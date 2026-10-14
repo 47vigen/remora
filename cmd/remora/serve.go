@@ -158,6 +158,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	api.RegisterHealthz(mux, sup)
 	mgmt := api.New(api.Deps{
 		Providers: api.NewProviders(st, rec),
+		Accounts:  api.NewAccounts(accts),
 		Aliases:   api.NewAliases(st, rec),
 		Keys:      api.NewKeys(st, rec),
 		System:    api.NewSystem(sup),

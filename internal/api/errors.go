@@ -3,7 +3,9 @@ package api
 import (
 	"errors"
 	"net/http"
+	"strings"
 
+	"github.com/47vigen/remora/internal/accounts"
 	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/auth"
 	"github.com/47vigen/remora/internal/config"
@@ -73,7 +75,19 @@ func toAPIError(err error) apiError {
 	case errors.Is(err, auth.ErrTooManyAttempts):
 		return apiError{http.StatusTooManyRequests, typeRateLimit, "too_many_attempts", "Too many failed sign-in attempts; try again later."}
 	}
+	for _, target := range []error{accounts.ErrNotFound, accounts.ErrLoginNotFound} {
+		if errors.Is(err, target) {
+			return apiError{http.StatusNotFound, typeNotFound, "not_found", sentence(innermost(err, target))}
+		}
+	}
+	switch {
+	case errors.Is(err, accounts.ErrLoginExpired):
+		return apiError{http.StatusGone, typeInvalidRequest, "login_expired", sentence(accounts.ErrLoginExpired)}
+	case errors.Is(err, accounts.ErrCredentialMissing):
+		return apiError{http.StatusConflict, typeInvalidRequest, "conflict", sentence(accounts.ErrCredentialMissing)}
+	}
 	for _, target := range []error{
+		accounts.ErrUnknownProvider, accounts.ErrBadRedirect, accounts.ErrNotPasteFlow, accounts.ErrBadCredential,
 		alias.ErrCycle, alias.ErrDepth, alias.ErrUnknownMember, alias.ErrEmpty, alias.ErrInvalidName, reconcile.ErrInvalid,
 		config.ErrInvalid,
 	} {
@@ -82,6 +96,19 @@ func toAPIError(err error) apiError {
 		}
 	}
 	return apiError{http.StatusBadGateway, typeAPI, "engine_error", "An internal service call failed; see the server log."}
+}
+
+// sentence capitalises an accounts error's text for an answer ("login not found" → "Login not found.").
+func sentence(err error) string {
+	msg := err.Error()
+	if msg == "" {
+		return msg
+	}
+	msg = strings.ToUpper(msg[:1]) + msg[1:]
+	if !strings.HasSuffix(msg, ".") {
+		msg += "."
+	}
+	return msg
 }
 
 // innermost returns the deepest error in err's chain that still wraps target with context of its own (for example

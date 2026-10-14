@@ -165,13 +165,10 @@ func TestApplyConfigReportsPartialFailure(t *testing.T) {
 	}
 }
 
-// pendingOperations are the operations plan 05 has not implemented yet (Task 5: accounts; Tasks 8–11: logs,
-// stats and key usage). Remove each one as its task lands.
+// pendingOperations are the operations plan 05 has not implemented yet (Tasks 8–11: logs, stats and key usage).
+// Remove each one as its task lands.
 var pendingOperations = map[string]bool{
-	"ListAccounts": true, "ImportAccount": true, "StartAccountLogin": true, "CancelAccountLogin": true,
-	"GetAccountLogin": true, "CompleteAccountLogin": true, "DeleteAccount": true, "UpdateAccount": true,
-	"ResetAccountCooldown": true,
-	"GetKeyUsage":          true, "ListLogs": true, "GetLog": true, "GetStats": true,
+	"GetKeyUsage": true, "ListLogs": true, "GetLog": true, "GetStats": true,
 }
 
 // TestNoUnimplementedLeft calls every operation of the generated interface over HTTP, with path parameters set and

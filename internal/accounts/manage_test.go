@@ -294,8 +294,8 @@ func TestImportFillsEngineType(t *testing.T) {
 	if !ok || c.Provider != "xai" || prefix != "grok" {
 		t.Errorf("engine credential = %+v prefix %q, want provider xai prefix grok", c, prefix)
 	}
-	if _, err := e.svc.Import(context.Background(), "grok", []byte(`{"type":"codex"}`)); err == nil {
-		t.Error("Import of another provider's credential succeeded")
+	if _, err := e.svc.Import(context.Background(), "grok", []byte(`{"type":"codex"}`)); !errors.Is(err, ErrBadCredential) {
+		t.Errorf("Import of another provider's credential err = %v, want ErrBadCredential", err)
 	}
 }
 
@@ -316,8 +316,8 @@ func TestImportRollsBack(t *testing.T) {
 func TestImportRejectsNonObject(t *testing.T) {
 	e := newEnv(t)
 	for _, raw := range []string{"[]", "x", "null", `"s"`, ""} {
-		if _, err := e.svc.Import(context.Background(), "codex", []byte(raw)); err == nil {
-			t.Errorf("Import(%q) succeeded", raw)
+		if _, err := e.svc.Import(context.Background(), "codex", []byte(raw)); !errors.Is(err, ErrBadCredential) {
+			t.Errorf("Import(%q) err = %v, want ErrBadCredential", raw, err)
 		}
 	}
 	if _, err := e.svc.Import(context.Background(), "cline", []byte(`{}`)); !errors.Is(err, ErrUnknownProvider) {
@@ -332,7 +332,7 @@ func TestImportRejectsNonObject(t *testing.T) {
 }
 
 func TestManageErrorsNeverNameEngine(t *testing.T) {
-	for _, err := range []error{ErrNotFound, ErrCredentialMissing} {
+	for _, err := range []error{ErrNotFound, ErrCredentialMissing, ErrBadCredential} {
 		text := strings.ToLower(err.Error())
 		if strings.Contains(text, "cliproxy") || strings.Contains(text, "bifrost") {
 			t.Errorf("%q names an engine", err)

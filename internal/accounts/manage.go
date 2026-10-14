@@ -21,6 +21,7 @@ import (
 var (
 	ErrNotFound          = errors.New("account not found")
 	ErrCredentialMissing = errors.New("this account's sign-in is missing; delete it and sign in again")
+	ErrBadCredential     = errors.New("invalid credential")
 )
 
 // statusMissing is an account's Status when the engine has no credential for it.
@@ -165,13 +166,13 @@ func (s *Service) Import(ctx context.Context, provider string, credential []byte
 	}
 	var doc map[string]any
 	if err := json.Unmarshal(credential, &doc); err != nil || doc == nil {
-		return Account{}, errors.New("the credential must be a JSON object")
+		return Account{}, fmt.Errorf("%w: it must be a JSON object", ErrBadCredential)
 	}
 	switch t, _ := doc["type"].(string); {
 	case t == "":
 		doc["type"] = p.Engine
 	case t != p.Engine:
-		return Account{}, fmt.Errorf("the credential is not a %s credential", p.Name)
+		return Account{}, fmt.Errorf("%w: it is not a %s credential", ErrBadCredential, p.Name)
 	}
 	data, err := json.Marshal(doc)
 	if err != nil {

@@ -27,6 +27,7 @@ type testEnv struct {
 	providers *fakeProviders
 	aliases   *fakeAliases
 	keys      *fakeKeys
+	accounts  *fakeAccounts
 }
 
 // newTestEnv starts the management server over in-memory fakes and a real auth service, and logs a client in.
@@ -41,10 +42,10 @@ func newTestEnv(t *testing.T) *testEnv {
 	if _, err := auth.EnsureAdmin(ctx, st, testAdminPassword); err != nil {
 		t.Fatalf("EnsureAdmin: %v", err)
 	}
-	env := &testEnv{system: &fakeSystem{}, providers: &fakeProviders{}, aliases: &fakeAliases{}, keys: &fakeKeys{}}
+	env := &testEnv{system: &fakeSystem{}, providers: &fakeProviders{}, aliases: &fakeAliases{}, keys: &fakeKeys{}, accounts: &fakeAccounts{}}
 	s := New(Deps{
 		Providers: env.providers,
-		Accounts:  fakeAccounts{},
+		Accounts:  env.accounts,
 		Aliases:   env.aliases,
 		Keys:      env.keys,
 		System:    env.system,

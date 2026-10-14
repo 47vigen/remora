@@ -2,12 +2,14 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
 	"sync"
 	"time"
 
+	"github.com/47vigen/remora/internal/accounts"
 	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/store"
 )
@@ -94,20 +96,150 @@ func (f *fakeProviders) Test(_ context.Context, name string) (ProviderTest, erro
 	return ProviderTest{OK: true}, nil
 }
 
-type fakeAccounts struct{}
-
-func (fakeAccounts) List(context.Context, string) ([]Account, error)   { return nil, nil }
-func (fakeAccounts) StartLogin(context.Context, string) (Login, error) { return Login{}, nil }
-func (fakeAccounts) LoginStatus(context.Context, string) (LoginStatus, error) {
-	return LoginStatus{Status: "wait"}, nil
+// fakeAccounts records the calls it gets. StartLogin answers next (state "s1" by default) and registers it as
+// waiting; CompleteLogin turns a login "ok".
+type fakeAccounts struct {
+	mu        sync.Mutex
+	accounts  []Account
+	next      Login
+	logins    map[string]string // state → status
+	completed [][2]string       // (state, redirect URL)
+	cancelled []string
+	enabled   map[string]bool // id → last SetEnabled
+	reset     []string
+	imported  []fakeImport
 }
-func (fakeAccounts) CompleteLogin(context.Context, string, string) error { return nil }
-func (fakeAccounts) CancelLogin(context.Context, string) error           { return nil }
-func (fakeAccounts) SetEnabled(context.Context, string, bool) error      { return nil }
-func (fakeAccounts) Delete(context.Context, string) error                { return nil }
-func (fakeAccounts) ResetCooldown(context.Context, string) error         { return nil }
-func (fakeAccounts) Import(context.Context, string, []byte) (Account, error) {
-	return Account{}, nil
+
+type fakeImport struct {
+	provider   string
+	credential []byte
+}
+
+func (f *fakeAccounts) List(_ context.Context, provider string) ([]Account, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := []Account{}
+	for _, a := range f.accounts {
+		if provider == "" || a.Provider == provider {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeAccounts) StartLogin(_ context.Context, provider string) (Login, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if provider != "codex" && provider != "grok" && provider != "antigravity" {
+		return Login{}, fmt.Errorf("%w: %q", accounts.ErrUnknownProvider, provider)
+	}
+	l := f.next
+	if l.State == "" {
+		l = Login{State: "s1", URL: "https://login.example/authorize?state=s1"}
+	}
+	if f.logins == nil {
+		f.logins = map[string]string{}
+	}
+	f.logins[l.State] = "wait"
+	return l, nil
+}
+
+func (f *fakeAccounts) LoginStatus(_ context.Context, state string) (LoginStatus, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	st, ok := f.logins[state]
+	if !ok {
+		return LoginStatus{}, accounts.ErrLoginNotFound
+	}
+	return LoginStatus{Status: st}, nil
+}
+
+func (f *fakeAccounts) CompleteLogin(_ context.Context, state, redirectURL string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.completed = append(f.completed, [2]string{state, redirectURL})
+	if _, ok := f.logins[state]; !ok {
+		return accounts.ErrLoginNotFound
+	}
+	f.logins[state] = "ok"
+	return nil
+}
+
+func (f *fakeAccounts) CancelLogin(_ context.Context, state string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.logins[state]; !ok {
+		return accounts.ErrLoginNotFound
+	}
+	f.cancelled = append(f.cancelled, state)
+	delete(f.logins, state)
+	return nil
+}
+
+// find returns the index of an account; f.mu is held.
+func (f *fakeAccounts) find(id string) (int, error) {
+	i := slices.IndexFunc(f.accounts, func(a Account) bool { return a.ID == id })
+	if i < 0 {
+		return 0, accounts.ErrNotFound
+	}
+	return i, nil
+}
+
+func (f *fakeAccounts) SetEnabled(_ context.Context, id string, enabled bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	i, err := f.find(id)
+	if err != nil {
+		return err
+	}
+	f.accounts[i].Enabled = enabled
+	if f.enabled == nil {
+		f.enabled = map[string]bool{}
+	}
+	f.enabled[id] = enabled
+	return nil
+}
+
+func (f *fakeAccounts) Delete(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	i, err := f.find(id)
+	if err != nil {
+		return err
+	}
+	f.accounts = slices.Delete(f.accounts, i, i+1)
+	return nil
+}
+
+func (f *fakeAccounts) ResetCooldown(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	i, err := f.find(id)
+	if err != nil {
+		return err
+	}
+	f.accounts[i].CooldownUntil = nil
+	f.reset = append(f.reset, id)
+	return nil
+}
+
+// Import refuses a credential whose type names another provider, as the accounts service does.
+func (f *fakeAccounts) Import(_ context.Context, provider string, credential []byte) (Account, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.imported = append(f.imported, fakeImport{provider, slices.Clone(credential)})
+	var doc struct {
+		Type, Email string
+	}
+	if err := json.Unmarshal(credential, &doc); err != nil {
+		return Account{}, fmt.Errorf("%w: it must be a JSON object", accounts.ErrBadCredential)
+	}
+	if doc.Type != "" && doc.Type != provider {
+		return Account{}, fmt.Errorf("%w: it is not a %s credential", accounts.ErrBadCredential, provider)
+	}
+	a := Account{ID: fmt.Sprint(len(f.accounts) + 100), Provider: provider, Email: doc.Email, Enabled: true, Status: "active"}
+	f.accounts = append(f.accounts, a)
+	return a, nil
 }
 
 type fakeAliases struct {

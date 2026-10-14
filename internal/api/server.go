@@ -15,7 +15,7 @@ import (
 // and the log tail.
 type Deps struct {
 	Providers Providers
-	Accounts  Accounts // plan 03's accounts.Service; nil until it is wired
+	Accounts  Accounts // plan 03's accounts.Service, through NewAccounts
 	Aliases   Aliases
 	Keys      Keys
 	System    System

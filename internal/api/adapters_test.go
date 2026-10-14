@@ -3,12 +3,22 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/47vigen/remora/internal/accounts"
 	"github.com/47vigen/remora/internal/alias"
+	"github.com/47vigen/remora/internal/engine/cliproxyapi"
+	"github.com/47vigen/remora/internal/engine/cliproxyapi/cliproxyapitest"
 	"github.com/47vigen/remora/internal/reconcile"
 	"github.com/47vigen/remora/internal/reconcile/reconciletest"
 	"github.com/47vigen/remora/internal/store"
@@ -169,5 +179,210 @@ func TestKeysAdapter(t *testing.T) {
 	}
 	if _, err := ks.Get(ctx, k.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("Get after delete err = %v", err)
+	}
+}
+
+const testOAuthSecret = "test-oauth-management-secret" //nolint:gosec // G101: a test value for the fake engine.
+
+// newAccountsAdapter is the Accounts port over a real accounts service, a fresh store and a fake OAuth engine.
+func newAccountsAdapter(t *testing.T) (Accounts, *cliproxyapitest.Fake, *store.Store) {
+	t.Helper()
+	st, _, _ := adapterStore(t)
+	fake := cliproxyapitest.NewServer(t, testOAuthSecret)
+	svc := accounts.New(cliproxyapi.New(fake.URL, testOAuthSecret, nil), st, nil)
+	return NewAccounts(svc), fake, st
+}
+
+// addAccountRow stores an account row; file is the engine credential's file name.
+func addAccountRow(t *testing.T, st *store.Store, provider, label, file string, enabled bool) store.Account {
+	t.Helper()
+	row, err := st.CreateAccount(context.Background(), store.Account{
+		Provider: provider, Label: label, Credential: file, Enabled: enabled,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return row
+}
+
+func TestAccountsAdapterList(t *testing.T) {
+	ctx := context.Background()
+	acc, fake, st := newAccountsAdapter(t)
+	retry := time.Date(2026, 10, 14, 13, 0, 0, 0, time.UTC)
+	later := retry.Add(time.Hour)
+	fake.AddCredential(cliproxyapi.Credential{
+		Name: "codex-a.json", Provider: "codex", Email: "a@example.com", Status: "error", StatusMessage: "quota exhausted",
+		Unavailable: true, NextRetryAfter: &retry,
+		Cooldowns: []cliproxyapi.Cooldown{
+			{Scope: "model", ModelKey: "gpt-x", Reason: "quota", RetryAt: retry, HTTPStatus: 429},
+			{Scope: "credential", Reason: "rate_limit", RetryAt: later, HTTPStatus: 429},
+		},
+	})
+	fake.SetModels("codex-a.json", "gpt-x")
+	row := addAccountRow(t, st, "codex", "a@example.com", "codex-a.json", true)
+	addAccountRow(t, st, "grok", "g@example.com", "xai-g.json", false)
+
+	got, err := acc.List(ctx, "codex")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("List(codex) = %+v", got)
+	}
+	a := got[0]
+	if a.ID != strconv.FormatInt(row.ID, 10) || a.Provider != "codex" || a.Email != "a@example.com" || !a.Enabled ||
+		a.Status != "error" || a.Message != "quota exhausted" || !slices.Equal(a.Models, []string{"codex/gpt-x"}) {
+		t.Errorf("account = %+v", a)
+	}
+	if a.CooldownUntil == nil || !a.CooldownUntil.Equal(later) {
+		t.Errorf("CooldownUntil = %v, want %v (the latest credential restriction)", a.CooldownUntil, later)
+	}
+	if len(a.Quota) != 1 || a.Quota[0].Model != "codex/gpt-x" || a.Quota[0].RemainingFraction == nil ||
+		*a.Quota[0].RemainingFraction != 0 || a.Quota[0].ResetAt == nil || !a.Quota[0].ResetAt.Equal(retry) {
+		t.Errorf("Quota = %+v", a.Quota)
+	}
+
+	all, err := acc.List(ctx, "")
+	if err != nil || len(all) != 2 || all[1].Status != "missing" || all[1].Enabled {
+		t.Errorf("List() = %+v, %v", all, err)
+	}
+}
+
+func TestAccountsAdapterIDs(t *testing.T) {
+	ctx := context.Background()
+	acc, fake, st := newAccountsAdapter(t)
+	fake.AddCredential(cliproxyapi.Credential{Name: "codex-a.json", Provider: "codex"})
+	row := addAccountRow(t, st, "codex", "", "codex-a.json", true)
+	id := strconv.FormatInt(row.ID, 10)
+	if err := acc.SetEnabled(ctx, id, false); err != nil {
+		t.Fatalf("SetEnabled: %v", err)
+	}
+	if c, _, _ := fake.Credential("codex-a.json"); !c.Disabled {
+		t.Error("engine credential still enabled")
+	}
+	if err := acc.ResetCooldown(ctx, id); err != nil {
+		t.Errorf("ResetCooldown: %v", err)
+	}
+	for _, bad := range []string{"abc", "", "999", "-1"} {
+		if err := acc.SetEnabled(ctx, bad, true); !errors.Is(err, accounts.ErrNotFound) {
+			t.Errorf("SetEnabled(%q) err = %v, want ErrNotFound", bad, err)
+		}
+		if err := acc.Delete(ctx, bad); !errors.Is(err, accounts.ErrNotFound) {
+			t.Errorf("Delete(%q) err = %v, want ErrNotFound", bad, err)
+		}
+		if err := acc.ResetCooldown(ctx, bad); !errors.Is(err, accounts.ErrNotFound) {
+			t.Errorf("ResetCooldown(%q) err = %v, want ErrNotFound", bad, err)
+		}
+	}
+	if err := acc.Delete(ctx, id); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, _, ok := fake.Credential("codex-a.json"); ok {
+		t.Error("engine credential not deleted")
+	}
+}
+
+func TestAccountsAdapterLogin(t *testing.T) {
+	ctx := context.Background()
+	acc, fake, _ := newAccountsAdapter(t)
+	l, err := acc.StartLogin(ctx, "codex")
+	if err != nil {
+		t.Fatalf("StartLogin: %v", err)
+	}
+	if l.State == "" || !strings.HasPrefix(l.URL, "https://") || l.UserCode != "" {
+		t.Errorf("login = %+v", l)
+	}
+	if st, err := acc.LoginStatus(ctx, l.State); err != nil || st.Status != "wait" {
+		t.Errorf("LoginStatus = %+v, %v", st, err)
+	}
+	redirect := "http://localhost:1455/auth/callback?code=c&state=" + l.State
+	if err := acc.CompleteLogin(ctx, l.State, redirect); err != nil {
+		t.Fatalf("CompleteLogin: %v", err)
+	}
+	if state, u := fake.LastCallback(); state != l.State || u != redirect {
+		t.Errorf("engine callback = (%q, %q)", state, u)
+	}
+	fake.FinishLogin(l.State, cliproxyapi.Credential{Name: "codex-new.json", Provider: "codex", Email: "n@example.com"})
+	if st, err := acc.LoginStatus(ctx, l.State); err != nil || st.Status != "ok" {
+		t.Errorf("LoginStatus = %+v, %v", st, err)
+	}
+
+	d, err := acc.StartLogin(ctx, "grok")
+	if err != nil || d.UserCode == "" {
+		t.Errorf("device login = %+v, %v", d, err)
+	}
+	if err := acc.CancelLogin(ctx, d.State); err != nil {
+		t.Errorf("CancelLogin: %v", err)
+	}
+	if err := acc.CancelLogin(ctx, d.State); !errors.Is(err, accounts.ErrLoginNotFound) {
+		t.Errorf("second CancelLogin err = %v, want ErrLoginNotFound", err)
+	}
+}
+
+func TestAccountsAdapterImport(t *testing.T) {
+	ctx := context.Background()
+	acc, fake, _ := newAccountsAdapter(t)
+	a, err := acc.Import(ctx, "antigravity", []byte(`{"email":"i@example.com","type":"antigravity"}`))
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if a.ID == "" || a.Provider != "antigravity" || a.Email != "i@example.com" || !a.Enabled {
+		t.Errorf("imported = %+v", a)
+	}
+	if _, err := acc.Import(ctx, "antigravity", []byte(`{"type":"codex"}`)); !errors.Is(err, accounts.ErrBadCredential) {
+		t.Errorf("mismatched Import err = %v, want ErrBadCredential", err)
+	}
+	if n := fake.Calls("/credentials"); n != 2 { // one upload, one list after it
+		t.Errorf("credentials calls = %d, want 2", n)
+	}
+}
+
+// TestAccountsOverHTTPNeverNameEngine drives the accounts operations over the real service and checks the error
+// answers: the right status, and no engine name.
+func TestAccountsOverHTTPNeverNameEngine(t *testing.T) {
+	acc, _, _ := newAccountsAdapter(t)
+	srv := httptest.NewServer(New(Deps{Accounts: acc}).Handler())
+	t.Cleanup(srv.Close)
+	call := func(method, path, body string) (int, string) {
+		t.Helper()
+		req, err := http.NewRequestWithContext(context.Background(), method, srv.URL+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	code, body := call(http.MethodPost, "/api/accounts/logins", `{"provider":"codex"}`)
+	if code != http.StatusCreated {
+		t.Fatalf("start = %d %s", code, body)
+	}
+	var l struct{ State string }
+	if err := json.Unmarshal([]byte(body), &l); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		method, path, body string
+		want               int
+	}{
+		{http.MethodPost, "/api/accounts/logins/" + l.State + "/complete", `{"redirect_url":"http://localhost:1455/cb?code=c&state=other"}`, http.StatusBadRequest},
+		{http.MethodPost, "/api/accounts/logins", `{"provider":"nope"}`, http.StatusBadRequest},
+		{http.MethodGet, "/api/accounts?provider=nope", "", http.StatusBadRequest},
+		{http.MethodGet, "/api/accounts/logins/unknown", "", http.StatusNotFound},
+		{http.MethodPost, "/api/accounts/import", `{"provider":"codex","credential":{"type":"antigravity"}}`, http.StatusBadRequest},
+		{http.MethodDelete, "/api/accounts/42", "", http.StatusNotFound},
+	} {
+		code, body := call(c.method, c.path, c.body)
+		if code != c.want {
+			t.Errorf("%s %s = %d %s, want %d", c.method, c.path, code, body, c.want)
+		}
+		if lower := strings.ToLower(body); strings.Contains(lower, "cliproxy") || strings.Contains(lower, "bifrost") {
+			t.Errorf("%s %s answer names an engine: %s", c.method, c.path, body)
+		}
 	}
 }

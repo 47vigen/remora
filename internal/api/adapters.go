@@ -7,7 +7,11 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
+	"strings"
+	"time"
 
+	"github.com/47vigen/remora/internal/accounts"
 	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/reconcile"
 	"github.com/47vigen/remora/internal/store"
@@ -15,9 +19,9 @@ import (
 )
 
 // Adapters map the ports onto plans 01–02's store, reconciler and supervisor. Every write goes through
-// reconcile.Reconciler.Change, so a change the front door refuses is not committed. Not wired yet, because their
-// services land in plan 03: Accounts (accounts.Service), the cooling snapshot (cooling.Cooler) and the OAuth
-// engine's provider names in EngineNames.Target and EngineFilter.
+// reconcile.Reconciler.Change, so a change the front door refuses is not committed. Accounts maps plan 03's
+// accounts.Service. Not wired yet: the cooling snapshot (cooling.Cooler) and the OAuth engine's provider names in
+// EngineNames.Target and EngineFilter.
 
 // NewSystem reports health and versions from the supervisor.
 func NewSystem(src StatusSource) System { return systemAdapter{src: src} }
@@ -459,4 +463,120 @@ func (a namesAdapter) EngineFilter(_ context.Context, provider, model string) ([
 		ms = []string{model}
 	}
 	return ps, ms
+}
+
+// NewAccounts manages subscription accounts through plan 03's accounts service. Account ids are the store's
+// integer ids as decimal strings; an id that is not one is not found.
+func NewAccounts(svc *accounts.Service) Accounts { return accountsAdapter{svc: svc} }
+
+type accountsAdapter struct{ svc *accounts.Service }
+
+// toAccount maps an account. CooldownUntil is the latest restriction on the whole credential (the engine's next
+// retry time or a credential cooldown); each model cooldown becomes a quota entry that resets when it ends, with
+// nothing remaining when its reason is quota. The engine's other quota signals are opaque and not shown.
+func toAccount(a accounts.Account) Account {
+	out := Account{
+		ID: strconv.FormatInt(a.ID, 10), Provider: a.Provider, Email: a.Label, Status: a.Status,
+		Message: a.StatusMessage, Enabled: a.Enabled, Models: a.Models,
+	}
+	later := func(t time.Time) {
+		if out.CooldownUntil == nil || t.After(*out.CooldownUntil) {
+			out.CooldownUntil = &t
+		}
+	}
+	if a.NextRetryAfter != nil {
+		later(*a.NextRetryAfter)
+	}
+	for _, c := range a.Cooldowns {
+		if c.Scope != "model" {
+			later(c.RetryAt)
+			continue
+		}
+		q := Quota{Model: c.ModelKey, ResetAt: &c.RetryAt}
+		if q.Model != "" && !strings.HasPrefix(q.Model, a.Provider+"/") {
+			q.Model = a.Provider + "/" + q.Model
+		}
+		if strings.Contains(strings.ToLower(c.Reason), "quota") {
+			q.RemainingFraction = new(float64)
+		}
+		out.Quota = append(out.Quota, q)
+	}
+	return out
+}
+
+// accountID parses an account id; accounts.ErrNotFound when it is not a positive integer.
+func accountID(id string) (int64, error) {
+	n, err := strconv.ParseInt(id, 10, 64)
+	if err != nil || n <= 0 {
+		return 0, accounts.ErrNotFound
+	}
+	return n, nil
+}
+
+func (a accountsAdapter) List(ctx context.Context, provider string) ([]Account, error) {
+	all, err := a.svc.List(ctx, provider)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Account, 0, len(all))
+	for _, acc := range all {
+		out = append(out, toAccount(acc))
+	}
+	return out, nil
+}
+
+func (a accountsAdapter) StartLogin(ctx context.Context, provider string) (Login, error) {
+	l, err := a.svc.StartLogin(ctx, provider)
+	if err != nil {
+		return Login{}, err
+	}
+	return Login{State: l.State, URL: l.URL, UserCode: l.UserCode}, nil
+}
+
+func (a accountsAdapter) LoginStatus(ctx context.Context, state string) (LoginStatus, error) {
+	st, err := a.svc.LoginStatus(ctx, state)
+	if err != nil {
+		return LoginStatus{}, err
+	}
+	return LoginStatus{Status: st.Status, Message: st.Message}, nil
+}
+
+func (a accountsAdapter) CompleteLogin(ctx context.Context, state, redirectURL string) error {
+	return a.svc.CompleteLogin(ctx, state, redirectURL)
+}
+
+func (a accountsAdapter) CancelLogin(ctx context.Context, state string) error {
+	return a.svc.CancelLogin(ctx, state)
+}
+
+func (a accountsAdapter) SetEnabled(ctx context.Context, id string, enabled bool) error {
+	n, err := accountID(id)
+	if err != nil {
+		return err
+	}
+	return a.svc.SetEnabled(ctx, n, enabled)
+}
+
+func (a accountsAdapter) Delete(ctx context.Context, id string) error {
+	n, err := accountID(id)
+	if err != nil {
+		return err
+	}
+	return a.svc.Delete(ctx, n)
+}
+
+func (a accountsAdapter) ResetCooldown(ctx context.Context, id string) error {
+	n, err := accountID(id)
+	if err != nil {
+		return err
+	}
+	return a.svc.ResetCooldown(ctx, n)
+}
+
+func (a accountsAdapter) Import(ctx context.Context, provider string, credential []byte) (Account, error) {
+	acc, err := a.svc.Import(ctx, provider, credential)
+	if err != nil {
+		return Account{}, err
+	}
+	return toAccount(acc), nil
 }
