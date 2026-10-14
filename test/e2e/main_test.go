@@ -65,7 +65,9 @@ func teardown() {
 // returns stdout. The error carries stderr.
 func runCompose(args ...string) (string, error) {
 	full := append([]string{"compose", "-f", "compose.yaml", "-p", project}, args...)
-	cmd := exec.Command("docker", full...)
+	// TestMain has no test context; the suite's own timeout bounds this.
+	//nolint:gosec // G204: fixed docker binary; args come from the test suite itself, not external input.
+	cmd := exec.CommandContext(context.Background(), "docker", full...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -119,7 +121,8 @@ func fakesURL(t testing.TB, path string) string {
 func execIn(t testing.TB, service string, args ...string) (stdout string, code int) {
 	t.Helper()
 	full := append([]string{"compose", "-f", "compose.yaml", "-p", project, "exec", "-T", service}, args...)
-	cmd := exec.Command("docker", full...)
+	//nolint:gosec // G204: fixed docker binary; service and args come from the test suite itself, not external input.
+	cmd := exec.CommandContext(t.Context(), "docker", full...)
 	var out, errOut bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errOut
@@ -149,7 +152,7 @@ func resetFakes(t testing.TB) {
 	if err != nil {
 		t.Fatalf("reset fakes: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("reset fakes: status %d, want 204", resp.StatusCode)
 	}
@@ -167,11 +170,11 @@ func waitHealthy(t testing.TB, timeout time.Duration) {
 		if err != nil {
 			last = err.Error()
 		} else {
-			resp, err := client.Get("http://" + addr + "/healthz")
+			resp, err := healthz(t.Context(), client, "http://"+addr+"/healthz")
 			if err != nil {
 				last = err.Error()
 			} else {
-				resp.Body.Close()
+				_ = resp.Body.Close()
 				if resp.StatusCode == http.StatusOK {
 					return
 				}
@@ -181,4 +184,13 @@ func waitHealthy(t testing.TB, timeout time.Duration) {
 		time.Sleep(time.Second)
 	}
 	t.Fatalf("remora not healthy after %s: %s", timeout, last)
+}
+
+// healthz sends a GET to url with ctx.
+func healthz(ctx context.Context, client *http.Client, url string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	return client.Do(req)
 }

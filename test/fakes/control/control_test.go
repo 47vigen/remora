@@ -32,7 +32,7 @@ func do(t *testing.T, method, url, body string) (int, string) {
 	if err != nil {
 		t.Fatalf("%s %s: %v", method, url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read body: %v", err)
@@ -116,6 +116,7 @@ func TestUnscriptedRouteReturns501(t *testing.T) {
 func TestDefaultHandlerUsed(t *testing.T) {
 	s := control.New(map[string]http.HandlerFunc{
 		control.RouteModels: func(w http.ResponseWriter, r *http.Request) {
+			//nolint:gosec // G705: test handler echoing a path value back to the test's own client; nothing renders it.
 			_, _ = io.WriteString(w, "default for "+r.PathValue("upstream"))
 		},
 	})
@@ -160,7 +161,7 @@ func TestStepDefaultsAndHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -208,9 +209,9 @@ func TestRequestsRecorded(t *testing.T) {
 	}
 	bodies := []string{
 		`{"model":"m","messages":[{"role":"user","content":"hi"}]}`,
-		`{"input":"می‌خواهم"}`,
+		"{\"input\":\"می\u200cخواهم\"}",
 	}
-	if !strings.Contains(bodies[1], "‌") {
+	if !strings.Contains(bodies[1], "\u200c") {
 		t.Fatal("fixture lost its zero-width non-joiner")
 	}
 	do(t, http.MethodPost, srv.URL+"/u/a/v1/chat/completions", bodies[0])
@@ -265,7 +266,7 @@ func TestDelay(t *testing.T) {
 		s := control.New(nil)
 		h := s.Handler()
 		w := &writeTracker{header: http.Header{}}
-		put := httptest.NewRequest(http.MethodPut, "/_control/upstreams/a/routes/models",
+		put := httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/_control/upstreams/a/routes/models",
 			strings.NewReader(`{"steps":[{"delay_ms":1000}]}`))
 		h.ServeHTTP(httptest.NewRecorder(), put)
 

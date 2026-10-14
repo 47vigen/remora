@@ -27,12 +27,16 @@ type versionResponse struct {
 // get fetches url from the host and returns the status code and body.
 func get(t *testing.T, url string) (int, []byte) {
 	t.Helper()
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(url)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("GET %s: %v", url, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("GET %s: read body: %v", url, err)
@@ -47,7 +51,7 @@ func do(t *testing.T, method, url, body string) (int, []byte) {
 	if body != "" {
 		r = strings.NewReader(body)
 	}
-	req, err := http.NewRequest(method, url, r)
+	req, err := http.NewRequestWithContext(t.Context(), method, url, r)
 	if err != nil {
 		t.Fatalf("%s %s: %v", method, url, err)
 	}
@@ -59,7 +63,7 @@ func do(t *testing.T, method, url, body string) (int, []byte) {
 	if err != nil {
 		t.Fatalf("%s %s: %v", method, url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	out, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("%s %s: read body: %v", method, url, err)
@@ -74,7 +78,7 @@ func engineVersions(t *testing.T) map[string]string {
 	if err != nil {
 		t.Fatalf("open versions.env: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	vars := map[string]string{}
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
@@ -153,9 +157,13 @@ func TestEnginePortsNotReachableFromOutside(t *testing.T) {
 	client := &http.Client{Timeout: 3 * time.Second}
 	for _, port := range []int{18080, 18317} {
 		url := "http://" + hostAddr(t, "remora", port) + "/"
-		resp, err := client.Get(url)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+		if err != nil {
+			t.Fatalf("GET %s: %v", url, err)
+		}
+		resp, err := client.Do(req)
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			t.Errorf("port %d reachable from the host: GET %s -> %d", port, url, resp.StatusCode)
 		}
 	}

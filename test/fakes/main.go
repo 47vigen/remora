@@ -82,17 +82,19 @@ func serve(ctx context.Context, logger *slog.Logger, addr string) error {
 func get(ctx context.Context, url string, stdout, stderr io.Writer) int {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+	//nolint:gosec // G704: url is the operator's own command-line argument; fetching it is the point of `fakes get`.
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, "fakes get:", err)
 		return 1
 	}
+	//nolint:gosec // G704: requests the operator-supplied URL from the `fakes get` command line.
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, "fakes get:", err)
 		return 1
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, resp.Body)
 	_, _ = fmt.Fprintln(stdout, resp.StatusCode)
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
