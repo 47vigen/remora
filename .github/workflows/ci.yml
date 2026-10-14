@@ -5,8 +5,7 @@ on:
   push:
     branches: [main]
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -14,6 +13,8 @@ concurrency:
 
 jobs:
   lint:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -25,6 +26,8 @@ jobs:
           version: v2.14
 
   test:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -34,6 +37,8 @@ jobs:
       - run: go test -race ./...
 
   image:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -82,6 +87,8 @@ jobs:
           retention-days: 1
 
   e2e:
+    permissions:
+      contents: read
     needs: image
     runs-on: ubuntu-latest
     env:
