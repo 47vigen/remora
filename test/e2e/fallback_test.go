@@ -39,7 +39,8 @@ func TestFallbackWithinRequest(t *testing.T) {
 			t.Run(f.name+"/stream="+strconv.FormatBool(stream), func(t *testing.T) {
 				resetFakes(t)
 				if f.status == http.StatusPaymentRequired {
-					t.Cleanup(func() { awaitCoolingCycle(t) })
+					// Deferred, not a Cleanup: the requests need the test's context, which ends before cleanups run.
+					defer awaitCoolingCycle(t)
 				}
 				once(t, "a", control.RouteOpenAIChat, control.Step{Status: f.status, Body: f.body})
 

@@ -12,7 +12,7 @@ aliases:
   - {name: memory/fast, kind: chat, members: [inner, up-c/m1]}
   - {name: emb, kind: embeddings, members: [up-a/emb-1, up-b/emb-1]}
   - {name: jev, kind: decisions, members: [ts-a/jev, ts-b/jev]}
-  - {name: cool, kind: chat, members: [cool-a/m, cool-b/m]}
+  - {name: cool, kind: chat, members: [cool-a/m1, cool-b/m1]}
 keys:
   - {name: full, value: env:E2E_KEY_FULL, allow: ["*"]}
   - {name: limited, value: env:E2E_KEY_LIMITED, allow: [fast, "up-a/*"]}

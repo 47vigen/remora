@@ -56,13 +56,13 @@ func TestCoolingAndRecovery(t *testing.T) {
 
 	rep := coolChat(t)
 	wantStatus(t, rep, http.StatusOK)
-	wantHeader(t, rep, "X-Remora-Served-By", "cool-b/m")
+	wantHeader(t, rep, "X-Remora-Served-By", "cool-b/m1")
 	wantHeader(t, rep, "X-Remora-Fallback", "true")
 
 	// Eventually cool-a is out of the chain: cool-b answers first-hand, and cool-a sees no more traffic. If the
 	// 4s cooldown ends in the middle of the check, cool-a is tried, answers 402 and cools again, so check again.
 	deadline := time.Now().Add(10 * time.Second)
-	for !served(coolChat(t), "cool-b/m", false) || !quietAcross(t, 3) {
+	for !served(coolChat(t), "cool-b/m1", false) || !quietAcross(t, 3) {
 		if time.Now().After(deadline) {
 			t.Fatalf("cool-a did not leave the chain within 10s")
 		}
@@ -71,7 +71,7 @@ func TestCoolingAndRecovery(t *testing.T) {
 
 	// The upstream recovers: back to the route's default 200. Once the cooldown ends, cool-a serves first again.
 	script(t, "cool-a", control.RouteOpenAIChat, control.Script{Steps: []control.Step{}})
-	awaitServed(t, "cool after recovery", func() reply { return coolChat(t) }, "cool-a/m", 500*time.Millisecond, 15*time.Second)
+	awaitServed(t, "cool after recovery", func() reply { return coolChat(t) }, "cool-a/m1", 500*time.Millisecond, 15*time.Second)
 }
 
 // quietAcross sends n requests to the cool alias and reports whether every one was served by cool-b without a
@@ -82,7 +82,7 @@ func quietAcross(t *testing.T, n int) bool {
 	for range n {
 		rep := coolChat(t)
 		wantStatus(t, rep, http.StatusOK)
-		if !served(rep, "cool-b/m", false) {
+		if !served(rep, "cool-b/m1", false) {
 			return false
 		}
 	}
