@@ -68,21 +68,15 @@ func (s *Server) health(ctx context.Context) (providerHealth, error) {
 	for _, c := range cooling {
 		cool[c.Target] = true
 	}
-	all, err := s.d.Aliases.List(ctx)
+	reached, err := s.aliasesByTarget(ctx)
 	if err != nil {
 		return h, err
 	}
-	for _, a := range all {
-		chain, err := s.d.Aliases.Chain(ctx, a.Name)
-		if err != nil {
-			continue // an alias that does not compile reaches nothing
+	for t := range reached {
+		if h.models[t.Provider] == nil {
+			h.models[t.Provider] = map[string]bool{}
 		}
-		for _, t := range chain {
-			if h.models[t.Provider] == nil {
-				h.models[t.Provider] = map[string]bool{}
-			}
-			h.models[t.Provider][t.Model] = cool[t]
-		}
+		h.models[t.Provider][t.Model] = cool[t]
 	}
 	return h, nil
 }

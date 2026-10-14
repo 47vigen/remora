@@ -54,41 +54,6 @@ func (s *Server) ResetAccountCooldown(context.Context, gen.ResetAccountCooldownR
 	return nil, errNotImplemented
 }
 
-// ListAliases is not implemented yet.
-func (s *Server) ListAliases(context.Context, gen.ListAliasesRequestObject) (gen.ListAliasesResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// CreateAlias is not implemented yet.
-func (s *Server) CreateAlias(context.Context, gen.CreateAliasRequestObject) (gen.CreateAliasResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// CompileAlias is not implemented yet.
-func (s *Server) CompileAlias(context.Context, gen.CompileAliasRequestObject) (gen.CompileAliasResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// DeleteAlias is not implemented yet.
-func (s *Server) DeleteAlias(context.Context, gen.DeleteAliasRequestObject) (gen.DeleteAliasResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// GetAlias is not implemented yet.
-func (s *Server) GetAlias(context.Context, gen.GetAliasRequestObject) (gen.GetAliasResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// UpdateAlias is not implemented yet.
-func (s *Server) UpdateAlias(context.Context, gen.UpdateAliasRequestObject) (gen.UpdateAliasResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// GetAliasChain is not implemented yet.
-func (s *Server) GetAliasChain(context.Context, gen.GetAliasChainRequestObject) (gen.GetAliasChainResponseObject, error) {
-	return nil, errNotImplemented
-}
-
 // ApplyConfig is not implemented yet.
 func (s *Server) ApplyConfig(context.Context, gen.ApplyConfigRequestObject) (gen.ApplyConfigResponseObject, error) {
 	return nil, errNotImplemented
@@ -101,11 +66,6 @@ func (s *Server) ExportConfig(context.Context, gen.ExportConfigRequestObject) (g
 
 // PlanConfig is not implemented yet.
 func (s *Server) PlanConfig(context.Context, gen.PlanConfigRequestObject) (gen.PlanConfigResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// ListCooling is not implemented yet.
-func (s *Server) ListCooling(context.Context, gen.ListCoolingRequestObject) (gen.ListCoolingResponseObject, error) {
 	return nil, errNotImplemented
 }
 
