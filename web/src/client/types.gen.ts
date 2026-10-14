@@ -12,6 +12,12 @@ export type ErrorDetail = {
     message: string;
     type: string;
     code: string;
+    /**
+     * Only on a failed `applyConfig`: the changes made before the failure, each generated client key value
+     * included once, so a committed key is never left without its value.
+     *
+     */
+    applied?: Array<Change>;
 };
 
 export type Health = {
