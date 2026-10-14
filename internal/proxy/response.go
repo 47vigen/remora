@@ -51,6 +51,10 @@ func scrub(b []byte) []byte {
 
 func scrubString(s string) string { return string(scrub([]byte(s))) }
 
+// Scrub returns b with engine names replaced by remora's and engine keys redacted, for any text an operator or
+// client reads (the CLI uses it on its error output).
+func Scrub(b []byte) []byte { return scrub(b) }
+
 // isEngineHeader reports whether a header name belongs to an engine.
 func isEngineHeader(name string) bool {
 	l := strings.ToLower(name)

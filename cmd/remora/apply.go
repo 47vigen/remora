@@ -15,6 +15,7 @@ import (
 	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/config"
 	"github.com/47vigen/remora/internal/engine/bifrost"
+	"github.com/47vigen/remora/internal/proxy"
 	"github.com/47vigen/remora/internal/reconcile"
 	"github.com/47vigen/remora/internal/store"
 	"github.com/47vigen/remora/internal/supervise"
@@ -40,6 +41,8 @@ func runApply(ctx context.Context, args []string, getenv func(string) string, st
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
+	// Errors and log lines can carry an engine's own words; the operator sees remora's.
+	stderr = scrubWriter{stderr}
 	logger := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: cfg.LogLevel}))
 	if err := apply(ctx, cfg, *path, getenv, stdout, logger); err != nil {
 		_, _ = fmt.Fprintf(stderr, "remora apply: %v\n", err)
@@ -161,9 +164,11 @@ func applyFile(ctx context.Context, r *reconcile.Reconciler, f config.File, gete
 		clientValues[i] = v
 	}
 
-	var generated []string // "<name>: <value>" lines, printed after the commit
+	var generated []string    // "<name>: <value>" lines, printed after the commit
+	var generatedIDs []string // their key ids, removed again when printing fails
 	err := r.Change(ctx, func(ctx context.Context, tx *store.Tx) error {
 		generated = generated[:0]
+		generatedIDs = generatedIDs[:0]
 		if err := removeUnlisted(ctx, tx, f); err != nil {
 			return err
 		}
@@ -198,8 +203,12 @@ func applyFile(ctx context.Context, r *reconcile.Reconciler, f config.File, gete
 				generated = append(generated, k.Name+": "+value)
 			}
 			enabled := k.Enabled == nil || *k.Enabled
-			if _, err := tx.PutClientKey(ctx, store.ClientKey{ID: id, Name: k.Name, Allow: k.Allow, Enabled: enabled}, value); err != nil {
+			saved, err := tx.PutClientKey(ctx, store.ClientKey{ID: id, Name: k.Name, Allow: k.Allow, Enabled: enabled}, value)
+			if err != nil {
 				return err
+			}
+			if id == "" && clientValues[i] == "" {
+				generatedIDs = append(generatedIDs, saved.ID)
 			}
 		}
 		return nil
@@ -209,7 +218,18 @@ func applyFile(ctx context.Context, r *reconcile.Reconciler, f config.File, gete
 	}
 	for _, line := range generated {
 		if _, err := fmt.Fprintln(out, line); err != nil {
-			return err
+			// The value was shown nowhere: remove the keys again, so the next apply generates and prints new ones.
+			if rerr := r.Change(ctx, func(ctx context.Context, tx *store.Tx) error {
+				for _, id := range generatedIDs {
+					if err := tx.DeleteClientKey(ctx, id); err != nil {
+						return err
+					}
+				}
+				return nil
+			}); rerr != nil {
+				return fmt.Errorf("print generated keys: %w (removing them again also failed: %w)", err, rerr)
+			}
+			return fmt.Errorf("print generated keys: %w; they were not kept, apply again", err)
 		}
 	}
 	return nil
@@ -323,4 +343,14 @@ func putProviders(ctx context.Context, tx *store.Tx, f config.File, secrets [][]
 		}
 	}
 	return nil
+}
+
+// scrubWriter replaces engine names and keys in everything written through it.
+type scrubWriter struct{ w io.Writer }
+
+func (s scrubWriter) Write(p []byte) (int, error) {
+	if _, err := s.w.Write(proxy.Scrub(p)); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+
+	"github.com/47vigen/remora/internal/alias"
 )
 
 // shape is the error body format a route's clients expect.
@@ -41,6 +43,7 @@ var (
 	errClientFallbacks = apiError{status: http.StatusBadRequest, typ: typeInvalidRequest, code: "fallbacks_not_supported", message: "The \"fallbacks\" field is not supported; use an alias to define fallbacks."}
 	errTooLarge        = apiError{status: http.StatusRequestEntityTooLarge, typ: typeTooLarge, code: "request_too_large", message: "The request body is larger than " + strconv.Itoa(MaxBodyBytes>>20) + " MiB."}
 	errKeyNotReady     = apiError{status: http.StatusServiceUnavailable, typ: typeAPI, code: "key_not_ready", message: "This API key is not active yet; try again shortly.", retryAfterSec: 5}
+	errNotReady        = apiError{status: http.StatusServiceUnavailable, typ: typeAPI, code: "not_ready", message: "remora is starting; try again shortly.", retryAfterSec: 5}
 	errUpstream        = apiError{status: http.StatusBadGateway, typ: typeAPI, code: "upstream_unavailable", message: "The inference service is unavailable."}
 	errInternal        = apiError{status: http.StatusInternalServerError, typ: typeAPI, code: "internal_error", message: "Internal error."}
 )
@@ -49,6 +52,14 @@ func errModelNotAllowed(model string) apiError {
 	return apiError{
 		status: http.StatusForbidden, typ: typePermission, code: "model_not_allowed",
 		message: "This API key may not use model " + strconv.Quote(model) + ".",
+	}
+}
+
+// errAliasKind refuses an alias on an endpoint of another kind (an embeddings alias on chat completions).
+func errAliasKind(model string, kind alias.Kind, path string) apiError {
+	return apiError{
+		status: http.StatusBadRequest, typ: typeInvalidRequest, code: "model_kind_mismatch",
+		message: "Model " + strconv.Quote(model) + " is a " + string(kind) + " alias; it cannot be used on " + path + ".",
 	}
 }
 

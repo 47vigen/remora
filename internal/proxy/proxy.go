@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/store"
 )
 
@@ -41,6 +42,10 @@ type Proxy struct {
 
 	hooksMu sync.RWMutex
 	hooks   []ResponseHook
+
+	// Ready, when set, reports whether the front door holds the store's state; until it does, /v1 answers 503
+	// instead of meeting missing or stale providers, rules or keys. serve sets it to the reconciler's Synced.
+	Ready func() bool
 }
 
 // New returns a Proxy in front of the front door at upstream (its inference routes), reading keys and aliases from
@@ -88,20 +93,21 @@ const (
 
 // route is one /v1 endpoint.
 type route struct {
-	kind     routeKind
-	upstream string // front-door path, for routeForward
+	kind      routeKind
+	upstream  string     // front-door path, for routeForward
+	aliasKind alias.Kind // the only alias kind this endpoint serves, for routeForward
 }
 
 // routes maps "METHOD /path" to its route. GET /v1/responses with a WebSocket upgrade is served by
 // serveResponsesWS.
 var routes = map[string]route{
-	"POST /v1/chat/completions":     {kind: routeForward, upstream: "/v1/chat/completions"},
-	"POST /v1/responses":            {kind: routeForward, upstream: "/v1/responses"},
-	"POST /v1/messages":             {kind: routeForward, upstream: "/anthropic/v1/messages"},
-	"POST /v1/embeddings":           {kind: routeForward, upstream: "/v1/embeddings"},
-	"POST /v1/audio/transcriptions": {kind: routeForward, upstream: "/v1/audio/transcriptions"},
-	"POST /v1/decisions":            {kind: routeForward, upstream: "/v1/decisions"},
-	"POST /v1/systemone":            {kind: routeForward, upstream: "/typesafe/v1/systemone"},
+	"POST /v1/chat/completions":     {kind: routeForward, upstream: "/v1/chat/completions", aliasKind: alias.KindChat},
+	"POST /v1/responses":            {kind: routeForward, upstream: "/v1/responses", aliasKind: alias.KindChat},
+	"POST /v1/messages":             {kind: routeForward, upstream: "/anthropic/v1/messages", aliasKind: alias.KindChat},
+	"POST /v1/embeddings":           {kind: routeForward, upstream: "/v1/embeddings", aliasKind: alias.KindEmbeddings},
+	"POST /v1/audio/transcriptions": {kind: routeForward, upstream: "/v1/audio/transcriptions", aliasKind: alias.KindTranscription},
+	"POST /v1/decisions":            {kind: routeForward, upstream: "/v1/decisions", aliasKind: alias.KindDecisions},
+	"POST /v1/systemone":            {kind: routeForward, upstream: "/typesafe/v1/systemone", aliasKind: alias.KindDecisions},
 	"GET /v1/models":                {kind: routeModels},
 }
 
@@ -147,6 +153,10 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rt, ok := routes[r.Method+" "+r.URL.Path]
 	if !ok {
 		errNotFound.write(w, sh)
+		return
+	}
+	if p.Ready != nil && !p.Ready() {
+		errNotReady.write(w, sh)
 		return
 	}
 	key, ok := p.authenticate(w, r, sh)
@@ -228,8 +238,12 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt route, sh sha
 	info := &reqInfo{in: r, upstream: rt.upstream, shape: sh, model: model, vk: key.VKValue, body: raw}
 	if aliases, err := p.store.Aliases(ctx); err != nil {
 		p.log.WarnContext(ctx, "proxy: load aliases", slog.Any("err", err))
-	} else {
-		_, info.isAlias = aliases[model]
+	} else if a, ok := aliases[model]; ok {
+		if a.Kind != rt.aliasKind {
+			errAliasKind(model, a.Kind, r.URL.Path).write(w, sh)
+			return
+		}
+		info.isAlias = true
 	}
 
 	out := r.WithContext(context.WithValue(ctx, reqInfoKey{}, info))

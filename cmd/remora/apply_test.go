@@ -350,3 +350,49 @@ func TestRunApply_Usage(t *testing.T) {
 		}
 	}
 }
+
+// failWriter fails every write, like a closed pipe or a full disk.
+type failWriter struct{}
+
+func (failWriter) Write([]byte) (int, error) { return 0, errors.New("broken pipe") }
+
+func TestApplyFile_GeneratedKeyNotKeptWhenOutputFails(t *testing.T) {
+	ctx := context.Background()
+	h := newApplyHarness(t)
+	src := strings.Replace(applyBase, "{name: full, value: env:FULL_KEY, allow: [\"*\"]}", "{name: full, allow: [\"*\"]}", 1)
+	if err := applyFile(ctx, h.rec, parseFile(t, src), testEnv, failWriter{}); err == nil {
+		t.Fatal("applyFile with a failing output: want an error")
+	}
+	var keys []store.ClientKey
+	if err := h.st.Write(ctx, func(tx *store.Tx) (err error) {
+		keys, err = tx.ClientKeys(ctx)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range keys {
+		if k.Name == "full" {
+			t.Fatalf("the unshown generated key was kept: %+v", k)
+		}
+	}
+	// The next apply generates a new key and prints it.
+	var out bytes.Buffer
+	if err := applyFile(ctx, h.rec, parseFile(t, src), testEnv, &out); err != nil {
+		t.Fatalf("applyFile again: %v", err)
+	}
+	if !regexp.MustCompile(`^full: sk-\S+\n$`).MatchString(out.String()) {
+		t.Errorf("out = %q, want one generated key", out.String())
+	}
+}
+
+func TestScrubWriter(t *testing.T) {
+	var b bytes.Buffer
+	msg := "reconcile: bifrost: POST /api/providers: status 500 (key sk-bf-abc)\n"
+	n, err := scrubWriter{&b}.Write([]byte(msg))
+	if err != nil || n != len(msg) {
+		t.Fatalf("Write = (%d, %v)", n, err)
+	}
+	if got := strings.ToLower(b.String()); strings.Contains(got, "bifrost") || strings.Contains(got, "sk-bf-") {
+		t.Errorf("scrubbed = %q", b.String())
+	}
+}

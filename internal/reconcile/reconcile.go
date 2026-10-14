@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"github.com/47vigen/remora/internal/engine/bifrost"
@@ -72,6 +73,8 @@ type Reconciler struct {
 	Interval      time.Duration         // 0 = 60s
 	MaxDepth      int                   // 0 = alias.DefaultMaxDepth
 	Log           *slog.Logger
+
+	synced atomic.Bool // a Sync has completed
 }
 
 func (r *Reconciler) log() *slog.Logger {
@@ -84,8 +87,16 @@ func (r *Reconciler) log() *slog.Logger {
 // Sync runs one pass inside store.Write. An alias that does not compile is logged and its rule removed; any other
 // invalid configuration fails the pass with ErrInvalid before the engine is called.
 func (r *Reconciler) Sync(ctx context.Context) error {
-	return r.sync(ctx, nil)
+	if err := r.sync(ctx, nil); err != nil {
+		return err
+	}
+	r.synced.Store(true)
+	return nil
 }
+
+// Synced reports whether a Sync has completed since the process started: until then the front door may lack or
+// hold stale providers, rules and keys.
+func (r *Reconciler) Synced() bool { return r.synced.Load() }
 
 // sync runs one non-strict pass; objects in force are pushed even when their MAC matches.
 func (r *Reconciler) sync(ctx context.Context, force map[string]bool) error {

@@ -105,7 +105,8 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	}
 
 	// Reconcile the front door now that it is healthy, before the listener opens, so /v1 never meets an engine that
-	// lags the store (a fresh or wiped engine data directory). A failure is logged, not fatal: the timer retries.
+	// lags the store (a fresh or wiped engine data directory). A failure is logged, not fatal: the timer retries,
+	// and /v1 stays closed (503) until a pass succeeds.
 	// Then reconcile on a timer; the goroutine ends before the engines stop and the store closes.
 	rec := &reconcile.Reconciler{Store: st, Engine: frontDoor(cfg, creds), Log: logger}
 	if err := rec.Sync(ctx); err != nil {
@@ -131,7 +132,11 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	}
 	mux := http.NewServeMux()
 	api.RegisterSystem(mux, sup)
-	mux.Handle("/v1/", proxy.New(upstream, st, logger))
+	// /v1 answers 503 until a Sync has completed, so a failed first pass never serves a stale front door; the
+	// management API and health stay reachable meanwhile.
+	px := proxy.New(upstream, st, logger)
+	px.Ready = rec.Synced
+	mux.Handle("/v1/", px)
 	srv := newServer(ctx, cfg.Listen, mux)
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.Listen)
 	if err != nil {

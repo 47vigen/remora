@@ -287,7 +287,7 @@ func TestProxy_Routes(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.path, func(t *testing.T) {
-			resp := f.do(t, http.MethodPost, c.path, keyFull, "application/json", chatBody("fast"), nil)
+			resp := f.do(t, http.MethodPost, c.path, keyFull, "application/json", chatBody("up-a/m1"), nil)
 			if resp.StatusCode != http.StatusOK {
 				t.Fatalf("status = %d", resp.StatusCode)
 			}
@@ -297,7 +297,7 @@ func TestProxy_Routes(t *testing.T) {
 		})
 	}
 	t.Run("/v1/audio/transcriptions", func(t *testing.T) {
-		body, ct := multipartBody(t, []field{{name: "file", filename: "a.wav", value: []byte("RIFF")}, {name: "model", value: []byte("fast")}})
+		body, ct := multipartBody(t, []field{{name: "file", filename: "a.wav", value: []byte("RIFF")}, {name: "model", value: []byte("up-a/m1")}})
 		resp := f.do(t, http.MethodPost, "/v1/audio/transcriptions", keyFull, ct, body, nil)
 		if resp.StatusCode != http.StatusOK || f.seen().path != "/v1/audio/transcriptions" {
 			t.Fatalf("status = %d, upstream path %q", resp.StatusCode, f.seen().path)
@@ -433,7 +433,7 @@ func TestProxy_BodyUnchanged(t *testing.T) {
 	t.Run("multipart", func(t *testing.T) {
 		body, ct := multipartBody(t, []field{
 			{name: "file", filename: "a.wav", value: bytes.Repeat([]byte{0, 1, 2, 0xff}, 1<<16)},
-			{name: "model", value: []byte("fast")},
+			{name: "model", value: []byte("up-a/m1")},
 		})
 		resp := f.do(t, http.MethodPost, "/v1/audio/transcriptions", keyFull, ct, body, nil)
 		got := f.seen()
@@ -599,7 +599,7 @@ func TestProxy_ErrorMapping(t *testing.T) {
 				w.WriteHeader(c.status)
 				_, _ = io.WriteString(w, c.upstream)
 			})
-			resp := f.do(t, http.MethodPost, c.path, keyFull, "application/json", chatBody("fast"), nil)
+			resp := f.do(t, http.MethodPost, c.path, keyFull, "application/json", chatBody("up-a/m1"), nil)
 			body := resp.Body
 			if resp.StatusCode != c.status || string(body) != c.want {
 				t.Fatalf("got %d %s\nwant %d %s", resp.StatusCode, body, c.status, c.want)
@@ -768,7 +768,7 @@ func TestProxy_UpstreamDown(t *testing.T) {
 		{"/v1/messages", `"type":"error"`},
 		{"/v1/systemone", `"detail":`},
 	} {
-		resp := f.do(t, http.MethodPost, c.path, keyFull, "application/json", chatBody("fast"), nil)
+		resp := f.do(t, http.MethodPost, c.path, keyFull, "application/json", chatBody("up-a/m1"), nil)
 		body := string(resp.Body)
 		if resp.StatusCode != http.StatusBadGateway || !strings.Contains(body, c.want) ||
 			strings.Contains(strings.ToLower(body), "bifrost") || strings.Contains(body, "18080") {
@@ -789,9 +789,62 @@ func TestProxy_NoResponseTimeout(t *testing.T) {
 		time.Sleep(3 * time.Second)
 		okJSON(w, r)
 	})
-	body, ct := multipartBody(t, []field{{name: "file", filename: "a.wav", value: []byte("RIFF")}, {name: "model", value: []byte("fast")}})
+	body, ct := multipartBody(t, []field{{name: "file", filename: "a.wav", value: []byte("RIFF")}, {name: "model", value: []byte("up-a/m1")}})
 	resp := f.do(t, http.MethodPost, "/v1/audio/transcriptions", keyFull, ct, body, nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
+	}
+}
+
+func TestProxy_NotReadyUntilSynced(t *testing.T) {
+	f := newFixture(t)
+	var ready atomic.Bool
+	f.px.Ready = ready.Load
+	resp := f.do(t, http.MethodPost, "/v1/chat/completions", keyFull, "application/json", chatBody("fast"), nil)
+	if resp.StatusCode != http.StatusServiceUnavailable || !strings.Contains(string(resp.Body), `"not_ready"`) {
+		t.Fatalf("before sync: %d %s, want 503 not_ready", resp.StatusCode, resp.Body)
+	}
+	if resp.Header.Get("Retry-After") == "" {
+		t.Error("before sync: no Retry-After")
+	}
+	resp = f.do(t, http.MethodPost, "/v1/messages", keyFull, "application/json", chatBody("fast"), nil)
+	if resp.StatusCode != http.StatusServiceUnavailable || !strings.Contains(string(resp.Body), `"type":"error"`) {
+		t.Errorf("before sync on /v1/messages: %d %s, want 503 in Anthropic's shape", resp.StatusCode, resp.Body)
+	}
+	if n := f.hits.Load(); n != 0 {
+		t.Errorf("front door called %d times before sync", n)
+	}
+	ready.Store(true)
+	if resp := f.do(t, http.MethodPost, "/v1/chat/completions", keyFull, "application/json", chatBody("fast"), nil); resp.StatusCode != http.StatusOK {
+		t.Errorf("after sync: %d %s", resp.StatusCode, resp.Body)
+	}
+}
+
+func TestProxy_AliasKindMustMatchEndpoint(t *testing.T) {
+	f := newFixture(t)
+	for _, c := range []struct {
+		path, model string
+		want        int
+	}{
+		{"/v1/chat/completions", "emb", http.StatusBadRequest},
+		{"/v1/embeddings", "fast", http.StatusBadRequest},
+		{"/v1/decisions", "memory/fast", http.StatusBadRequest},
+		{"/v1/chat/completions", "fast", http.StatusOK},
+		{"/v1/embeddings", "emb", http.StatusOK},
+		{"/v1/embeddings", "up-a/m1", http.StatusOK}, // a provider model is not an alias: the front door decides
+	} {
+		before := f.hits.Load()
+		resp := f.do(t, http.MethodPost, c.path, keyFull, "application/json", chatBody(c.model), nil)
+		if resp.StatusCode != c.want {
+			t.Errorf("%s %s: %d %s, want %d", c.path, c.model, resp.StatusCode, resp.Body, c.want)
+		}
+		if c.want == http.StatusBadRequest {
+			if !strings.Contains(string(resp.Body), `"model_kind_mismatch"`) {
+				t.Errorf("%s %s: body %s, want model_kind_mismatch", c.path, c.model, resp.Body)
+			}
+			if f.hits.Load() != before {
+				t.Errorf("%s %s: refused request reached the front door", c.path, c.model)
+			}
+		}
 	}
 }

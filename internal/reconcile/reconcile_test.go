@@ -720,3 +720,22 @@ func TestNames(t *testing.T) {
 		t.Errorf("VirtualKeyName = %q", got)
 	}
 }
+
+func TestSynced(t *testing.T) {
+	h := newHarness(t)
+	h.base(t)
+	if h.rec.Synced() {
+		t.Fatal("Synced before any Sync")
+	}
+	h.eng.FailOnce("CreateRoutingRule")
+	if err := h.rec.Sync(context.Background()); err == nil {
+		t.Fatal("Sync with a failing engine: want an error")
+	}
+	if h.rec.Synced() {
+		t.Fatal("Synced after a failed Sync")
+	}
+	h.sync(t)
+	if !h.rec.Synced() {
+		t.Fatal("not Synced after a successful Sync")
+	}
+}
