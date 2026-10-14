@@ -21,7 +21,7 @@ type Step struct {
 	Headers map[string]string `json:"headers,omitempty"`  // Content-Type defaults to application/json
 	Body    string            `json:"body,omitempty"`     // written verbatim
 	DelayMS int               `json:"delay_ms,omitempty"` // before the first byte; honours request cancellation
-	SSE     []string          `json:"sse,omitempty"`      // reserved: plan 02 streams these as `data:` events
+	SSE     []string          `json:"sse,omitempty"`      // when set: text/event-stream, one flushed `data:` event each, then [DONE]
 }
 
 // Script is the ordered replies for one (upstream, route).
@@ -157,7 +157,12 @@ func writeStep(w http.ResponseWriter, r *http.Request, step Step) {
 		}
 	}
 	h := w.Header()
-	h.Set("Content-Type", "application/json")
+	if step.SSE != nil {
+		h.Set("Content-Type", "text/event-stream")
+		h.Set("Cache-Control", "no-cache")
+	} else {
+		h.Set("Content-Type", "application/json")
+	}
 	for k, v := range step.Headers {
 		h.Set(k, v)
 	}
@@ -166,8 +171,28 @@ func writeStep(w http.ResponseWriter, r *http.Request, step Step) {
 		status = http.StatusOK
 	}
 	w.WriteHeader(status)
+	if step.SSE != nil {
+		writeSSE(w, r, step.SSE)
+		return
+	}
 	if step.Body != "" {
 		_, _ = io.WriteString(w, step.Body)
+	}
+}
+
+// writeSSE sends each entry verbatim as one `data:` event, flushing after
+// each, then the terminating `data: [DONE]` event. It stops when the client
+// goes away.
+func writeSSE(w http.ResponseWriter, r *http.Request, entries []string) {
+	rc := http.NewResponseController(w)
+	for _, e := range append(entries[:len(entries):len(entries)], "[DONE]") {
+		if r.Context().Err() != nil {
+			return
+		}
+		if _, err := io.WriteString(w, "data: "+e+"\n\n"); err != nil {
+			return
+		}
+		_ = rc.Flush()
 	}
 }
 

@@ -55,7 +55,7 @@ func listenAddr() string {
 func serve(ctx context.Context, logger *slog.Logger, addr string) error {
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           control.New(nil).Handler(),
+		Handler:           control.New(control.Defaults()).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	errc := make(chan error, 1)
