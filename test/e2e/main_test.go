@@ -35,6 +35,13 @@ func run(m *testing.M) int {
 		teardown()
 		return 1
 	}
+	// The inference tests need providers, aliases and keys: apply them the way an operator would.
+	if out, err := runCompose("exec", "-T", "remora", "remora", "apply", "-f", "/e2e/remora.yaml"); err != nil {
+		fmt.Fprintf(os.Stderr, "e2e: remora apply: %v\n%s\n", err, out)
+		dumpLogs()
+		teardown()
+		return 1
+	}
 	code := m.Run()
 	if code != 0 {
 		dumpLogs()

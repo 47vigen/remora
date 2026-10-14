@@ -1,0 +1,16 @@
+providers:
+  - {name: up-a, kind: openai-compatible, base_url: http://fakes:9090/u/a, allow_private_network: true, keys: [{name: main, value: env:E2E_UPSTREAM_KEY}]}
+  - {name: up-b, kind: openai-compatible, base_url: http://fakes:9090/u/b, allow_private_network: true, keys: [{name: main, value: env:E2E_UPSTREAM_KEY}]}
+  - {name: up-c, kind: openai-compatible, base_url: http://fakes:9090/u/c, allow_private_network: true, keys: [{name: main, value: env:E2E_UPSTREAM_KEY}]}
+  - {name: ts-a, kind: typesafe-compatible, base_url: http://fakes:9090/u/ts-a, allow_private_network: true, keys: [{name: main, value: env:E2E_UPSTREAM_KEY}]}
+  - {name: ts-b, kind: typesafe-compatible, base_url: http://fakes:9090/u/ts-b, allow_private_network: true, keys: [{name: main, value: env:E2E_UPSTREAM_KEY}]}
+aliases:
+  - {name: fast, kind: chat, members: [up-a/m1, up-b/m1], capabilities: [structured_outputs, tools], context_window: 131072}
+  - {name: inner, kind: chat, members: [up-a/m1]}
+  - {name: memory/fast, kind: chat, members: [inner, up-c/m1]}
+  - {name: emb, kind: embeddings, members: [up-a/emb-1, up-b/emb-1]}
+  - {name: jev, kind: decisions, members: [ts-a/jev, ts-b/jev]}
+keys:
+  - {name: full, value: env:E2E_KEY_FULL, allow: ["*"]}
+  - {name: limited, value: env:E2E_KEY_LIMITED, allow: [fast, "up-a/*"]}
+  - {name: off, value: env:E2E_KEY_OFF, allow: ["*"], enabled: false}
