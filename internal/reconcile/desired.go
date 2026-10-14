@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -209,7 +210,7 @@ func (r *Reconciler) engineProvider(p store.Provider, reserved, internal map[str
 	case reserved[p.Name] || internal[p.Name]:
 		return bifrost.Provider{}, invalid("provider name %q is reserved for a subscription provider", p.Name)
 	}
-	bp := bifrost.Provider{Name: p.Name, BaseURL: p.BaseURL, AllowPrivateNetwork: p.AllowPrivateNetwork}
+	bp := bifrost.Provider{Name: p.Name, BaseURL: engineBaseURL(p.BaseURL), AllowPrivateNetwork: p.AllowPrivateNetwork}
 	switch p.Kind {
 	case store.KindBuiltin:
 		// The front door keys a standard provider by name, so 0.1 allows one provider per builtin type.
@@ -239,6 +240,18 @@ func (r *Reconciler) engineProvider(p store.Provider, reserved, internal map[str
 		return bifrost.Provider{}, invalid("provider %q: kind %q is not supported", p.Name, p.Kind)
 	}
 	return bp, nil
+}
+
+// engineBaseURL maps a provider's base URL to the front door's: the front door appends /v1/<endpoint> itself, while
+// providers publish their base URL with the /v1 the OpenAI SDKs expect, so a trailing /v1 is dropped.
+func engineBaseURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return strings.TrimRight(raw, "/")
+	}
+	u.Path = strings.TrimSuffix(strings.TrimRight(u.Path, "/"), "/v1")
+	u.RawPath = ""
+	return strings.TrimRight(u.String(), "/")
 }
 
 // aliasRule validates one alias and builds its routing rule: the compiled chain is validated whole, Filter drops

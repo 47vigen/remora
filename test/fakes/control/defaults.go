@@ -27,6 +27,7 @@ const DefaultEmbeddingDimensions = 8
 // Fixed values of the default answers, so tests can assert on them.
 const (
 	DefaultChatID      = "chatcmpl-fake"
+	DefaultResponseID  = "resp_fake"
 	DefaultCreated     = 1700000000
 	DefaultNoul        = 0.75
 	defaultPromptToks  = 3
@@ -38,15 +39,17 @@ const (
 var defaultModels = []string{"m1", "emb-1", "jev"}
 
 // Defaults returns the default answer of every route this plan serves: OpenAI
-// chat (plain and streamed), embeddings and decisions, TypeSafe System One and
+// chat (plain and streamed), Responses, embeddings and decisions, TypeSafe System One and
 // the model listing. Each echoes the requested model.
 func Defaults() map[string]http.HandlerFunc {
 	return map[string]http.HandlerFunc{
 		RouteOpenAIChat:        defaultChat,
 		RouteOpenAIEmbeddings:  defaultEmbeddings,
 		RouteOpenAIDecisions:   defaultDecisions,
+		RouteOpenAIResponses:   defaultResponses,
 		RouteTypeSafeSystemOne: defaultSystemOne,
 		RouteModels:            defaultModelList,
+		RouteOpenRouterAuthKey: defaultAuthKey,
 	}
 }
 
@@ -109,6 +112,56 @@ func defaultChat(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// defaultResponses answers a non-streamed OpenAI Responses request with one
+// assistant message holding DefaultChatContent.
+func defaultResponses(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Model string `json:"model"`
+	}
+	if !decodeBody(w, r, &req, writeError) {
+		return
+	}
+	type part struct {
+		Type        string `json:"type"`
+		Text        string `json:"text"`
+		Annotations []any  `json:"annotations"`
+	}
+	type item struct {
+		ID      string `json:"id"`
+		Type    string `json:"type"`
+		Status  string `json:"status"`
+		Role    string `json:"role"`
+		Content []part `json:"content"`
+	}
+	type respUsage struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+		TotalTokens  int `json:"total_tokens"`
+	}
+	writeJSON(w, http.StatusOK, struct {
+		ID        string    `json:"id"`
+		Object    string    `json:"object"`
+		CreatedAt int64     `json:"created_at"`
+		Status    string    `json:"status"`
+		Model     string    `json:"model"`
+		Output    []item    `json:"output"`
+		Usage     respUsage `json:"usage"`
+	}{
+		ID: DefaultResponseID, Object: "response", CreatedAt: DefaultCreated, Status: "completed", Model: req.Model,
+		Output: []item{{
+			ID: "msg_fake", Type: "message", Status: "completed", Role: "assistant",
+			Content: []part{{Type: "output_text", Text: DefaultChatContent, Annotations: []any{}}},
+		}},
+		Usage: respUsage{InputTokens: defaultPromptToks, OutputTokens: defaultOutputToks, TotalTokens: defaultPromptToks + defaultOutputToks},
+	})
+}
+
+// defaultAuthKey answers OpenRouter's key check, which the routing engine calls before it lists an OpenRouter
+// provider's models: any key is valid.
+func defaultAuthKey(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"label": "fake", "usage": 0, "limit": nil}})
+}
+
 // streamChat answers as OpenAI streams: a role chunk, the content in three
 // pieces, a finish chunk, then a usage chunk with no choices, all with one id.
 func streamChat(w http.ResponseWriter, r *http.Request, model, content string) {
@@ -153,7 +206,7 @@ func streamChat(w http.ResponseWriter, r *http.Request, model, content string) {
 	h.Set("Content-Type", "text/event-stream")
 	h.Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
-	writeSSE(w, r, events)
+	writeSSE(w, r, events, 0)
 }
 
 // splitRunes cuts s into at most n non-empty pieces on rune boundaries.

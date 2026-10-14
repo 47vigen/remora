@@ -861,3 +861,44 @@ Expected: the engine table (`bifrost`, `cliproxyapi` versions), the pull-by-dige
 2. e2e green on the released image — the `verify` jobs of Step 2.
 3. Quick start from a clean machine — the `verify` jobs ran it on fresh runners against the released digests.
 4. The reference deployment's migration — outside this repository; not part of this plan.
+
+## Corrections found during implementation
+
+- Task 7: the format says a proof item is `migration` or `exception: <reason>`, but the row table writes both inside
+  backticks. `parseProof` accepts either form, and an exception takes the rest of the cell as its reason, so a
+  reason may contain commas.
+- Task 7 (gap tests, request shapes and providers): the front door appends `/v1/<endpoint>` to a provider's base
+  URL, but providers publish base URLs ending in `/v1` (and the OmniRoute importer copies them verbatim), so such a
+  provider was called at `/v1/v1/...`. Reconcile now drops a trailing `/v1` (and `/`) from every base URL it hands
+  the front door (`internal/reconcile.TestEngineProviderBaseURLDropsV1`; proven end to end by
+  `test/e2e.TestProviderOpenAICompatible`).
+- Task 7: the fakes had no `/v1/responses` route; `openai.responses` (POST `/v1/responses`) was added with a default
+  answer, for `TestResponsesAgentMessage` and the Responses half of `TestMaxTokensAndReasoningEffort`.
+- Task 7 (gap tests, load and audio logs): `TestConcurrentHeavyRequests`, `TestLargePromptNoQueueDeadline`,
+  `TestLongStreamNoDeadline`, `TestFailingChainFailsFast` and `TestTranscriptionLogged` live in
+  `test/e2e/parity_load_test.go`, not `parity_gaps_test.go`; the parity proofs name the directory, so they resolve
+  either way. A long stream needs time between chunks, which the fakes could not script: `control.Step` gains
+  `interval_ms` (a wait before every SSE event after the first), unit-tested in `TestSSEInterval`, so the fakes
+  image must be rebuilt for these tests. The deadline tests outlast the reference deployment's 15 s queue deadline;
+  the engines' own configured deadlines (600 s per request, 300 s between stream chunks) are too long for CI.
+- Task 2: a provider named `openrouter` must be of kind `builtin` with `type: openrouter`; the reconciler rejects an
+  `openai-compatible` provider that takes a builtin provider's name. The README creates it that way.
+- Task 2: the routing engine appends `/v1/...` to an OpenRouter base URL (its default is `https://openrouter.ai/api`),
+  so the README literal is `https://openrouter.ai/api` and the smoke replaces it with
+  `http://<host>:9090/u/quickstart`, not the `/api/v1` and `/u/quickstart/v1` pair in Step 5.
+- Task 2: the routing engine refuses private addresses unless a provider allows them, and the fake listens on the
+  bridge gateway, so the smoke adds a fifth literal substitution, `type: "openrouter",` →
+  `type: "openrouter", allow_private_network: true,`. The README stays free of it.
+- Task 2: the engines load a new provider shortly after it is stored (the e2e suite retries for the same reason), so
+  the README's chat call uses `curl --retry 10 --retry-delay 2 --retry-all-errors`.
+- Task 2: substitutions use bash string replacement instead of `sed`, so a literal never needs regex escaping. The
+  bridge host defaults to the gateway of Docker's `bridge` network (falling back to `172.17.0.1`);
+  `QS_UPSTREAM_HOST` overrides it.
+- Task 2: `release.yml` already calls the script with `REMORA_IMAGE` and `FAKES_IMAGE`; no change was needed.
+- Task 7: the routing engine checks an OpenRouter key at `GET /v1/auth/key` before it lists the provider's models;
+  without that route the fakes' models never reached its catalog and every request was refused. The fakes now
+  answer it (`openrouter.auth_key`, `TestDefaultAuthKey`). The engine also numbers non-streamed tool calls with an
+  `index` field, so `TestToolsMultiTurn` compares tool calls by id, type, name and arguments.
+- Review fixes: the base URL's `/v1` is removed from the parsed path, so a host named `v1` is kept. The smoke script
+  refuses to start when the README's container or volume already exists, because its cleanup would remove them. The
+  README's shell quick start deletes its session cookie file at the end.

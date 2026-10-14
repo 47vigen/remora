@@ -443,3 +443,61 @@ func TestSSEFlushesEachEvent(t *testing.T) {
 		t.Fatalf("body = %q, want %q", got, want)
 	}
 }
+
+func TestDefaultResponses(t *testing.T) {
+	srv := newDefaultsServer(t)
+	resp := post(t, srv.URL+"/u/a/v1/responses", `{"model":"m1","input":"hi"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200", resp.StatusCode)
+	}
+	var got struct {
+		ID     string `json:"id"`
+		Object string `json:"object"`
+		Model  string `json:"model"`
+		Status string `json:"status"`
+		Output []struct {
+			Type    string `json:"type"`
+			Role    string `json:"role"`
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"output"`
+		Usage struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+			TotalTokens  int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	decode(t, resp.Body, &got)
+	if got.ID != control.DefaultResponseID || got.Object != "response" || got.Model != "m1" || got.Status != "completed" {
+		t.Errorf("response %+v: want id %s, object response, model m1, status completed", got, control.DefaultResponseID)
+	}
+	if len(got.Output) != 1 || got.Output[0].Type != "message" || got.Output[0].Role != "assistant" ||
+		len(got.Output[0].Content) != 1 || got.Output[0].Content[0].Type != "output_text" ||
+		!bytes.Equal([]byte(got.Output[0].Content[0].Text), []byte(persian)) {
+		t.Errorf("output %+v, want one assistant message with the default text", got.Output)
+	}
+	if got.Usage.TotalTokens != got.Usage.InputTokens+got.Usage.OutputTokens || got.Usage.TotalTokens == 0 {
+		t.Errorf("usage %+v", got.Usage)
+	}
+}
+
+func TestDefaultAuthKey(t *testing.T) {
+	srv := newDefaultsServer(t)
+	resp, err := http.Get(srv.URL + "/u/a/v1/auth/key") //nolint:noctx // a test against a local server
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200", resp.StatusCode)
+	}
+	var got struct {
+		Data map[string]any `json:"data"`
+	}
+	decode(t, resp.Body, &got)
+	if got.Data == nil {
+		t.Error("no data object")
+	}
+}
