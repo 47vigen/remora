@@ -495,6 +495,8 @@ func TestProxy_ResponseHeaders(t *testing.T) {
 		w.Header().Set("x-bf-other", "1")
 		w.Header().Set("Server", "Bifrost")
 		w.Header().Set("X-Provider-Note", "via bifrost key sk-bf-abc")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Bf-Setup-Token")
 		okJSON(w, r)
 	})
 	for _, c := range []struct{ model, alias string }{{"fast", "fast"}, {"memory/fast", "memory/fast"}, {"up-a/m1", ""}} {
@@ -512,6 +514,11 @@ func TestProxy_ResponseHeaders(t *testing.T) {
 			}
 			if got := h.Get("x-remora-fallback"); got != "true" {
 				t.Errorf("x-remora-fallback = %q", got)
+			}
+			for name := range h {
+				if strings.HasPrefix(strings.ToLower(name), "access-control-") {
+					t.Errorf("client saw the front door's CORS header %s", name)
+				}
 			}
 			for name, vals := range h {
 				all := strings.ToLower(name + ":" + strings.Join(vals, ","))

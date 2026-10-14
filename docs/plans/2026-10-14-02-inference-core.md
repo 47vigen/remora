@@ -47,7 +47,7 @@ driver), `crypto/aes` GCM + `crypto/hkdf`, `github.com/coder/websocket` (WebSock
    `Authorization`. Expected: every inbound `x-bf-*`, `x-bifrost-*`, `Authorization`, `x-api-key` and `Cookie` is
    removed, and only remora's values go upstream. Test in Task 6 (`TestProxy_StripsClientEngineHeaders`).
 3. **An engine error or header names the engine** (`is_bifrost_error`, `x-bifrost-*`, a message with "bifrost",
-   a `sk-bf-` value), including an error event in the middle of an SSE stream. Expected: OpenAI-shaped error, engine
+   a `sk-bf-` value), including an error event in the middle of an SSE stream. Expected: an error in the endpoint's own shape, engine
    words replaced, no `x-bifrost-*` header. Tests in Task 6 and the e2e leak guard in Task 11.
 4. **The `model` field is not where a naive parser looks**: multipart with `model` after a large `file` part, JSON
    with `model` missing or not a string, a body over the size cap. Expected: the model is found without changing a

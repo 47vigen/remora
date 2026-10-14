@@ -57,10 +57,12 @@ func isEngineHeader(name string) bool {
 	return strings.HasPrefix(l, "x-bf-") || strings.Contains(l, "bifrost") || strings.Contains(l, "cliproxyapi")
 }
 
-// cleanResponseHeaders removes engine headers and the Server header, and scrubs every remaining value.
+// cleanResponseHeaders removes engine headers, the Server header and the front door's CORS headers (they describe
+// the engine's own UI, not remora's /v1), and scrubs every remaining value.
 func cleanResponseHeaders(h http.Header) {
 	for name, vals := range h {
-		if isEngineHeader(name) || strings.EqualFold(name, "Server") {
+		if isEngineHeader(name) || strings.EqualFold(name, "Server") ||
+			strings.HasPrefix(strings.ToLower(name), "access-control-") {
 			delete(h, name)
 			continue
 		}
