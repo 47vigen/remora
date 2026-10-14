@@ -536,7 +536,7 @@ Flow of `ServeHTTP` (only `POST /v1/audio/transcriptions`; anything else → 404
 2. `r.ParseMultipartForm(32 << 20)`, `defer r.MultipartForm.RemoveAll()`; `parseParams`; `ParamError` → 400 `invalid_request_error`; no `file` part → 400.
 3. `ctx, cancel := context.WithTimeout(r.Context(), cfg.Deadline)`; `ref := RefPrefix + hex(16 random bytes)`.
 4. Upload (filename from the part header), create with `FileID` and `ClientReferenceID = ref`.
-5. **Deferred cleanup, registered right after each object exists:** `DeleteFile` then `DeleteTranscription` with `context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)` each; a failure is logged at `warn` with ids and `redact`ed error, never returned (the sweeper is the backstop).
+5. **One deferred cleanup closure**, registered right after the upload succeeds; it reads `fileID` and `transcriptionID` (the latter set once create succeeds) and deletes the file first, then the transcription if one exists (two separate `defer`s would run LIFO and delete the transcription first). Each delete uses `context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)` each; a failure is logged at `warn` with ids and `redact`ed error, never returned (the sweeper is the backstop).
 6. Poll: first `GetTranscription` immediately, then wait `min(clampPoll(cfg.PollInterval), time.Until(deadline))` via `a.after` between polls. `completed` → fetch transcript; `error` → 502 `upstream_error` with `"transcription failed: <error_type>: <error_message>"`; deadline reached → 504 `timeout` with `"transcription did not complete within <Deadline>"`; `r.Context()` cancelled → return without writing.
 7. Respond 200: `json` → `{"text": ts.Text}`; `text` → `text/plain; charset=utf-8` body `ts.Text`; `verbose_json` → `buildVerbose`.
 
@@ -562,7 +562,8 @@ func TestHandlerPollIntervalClamped(t *testing.T) {
 func TestHandlerDeadline(t *testing.T) // Deadline 50ms, real a.after, ProcessingFor 1h → 504, error.type == "timeout"; file deleted
 func TestHandlerJobErrorCleansUp(t *testing.T) // FailWith "audio_decode_failed" → 502, message contains "audio_decode_failed"; Live empty
 func TestHandlerCreateRejectedCleansUpFile(t *testing.T) // HTTPStatus 429 → 429 rate_limit_exceeded; uploaded file deleted
-func TestHandlerCleansUpWhenClientCancels(t *testing.T) // cancel request ctx after first poll → handler returns; file deleted within 1s
+func TestHandlerCleansUpWhenClientCancels(t *testing.T) // cancel request ctx after first poll → handler returns; within 1s fake.State().Deleted == [file, transcription] in that order
+func TestHandlerCleanupOrderOnSuccess(t *testing.T)     // completed job → Deleted[0] is the file id, Deleted[1] the transcription id
 func TestHandlerParamErrorIs400(t *testing.T) // field foo=1 → 400, error.message == `unsupported parameter "foo"`; fake saw no upload
 func TestHandlerMissingKeyIs401(t *testing.T)
 func TestHandlerErrorRedactsKey(t *testing.T) // EchoAuthInError + key "sk-test-secret": body has no "sk-test-secret"

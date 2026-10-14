@@ -554,7 +554,10 @@ is re-recorded); then delete unknown rules → virtual keys → keys → provide
 it is missing in the engine or its MAC (over its desired JSON, secret included) differs from `engine_sync`.
 
 `Change` runs `fn` and the pass in one `store.Write`; when the pass fails the transaction rolls back, and `Change`
-then runs `Sync` once more so the engine returns to the committed state, and returns the first error.
+then runs a recovery `Sync` so the engine returns to the committed state, and returns the first error. The pass
+records every engine object it mutated before the failure; the recovery `Sync` force-repushes those objects
+(deleting the ones that did not exist in the committed state) regardless of `engine_sync`, because the rolled-back
+MAC still matches the committed desired state while the engine holds the newer write.
 
 - [ ] **Step 1: Write the failing tests** (fake engine records every mutating call and can be told to fail one)
 
@@ -573,6 +576,11 @@ func TestSync_AliasChange(t *testing.T)         // members reversed → one Upda
 func TestSync_NestedAliasFlattened(t *testing.T) // memory/fast [inner, up-c/m1], inner [up-a/m1] → rule targets up-a/m1, fallbacks [up-c/m1]
 func TestSync_BadAliasSkipped(t *testing.T)     // alias "x" [nope] and alias fast valid → fast's rule exists, no rule for x, Sync returns nil, error logged
 func TestSync_DisabledKeyDeactivatesVK(t *testing.T) // client key Enabled false → UpdateVirtualKey Active false
+func TestChange_RecoveryRepushesTouched(t *testing.T) {
+    // pass updates provider up-a in the engine, then fails on rule create; tx rolls back (engine_sync MAC back to
+    // the old value); recovery Sync must PUT up-a again with the committed JSON even though MAC matches
+}
+
 func TestChange_RollsBackOnEngineError(t *testing.T) {
     // fake fails CreateRoutingRule; Change adds alias "slow" → returns error; store has no alias "slow";
     // engine has no rule "remora:alias:slow" and no other object changed

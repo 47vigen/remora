@@ -386,14 +386,15 @@ func TestTestProvider(t *testing.T) // fake returns {OK:false, Message:"401 from
 func TestAccountLoginFlow(t *testing.T) // start {provider:"codex"} → {state:"s1", url:"https://…"}; status → "wait"; complete {redirect_url:"http://localhost:1455/auth/callback?code=c&state=s1"} → 202 and fake saw ("s1", that URL); status → "ok"
 func TestDeviceCodeLogin(t *testing.T)  // fake Login{UserCode:"ABCD-1234"} → body user_code "ABCD-1234"
 func TestCancelAccountLogin(t *testing.T) // DELETE /api/accounts/logins/s1 → 204 and fake CancelLogin("s1"); unknown state → 404
-func TestCompleteLoginRejectsBadURL(t *testing.T) // table: "", "not a url", "http://localhost/cb" without code and state → 400; fake not called
+func TestCompleteLoginRejectsBadURL(t *testing.T) // table: "", "not a url", "http://localhost/cb" (no code, no error) → 400; fake not called
+func TestCompleteLoginWithoutState(t *testing.T)  // "http://localhost:1455/cb?code=c" (no state) → 202; the service, not the handler, checks state when present
 func TestListAccounts(t *testing.T)     // ?provider=antigravity filters; cooldown_until, quota, models serialised; ?q matches email
 func TestAccountToggleDeleteReset(t *testing.T) // PATCH {enabled:false} → fake SetEnabled(id,false); reset-cooldown → 204; delete → 204; unknown id → 404
 func TestImportAccount(t *testing.T)    // {provider:"antigravity", credential:{"type":"antigravity",…}} → fake got the exact JSON bytes; credential.type != provider → 400
 ```
 
 - [ ] **Step 2: Run, expect FAIL** — `go test ./internal/api -run Account` → FAIL.
-- [ ] **Step 3: Implement.** `redirect_url` must parse as an absolute URL whose query has `code` and `state` (or `error`); the engine accepts the full URL as `redirect_url` (`POST /v8/management/oauth/callback`, research map).
+- [ ] **Step 3: Implement.** `redirect_url` must parse as an absolute URL whose query has `code` or `error`; `state` is optional (some providers omit it), and the account service verifies it against the login only when it is present; the engine accepts the full URL as `redirect_url` (`POST /v8/management/oauth/callback`, research map).
 - [ ] **Step 4: Run, expect PASS.**
 - [ ] **Step 5: Commit** — `git commit -m "feat(api): add OAuth account endpoints"`
 

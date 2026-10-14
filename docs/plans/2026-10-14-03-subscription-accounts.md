@@ -515,7 +515,7 @@ The live log WebSocket `/ws` carries no log rows (`B/transports/bifrost-http/han
 - Produces:
 
 ```go
-type LogFilter struct { Status []string; Start *time.Time; Limit int; SortBy, Order string } // status (comma-joined), start_time RFC3339Nano, limit ≤1000, sort_by, order (B/.../handlers/logging.go:647,699-702,772-809)
+type LogFilter struct { Status []string; Start *time.Time; Limit, Offset int; SortBy, Order string } // status (comma-joined), start_time RFC3339Nano, limit ≤1000, offset, sort_by, order (B/.../handlers/logging.go:647,699-702,772-809)
 type Log struct {
     ID string `json:"id"`; ParentRequestID *string `json:"parent_request_id"`; Timestamp time.Time `json:"timestamp"`
     Provider string `json:"provider"`; Model string `json:"model"`; Status string `json:"status"` // "processing"|"success"|"error"
@@ -532,7 +532,7 @@ func (t *Tail) Subscribe(buffer int) (<-chan Log, func())
 func (t *Tail) Run(ctx context.Context)
 ```
 
-`Tail` polls only while at least one subscriber exists. Each poll queries `Start = newest seen timestamp − lookback` (default 10 min), `SortBy timestamp`, `Order asc`, `Limit 1000`. It delivers each ID once, and it prunes seen IDs older than the lookback. Rows are written when a request completes but carry its start time, and the lookback is what still catches those late rows. Rows with `Status "processing"` are not delivered and not marked seen. A subscriber whose buffer is full is dropped: its channel is closed, and the poller never blocks.
+`Tail` polls only while at least one subscriber exists. Each poll queries `Start = newest seen timestamp − lookback` (default 10 min), `SortBy timestamp`, `Order asc`, `Limit 1000`, and pages with `Offset` until a page returns fewer than `Limit` rows; only then does it advance its cursor, so a burst of more than 1,000 rows in one window is never skipped. It delivers each ID once, and it prunes seen IDs older than the lookback. Rows are written when a request completes but carry its start time, and the lookback is what still catches those late rows. Rows with `Status "processing"` are not delivered and not marked seen. A subscriber whose buffer is full is dropped: its channel is closed, and the poller never blocks.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -542,6 +542,7 @@ func TestGetLogFailure(t *testing.T)             // detail body {"error_details"
 func TestTailDeliversOnceInOrder(t *testing.T)   // poll1 [a@t1,b@t2], poll2 [b@t2,c@t3] → a,b,c once
 func TestTailCatchesLateRow(t *testing.T)        // poll1 [b@t5], poll2 [a@t1 (new), b@t5] with t5-t1 < lookback → a delivered
 func TestTailSkipsProcessing(t *testing.T)       // poll1 [a processing], poll2 [a error] → a delivered once, as error
+func TestTailPagesBeyondLimit(t *testing.T)     // 1,500 rows in one window → pages at offset 0 and 1000, all 1,500 delivered once
 func TestTailIdleWithoutSubscribers(t *testing.T) // SearchLogs called 0 times over 5 intervals
 func TestTailDropsSlowSubscriber(t *testing.T)   // buffer 1 never read → its channel closed; second subscriber gets all rows
 ```

@@ -264,7 +264,7 @@ Sections, in order (plain English, short sentences):
    executed by the smoke job in order; prose between them is for people.
    - Block 1: `export REMORA_ADMIN_PASSWORD="$(openssl rand -hex 16)"`, then
      `docker run -d --name remora -p 8080:8080 -v remora-data:/data -e REMORA_ADMIN_PASSWORD ghcr.io/47vigen/remora:latest`,
-     then a wait loop on `http://localhost:8080/healthz` (plan 01) of at most 60 s.
+     then a wait loop on `http://localhost:8080/healthz` (plan 01) of at most 120 s, the same budget as the supervisor's engine start and the image `HEALTHCHECK` start period, so a cold first boot on a slow host is not reported as a failure.
    - Prose: open `http://localhost:8080`, sign in with that password; **Providers → Add** (an OpenRouter key);
      optionally **Providers → a subscription provider → Add account** (sign in, paste the final address back;
      link to the ToS section); **Keys → Create** (the value is shown once).
