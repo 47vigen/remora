@@ -97,7 +97,14 @@ function LogsPage() {
 
   // Live mode starts from page 1 and prepends what arrives, within the same filters.
   const [liveRows, setLiveRows] = useState<LogSummary[] | null>(null);
-  if (live && liveRows === null && list.data) setLiveRows(pageRows);
+  // New filters restart live mode from the new first page; rows that matched the old filters must not linger.
+  const [liveFilters, setLiveFilters] = useState(filterKey);
+  if (liveFilters !== filterKey) {
+    setLiveFilters(filterKey);
+    setLiveRows(null);
+  }
+  if (live && liveRows === null && list.data && !list.isPlaceholderData && liveFilters === filterKey)
+    setLiveRows(pageRows);
   if (!live && liveRows !== null) setLiveRows(null);
   const { isConnected } = useLiveLogs(live === true, (l) => {
     const row = l.keyId !== undefined ? { ...l, keyName: keyNames.get(l.keyId) } : l;

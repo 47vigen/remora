@@ -5,7 +5,13 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { FileTrigger } from "react-aria-components";
 
-import { type ApiToken, type CreateApiTokenData, exportConfig, type Options } from "../../../client";
+import {
+  type ApiToken,
+  type ApplyConfigData,
+  type CreateApiTokenData,
+  exportConfig,
+  type Options,
+} from "../../../client";
 import {
   applyConfigMutation,
   changePasswordMutation,
@@ -26,7 +32,7 @@ import { About } from "./-components/About";
 import { ImportReview } from "./-components/ImportReview";
 import { PasswordForm } from "./-components/PasswordForm";
 import { TokensTable } from "./-components/TokensTable";
-import { formatChanges } from "./-lib/config-diff";
+import { appliedBeforeError, formatChanges, type GeneratedKey, generatedKeys, withoutValue } from "./-lib/config-diff";
 
 const TABS = ["password", "tokens", "backup", "about"] as const;
 type Tab = (typeof TABS)[number];
@@ -294,8 +300,26 @@ function BackupPanel() {
     onSuccess: (text) => downloadFile(text, "remora.yaml", "application/yaml"),
   });
   const plan = useMutation(planConfigMutation());
+  // Generated client key values go only to SecretOnce, one at a time, never into the mutation cache.
+  const [generated, setGenerated] = useState<GeneratedKey[]>([]);
+  const base = applyConfigMutation();
   const apply = useMutation({
-    ...applyConfigMutation(),
+    gcTime: 0,
+    mutationFn: async (vars: Options<ApplyConfigData>, ctx: MutationFunctionContext) => {
+      try {
+        const answer = await base.mutationFn!(vars, ctx);
+        setGenerated(generatedKeys(answer.changes));
+        return { changes: answer.changes.map(withoutValue) };
+      } catch (err) {
+        // A failed apply may have committed changes first: show their key values and stop showing stale data.
+        const committed = appliedBeforeError(err);
+        if (committed === undefined) throw err;
+        setGenerated(generatedKeys(committed));
+        void queryClient.invalidateQueries();
+        const detail = (err as { error: object }).error;
+        throw { error: { ...detail, applied: committed.map(withoutValue) } };
+      }
+    },
     onSuccess: async () => {
       setYaml(null);
       setApplied(true);
@@ -375,6 +399,11 @@ function BackupPanel() {
           {apply.error ? <ErrorAlert title="Could not apply the file" error={apply.error} /> : null}
         </div>
       ) : null}
+      <SecretOnce
+        title={generated[0] ? `Key ${generated[0].name} created` : ""}
+        value={generated[0]?.value ?? null}
+        onClose={() => setGenerated((keys) => keys.slice(1))}
+      />
     </div>
   );
 }

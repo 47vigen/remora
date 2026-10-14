@@ -77,6 +77,65 @@ test("import reviews the dry run, then applies the same document", async () => {
   for (const r of sent) expect(await r.json()).toEqual({ document: yaml, prune: true });
 });
 
+async function importFile(yaml: string) {
+  await screen.findByRole("button", { name: "Import" });
+  const input = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+  await userEvent.upload(input, new File([yaml], "remora.yaml", { type: "application/yaml" }));
+  await screen.findByText((_, el) => el?.tagName === "PRE");
+  await userEvent.click(screen.getByRole("button", { name: "Apply" }));
+}
+
+const planned = () => Response.json({ changes: [{ op: "create", kind: "key", name: "gen", fields: [] }] });
+
+test("apply shows each generated key value once and keeps it out of the caches", async () => {
+  const { queryClient } = renderRoute("/settings?tab=backup", (_req, url) => {
+    if (url.pathname === "/api/config/plan") return planned();
+    if (url.pathname === "/api/config/apply")
+      return Response.json({
+        changes: [
+          { op: "create", kind: "key", name: "gen", fields: [], value: "rk-generated-1" },
+          { op: "create", kind: "key", name: "gen2", fields: [], value: "rk-generated-2" },
+        ],
+      });
+  });
+  await importFile("keys:\n  - name: gen\n");
+  expect(await screen.findByDisplayValue("rk-generated-1")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Done" }));
+  expect(await screen.findByDisplayValue("rk-generated-2")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Done" }));
+  await waitFor(() => expect(document.body.innerHTML).not.toContain("rk-generated"));
+  const cached = queryClient
+    .getMutationCache()
+    .getAll()
+    .map((m) => [m.state.data, m.state.error]);
+  expect(JSON.stringify(cached)).not.toContain("rk-generated");
+});
+
+test("a partly failed apply shows committed key values and refetches", async () => {
+  const { queryClient } = renderRoute("/settings?tab=backup", (_req, url) => {
+    if (url.pathname === "/api/config/plan") return planned();
+    if (url.pathname === "/api/config/apply")
+      return Response.json(
+        {
+          error: {
+            message: "alias fast: unknown member",
+            type: "invalid_request_error",
+            code: "invalid_config",
+            applied: [{ op: "create", kind: "key", name: "gen", fields: [], value: "rk-generated-3" }],
+          },
+        },
+        { status: 400 },
+      );
+  });
+  const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+  await importFile("keys:\n  - name: gen\n");
+  expect(await screen.findByDisplayValue("rk-generated-3")).toBeInTheDocument();
+  expect(invalidate).toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("button", { name: "Done" }));
+  expect(await screen.findByText("alias fast: unknown member")).toBeInTheDocument();
+  expect(document.body.innerHTML).not.toContain("rk-generated-3");
+});
+
 test("export downloads the YAML text", async () => {
   const createObjectURL = vi.fn<(b: Blob) => string>(() => "blob:x");
   URL.createObjectURL = createObjectURL;

@@ -109,6 +109,26 @@ test("live mode prepends matching entries and hides paging", async () => {
   expect(screen.queryByText("or/skipped")).toBeNull();
 });
 
+test("live mode drops the old filter's rows when a filter changes", async () => {
+  const { router } = renderRoute("/logs?live=true&alias=fast", (req, url) => {
+    if (url.pathname === "/api/logs" && url.searchParams.get("alias") === "slow")
+      return Response.json({ items: [entry("l5", { alias: "slow", model: "slow-model" })], total: 1 });
+    return api(req, url);
+  });
+  await findRow("or/x");
+  const ws = FakeSocket.last!;
+  act(() => {
+    ws.readyState = 1;
+    ws.onopen?.();
+  });
+  act(() => ws.onmessage?.({ data: JSON.stringify(entry("l9", { model: "live-model" })) }));
+  await findRow("or/live-model");
+  act(() => router.history.push("/logs?live=true&alias=slow"));
+  await findRow("or/slow-model");
+  expect(screen.queryByText("or/live-model")).toBeNull();
+  expect(screen.queryByText("or/x")).toBeNull();
+});
+
 test("a custom range shows the date picker", async () => {
   renderRoute("/logs?range=custom", api);
   expect(await screen.findByText("Dates")).toBeInTheDocument();
