@@ -1,0 +1,8 @@
+/bin/
+/dist/
+*.db
+*.db-*
+coverage.out
+.env*
+/web/node_modules/
+/web/dist/

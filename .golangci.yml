@@ -1,0 +1,12 @@
+version: "2"
+run:
+  timeout: 5m
+  build-tags: [e2e]
+linters:
+  default: standard
+  enable: [bodyclose, contextcheck, errorlint, gocritic, gosec, misspell, noctx, revive, sloglint, unconvert, usestdlibvars]
+formatters:
+  enable: [gofumpt, goimports]
+  settings:
+    goimports:
+      local-prefixes: [github.com/47vigen/remora]
