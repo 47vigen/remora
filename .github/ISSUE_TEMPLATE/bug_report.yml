@@ -1,0 +1,47 @@
+name: Bug report
+description: Something in remora does not work as documented.
+labels: [bug]
+body:
+  - type: textarea
+    id: version
+    attributes:
+      label: remora version
+      description: The output of `remora version`.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: deployment
+    attributes:
+      label: Deployment shape
+      description: How you run remora, for example Docker Compose or a plain container, and on which architecture.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant log lines. Redact every key, password and token before you paste.
+      render: text
