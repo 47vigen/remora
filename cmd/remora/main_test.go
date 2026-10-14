@@ -16,7 +16,7 @@ func TestRun(t *testing.T) {
 		wantErr  string // substring of stderr
 	}{
 		{"version", []string{"version"}, 0, "remora dev", ""},
-		{"no args", nil, 2, "", "usage: remora <serve|apply|version|healthcheck>"},
+		{"no args", nil, 2, "", "usage: remora <serve|apply|import|version|healthcheck>"},
 		{"unknown", []string{"frobnicate"}, 2, "", `unknown command "frobnicate"`},
 	}
 	for _, tt := range tests {

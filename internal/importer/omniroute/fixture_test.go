@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"golang.org/x/crypto/scrypt"
@@ -83,13 +84,26 @@ func testJWT(claims map[string]any) string {
 	return enc.EncodeToString(h) + "." + enc.EncodeToString(p) + "."
 }
 
+// keyCache keeps derived keys: scrypt is slow on purpose and the fixture encrypts many values.
+var (
+	keyMu    sync.Mutex
+	keyCache = map[string][]byte{}
+)
+
 // encryptWith encrypts like OmniRoute's encrypt() with a key derived from secret and salt.
 func encryptWith(t *testing.T, secret string, salt []byte, plain string) string {
 	t.Helper()
-	key, err := scrypt.Key([]byte(secret), salt, 16384, 8, 1, 32)
-	if err != nil {
-		t.Fatal(err)
+	keyMu.Lock()
+	key, ok := keyCache[secret+"\x00"+string(salt)]
+	if !ok {
+		var err error
+		if key, err = scrypt.Key([]byte(secret), salt, 16384, 8, 1, 32); err != nil {
+			keyMu.Unlock()
+			t.Fatal(err)
+		}
+		keyCache[secret+"\x00"+string(salt)] = key
 	}
+	keyMu.Unlock()
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		t.Fatal(err)
