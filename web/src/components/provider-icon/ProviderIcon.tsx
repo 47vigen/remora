@@ -5,7 +5,7 @@ import { ProviderIcons, resolveProviderIconKey } from "./icons";
 
 const SIZES = { xs: 16, sm: 20, md: 24 } as const;
 
-/** The mark of a provider type or subscription provider; nothing when there is none. */
+/** The decorative mark of a provider type or subscription provider; nothing when there is none. */
 export function ProviderIcon({
   type,
   size = "sm",
@@ -19,5 +19,10 @@ export function ProviderIcon({
   const key = borrowed ?? resolveProviderIconKey(type);
   if (!key) return null;
   const Icon = ProviderIcons[key];
-  return <Icon size={SIZES[size]} className={cn("shrink-0", className)} />;
+  // Decorative: the provider's name is always shown next to it, and some marks carry a <title>.
+  return (
+    <span aria-hidden="true" className={cn("inline-flex shrink-0", className)}>
+      <Icon size={SIZES[size]} />
+    </span>
+  );
 }
