@@ -1,0 +1,11 @@
+# Build context is the repo root. test/fakes stays in; its own Dockerfile uses it.
+.git
+**/.git
+docs/
+test/e2e/
+engines/bifrost/ui/
+engines/bifrost/docs/
+engines/bifrost/tests/
+engines/bifrost/helm-charts/
+engines/bifrost/terraform/
+engines/cliproxyapi/docs/
