@@ -482,3 +482,22 @@ func TestDefaultResponses(t *testing.T) {
 		t.Errorf("usage %+v", got.Usage)
 	}
 }
+
+func TestDefaultAuthKey(t *testing.T) {
+	srv := newDefaultsServer(t)
+	resp, err := http.Get(srv.URL + "/u/a/v1/auth/key") //nolint:noctx // a test against a local server
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200", resp.StatusCode)
+	}
+	var got struct {
+		Data map[string]any `json:"data"`
+	}
+	decode(t, resp.Body, &got)
+	if got.Data == nil {
+		t.Error("no data object")
+	}
+}

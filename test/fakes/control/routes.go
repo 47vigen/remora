@@ -10,6 +10,7 @@ const (
 	RouteOpenAIDecisions      = "openai.decisions"             // POST /v1/decisions
 	RouteOpenAIResponses      = "openai.responses"             // POST /v1/responses
 	RouteModels               = "models"                       // GET  /v1/models
+	RouteOpenRouterAuthKey    = "openrouter.auth_key"          // GET  /v1/auth/key
 	RouteSonioxFileCreate     = "soniox.files.create"          // POST /v1/files
 	RouteSonioxFileList       = "soniox.files.list"            // GET  /v1/files
 	RouteSonioxFileDelete     = "soniox.files.delete"          // DELETE /v1/files/{id}
@@ -38,6 +39,7 @@ func routeTable() []routeSpec {
 		{RouteOpenAIDecisions, http.MethodPost, "/v1/decisions"},
 		{RouteOpenAIResponses, http.MethodPost, "/v1/responses"},
 		{RouteModels, http.MethodGet, "/v1/models"},
+		{RouteOpenRouterAuthKey, http.MethodGet, "/v1/auth/key"},
 		{RouteSonioxFileCreate, http.MethodPost, "/v1/files"},
 		{RouteSonioxFileList, http.MethodGet, "/v1/files"},
 		{RouteSonioxFileDelete, http.MethodDelete, "/v1/files/{id}"},

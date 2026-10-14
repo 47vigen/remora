@@ -895,3 +895,7 @@ Expected: the engine table (`bifrost`, `cliproxyapi` versions), the pull-by-dige
   bridge host defaults to the gateway of Docker's `bridge` network (falling back to `172.17.0.1`);
   `QS_UPSTREAM_HOST` overrides it.
 - Task 2: `release.yml` already calls the script with `REMORA_IMAGE` and `FAKES_IMAGE`; no change was needed.
+- Task 7: the routing engine checks an OpenRouter key at `GET /v1/auth/key` before it lists the provider's models;
+  without that route the fakes' models never reached its catalog and every request was refused. The fakes now
+  answer it (`openrouter.auth_key`, `TestDefaultAuthKey`). The engine also numbers non-streamed tool calls with an
+  `index` field, so `TestToolsMultiTurn` compares tool calls by id, type, name and arguments.

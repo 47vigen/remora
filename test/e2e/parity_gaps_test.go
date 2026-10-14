@@ -209,7 +209,7 @@ func TestToolsMultiTurn(t *testing.T) {
 	wantStatus(t, rep, http.StatusOK)
 	var first chatAnswer
 	decodeJSON(t, rep.Body, &first)
-	if len(first.Choices) != 1 || first.Choices[0].FinishReason != "tool_calls" || !jsonEqual(t, first.Choices[0].Message.ToolCalls, toolCalls) {
+	if len(first.Choices) != 1 || first.Choices[0].FinishReason != "tool_calls" || !sameToolCalls(t, first.Choices[0].Message.ToolCalls, toolCalls) {
 		t.Fatalf("turn 1 answer %s, want the tool call %s with finish_reason tool_calls", rep.Body, toolCalls)
 	}
 
@@ -254,12 +254,24 @@ func TestToolsMultiTurn(t *testing.T) {
 	if m := got.Messages[0]; m.Role != "user" || m.Content == nil || *m.Content != user["content"] {
 		t.Errorf("turn 2 message 1 %+v, want the user's question", m)
 	}
-	if m := got.Messages[1]; m.Role != "assistant" || !jsonEqual(t, m.ToolCalls, toolCalls) {
+	if m := got.Messages[1]; m.Role != "assistant" || !sameToolCalls(t, m.ToolCalls, toolCalls) {
 		t.Errorf("turn 2 message 2: role %q tool_calls %s, want assistant %s", m.Role, m.ToolCalls, toolCalls)
 	}
 	if m := got.Messages[2]; m.Role != "tool" || m.ToolCallID != "call_1" || m.Content == nil || !bytes.Equal([]byte(*m.Content), []byte(persian)) {
 		t.Errorf("turn 2 message 3 %+v, want the tool result for call_1", m)
 	}
+}
+
+// sameToolCalls compares tool calls by id, type, name and arguments. The front door numbers non-streamed tool
+// calls with an "index" field, as OpenAI does in streams; it carries nothing a client replays, so it is ignored.
+func sameToolCalls(t *testing.T, got, want []byte) bool {
+	t.Helper()
+	var calls []map[string]any
+	decodeJSON(t, got, &calls)
+	for _, c := range calls {
+		delete(c, "index")
+	}
+	return jsonEqual(t, []byte(mustJSON(t, calls)), want)
 }
 
 // M7.4: the OpenRouter provider kind.

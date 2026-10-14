@@ -49,6 +49,7 @@ func Defaults() map[string]http.HandlerFunc {
 		RouteOpenAIResponses:   defaultResponses,
 		RouteTypeSafeSystemOne: defaultSystemOne,
 		RouteModels:            defaultModelList,
+		RouteOpenRouterAuthKey: defaultAuthKey,
 	}
 }
 
@@ -153,6 +154,12 @@ func defaultResponses(w http.ResponseWriter, r *http.Request) {
 		}},
 		Usage: respUsage{InputTokens: defaultPromptToks, OutputTokens: defaultOutputToks, TotalTokens: defaultPromptToks + defaultOutputToks},
 	})
+}
+
+// defaultAuthKey answers OpenRouter's key check, which the routing engine calls before it lists an OpenRouter
+// provider's models: any key is valid.
+func defaultAuthKey(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"label": "fake", "usage": 0, "limit": nil}})
 }
 
 // streamChat answers as OpenAI streams: a role chunk, the content in three
