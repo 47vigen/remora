@@ -26,6 +26,8 @@ const (
 	readHeaderTimeout = 10 * time.Second
 	shutdownTimeout   = 15 * time.Second
 	engineStopTimeout = 45 * time.Second // covers both engines' 15s SIGTERM grace
+	// sweepMargin keeps the speech sweeper off a job a live request still waits on.
+	sweepMargin = 10 * time.Minute
 )
 
 // runServe implements `remora serve`.
@@ -215,7 +217,7 @@ func startSpeech(ctx context.Context, cfg config.Config, st *store.Store, logger
 		Keys: func(ctx context.Context) ([]string, error) {
 			return st.ProviderKeysByKind(ctx, store.KindSoniox)
 		},
-		MaxAge: soniox.DefaultMaxAge,
+		MaxAge: max(soniox.DefaultMaxAge, cfg.SonioxDeadline+sweepMargin),
 		Logger: log,
 	}
 	sctx, scancel := context.WithCancel(ctx)

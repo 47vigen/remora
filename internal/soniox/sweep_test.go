@@ -69,7 +69,22 @@ func TestSweepKeepsYoungAndForeign(t *testing.T) {
 	}
 }
 
-func TestSweepKeepsActiveJobAndItsFile(t *testing.T) {
+func TestSweepKeepsYoungActiveJobAndItsFile(t *testing.T) {
+	f := fake.New()
+	f.Seed(fake.Object{ID: "fc", Kind: "file", Key: "k", ClientReferenceID: "remora:c", CreatedAt: t0.Add(-3 * time.Hour)})
+	f.Seed(fake.Object{Kind: "transcription", Key: "k", ClientReferenceID: "remora:c", Status: "processing", FileID: "fc", CreatedAt: t0.Add(-30 * time.Minute)})
+	f.Seed(fake.Object{ID: "fx", Kind: "file", Key: "k", ClientReferenceID: "remora:x", CreatedAt: t0.Add(-3 * time.Hour)})
+	f.Seed(fake.Object{Kind: "transcription", Key: "k", ClientReferenceID: "app:x", Status: "queued", FileID: "fx", CreatedAt: t0.Add(-3 * time.Hour)})
+	res, err := newSweeper(t, f, "k").SweepOnce(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := f.State(); res != (SweepResult{}) || len(st.Live) != 4 {
+		t.Fatalf("res %+v, state %+v", res, st)
+	}
+}
+
+func TestSweepExpiresAbandonedJob(t *testing.T) {
 	f := fake.New()
 	f.Seed(fake.Object{ID: "fc", Kind: "file", Key: "k", ClientReferenceID: "remora:c", CreatedAt: t0.Add(-3 * time.Hour)})
 	f.Seed(fake.Object{Kind: "transcription", Key: "k", ClientReferenceID: "remora:c", Status: "processing", FileID: "fc", CreatedAt: t0.Add(-3 * time.Hour)})
@@ -79,13 +94,15 @@ func TestSweepKeepsActiveJobAndItsFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Both files go, which makes the jobs fail; the jobs themselves still run
+	// and wait for the next sweep.
 	st := f.State()
-	if res != (SweepResult{}) || len(st.Live) != 4 {
+	if res != (SweepResult{Files: 2}) || len(st.Live) != 2 {
 		t.Fatalf("res %+v, state %+v", res, st)
 	}
 	for _, o := range st.Live {
-		if o.Kind == "transcription" && o.Status != "processing" && o.Status != "queued" {
-			t.Fatalf("active job disturbed: %+v", o)
+		if o.Kind != "transcription" {
+			t.Fatalf("file of an abandoned job kept: %+v", o)
 		}
 	}
 }

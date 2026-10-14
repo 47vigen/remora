@@ -616,7 +616,8 @@ func (s *Sweeper) Run(ctx context.Context, every time.Duration)    // sweeps at 
 
 Per key, in this order:
 
-1. `ListTranscriptions`. `active` = set of `FileID` whose status is `queued` or `processing`.
+1. `ListTranscriptions`. `active` = set of `FileID` whose status is `queued` or `processing`, except jobs with prefix
+   `remora:` older than `MaxAge`: those are abandoned, and losing their file makes them fail.
 2. Delete each transcription with prefix `remora:`, `CreatedAt` before `Now()-MaxAge`, and status `completed` or `error`.
 3. `ListFiles`. Delete each file with prefix `remora:`, older than `MaxAge`, and not in `active` (deleting it would fail a job still running).
 4. An item that fails is logged and skipped; a key whose list fails is logged and joined into the returned error; other keys still run.
@@ -631,7 +632,8 @@ func TestSweepDeletesOldOwned(t *testing.T) {
     // res == SweepResult{Transcriptions:1, Files:1}
 }
 func TestSweepKeepsYoungAndForeign(t *testing.T) // remora:b at t0-30m and "app:x" at t0-5h survive
-func TestSweepKeepsActiveJobAndItsFile(t *testing.T) // processing remora:c at t0-3h and its file survive
+func TestSweepKeepsYoungActiveJobAndItsFile(t *testing.T) // processing remora:c at t0-30m, foreign queued job, and their files survive
+func TestSweepExpiresAbandonedJob(t *testing.T) // processing and queued remora jobs at t0-3h lose their files
 func TestSweepEachKeyIndependently(t *testing.T) // keys {"bad","k"}; fake 401s "bad" → k still swept; err != nil
 func TestSweepRunStopsOnCancel(t *testing.T) // Run with every=10ms; cancel; returns within 100ms; at least 1 sweep happened
 ```
@@ -887,3 +889,7 @@ git commit -m "test(e2e): transcription speakers, cleanup, long job and sweep th
   poll the fake for up to 5 s. The failed-job test accepts any status of 400 or above (the adapter answers 502).
   Step 3 (rebuilding at the unpatched pin to watch the speaker check fail) was not run: the patch is a single field,
   and the image build against the submodule's core is what carries it.
+- **Abandoned jobs expire (review fix).** The sweeper first protected every queued or processing job forever, so a
+  job stuck at Soniox kept its file and transcription indefinitely. A remora job older than `MaxAge` now loses its
+  file, which makes it fail, and the next sweep deletes the failed transcription. `serve` sets `MaxAge` to the larger
+  of 1 h and the speech deadline plus 10 minutes, so a job a live request still waits on is never touched.

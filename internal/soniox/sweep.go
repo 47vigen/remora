@@ -19,7 +19,9 @@ type KeySource func(ctx context.Context) ([]string, error)
 
 // Sweeper deletes Soniox files and transcriptions that remora created (their
 // client_reference_id starts with RefPrefix) and that outlived MaxAge, such as
-// leftovers of a crash. Objects without the prefix are never touched.
+// leftovers of a crash. Objects without the prefix are never touched. An owned
+// job still queued or processing past MaxAge loses its file, which makes it
+// fail; a later sweep then deletes the failed transcription.
 type Sweeper struct {
 	Client *Client
 	Keys   KeySource
@@ -65,9 +67,13 @@ func (s *Sweeper) sweepKey(ctx context.Context, key string, res *SweepResult) er
 	if err != nil {
 		return err
 	}
+	// A running job keeps its file, unless remora owns the job and it outlived
+	// the cutoff: then the job is abandoned, and deleting its file forces it to
+	// fail, so the next sweep can delete the transcription too.
 	active := map[string]bool{}
 	for _, tr := range txs {
-		if tr.Status == StatusQueued || tr.Status == StatusProcessing {
+		if (tr.Status == StatusQueued || tr.Status == StatusProcessing) &&
+			(!strings.HasPrefix(tr.ClientReferenceID, RefPrefix) || !tr.CreatedAt.Before(cutoff)) {
 			active[tr.FileID] = true
 		}
 	}
