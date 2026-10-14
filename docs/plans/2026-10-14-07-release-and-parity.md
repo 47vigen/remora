@@ -861,3 +861,9 @@ Expected: the engine table (`bifrost`, `cliproxyapi` versions), the pull-by-dige
 2. e2e green on the released image — the `verify` jobs of Step 2.
 3. Quick start from a clean machine — the `verify` jobs ran it on fresh runners against the released digests.
 4. The reference deployment's migration — outside this repository; not part of this plan.
+
+## Corrections found during implementation
+
+- Task 7: the format says a proof item is `migration` or `exception: <reason>`, but the row table writes both inside
+  backticks. `parseProof` accepts either form, and an exception takes the rest of the cell as its reason, so a
+  reason may contain commas.
