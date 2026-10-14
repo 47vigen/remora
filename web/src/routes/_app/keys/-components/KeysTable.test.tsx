@@ -69,7 +69,7 @@ test("rows show name, prefix, allowlist chips, enabled switch, created time and 
   expect(within(row1).getByText("+2")).toBeInTheDocument();
   expect(within(row1).getByRole("switch", { name: "Enabled" })).toBeChecked();
   expect(row1).toHaveTextContent("1h ago");
-  expect(row1).toHaveTextContent("1.2K");
+  expect(row1).toHaveTextContent("1.23K");
   expect(within(row2).getByRole("switch", { name: "Enabled" })).not.toBeChecked();
   expect(row2).toHaveTextContent("2d ago");
   expect(within(row2).getAllByRole("gridcell")[3]).toHaveTextContent(/^0$/);

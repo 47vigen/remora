@@ -33,6 +33,8 @@ They were copied once and modified; they are not kept in sync.
 - `web/src/routes/_app/(overview)/-components/charts/TokenChart.tsx`
 - `web/src/routes/_app/(overview)/-components/charts/CostChart.tsx`
 - `web/src/routes/_app/(overview)/-components/charts/LatencyChart.tsx`
+- `web/src/routes/_app/logs/-lib/format.ts`
+- `web/src/routes/_app/logs/-hooks/useLiveLogs.ts`
 
 ## CLIProxyAPI
 

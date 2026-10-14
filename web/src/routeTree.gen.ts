@@ -11,10 +11,13 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as AppoverviewIndexRouteImport } from './routes/_app/(overview)/index'
 import { Route as AppAliasesIndexRouteImport } from './routes/_app/aliases/index'
 import { Route as AppAliasesNameRouteImport } from './routes/_app/aliases/$name'
 import { Route as AppKeysIndexRouteImport } from './routes/_app/keys/index'
 import { Route as AppLogsIndexRouteImport } from './routes/_app/logs/index'
+import { Route as AppProvidersIndexRouteImport } from './routes/_app/providers/index'
+import { Route as AppProvidersProviderIdRouteImport } from './routes/_app/providers/$providerId'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
 
 const AppRoute = AppRouteImport.update({
@@ -25,6 +28,11 @@ const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AppoverviewIndexRoute = AppoverviewIndexRouteImport.update({
+  id: '/(overview)/',
+  path: '/',
+  getParentRoute: () => AppRoute,
 } as any)
 const AppAliasesIndexRoute = AppAliasesIndexRouteImport.update({
   id: '/aliases/',
@@ -46,6 +54,16 @@ const AppLogsIndexRoute = AppLogsIndexRouteImport.update({
   path: '/logs/',
   getParentRoute: () => AppRoute,
 } as any)
+const AppProvidersIndexRoute = AppProvidersIndexRouteImport.update({
+  id: '/providers/',
+  path: '/providers/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppProvidersProviderIdRoute = AppProvidersProviderIdRouteImport.update({
+  id: '/providers/$providerId',
+  path: '/providers/$providerId',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
   id: '/settings/',
   path: '/settings/',
@@ -53,21 +71,25 @@ const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
 } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof AppRouteWithChildren
+  '/': typeof AppoverviewIndexRoute
   '/login': typeof LoginRoute
   '/aliases/$name': typeof AppAliasesNameRoute
+  '/providers/$providerId': typeof AppProvidersProviderIdRoute
   '/aliases/': typeof AppAliasesIndexRoute
   '/keys/': typeof AppKeysIndexRoute
   '/logs/': typeof AppLogsIndexRoute
+  '/providers/': typeof AppProvidersIndexRoute
   '/settings/': typeof AppSettingsIndexRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
   '/aliases/$name': typeof AppAliasesNameRoute
+  '/providers/$providerId': typeof AppProvidersProviderIdRoute
+  '/': typeof AppoverviewIndexRoute
   '/aliases': typeof AppAliasesIndexRoute
   '/keys': typeof AppKeysIndexRoute
   '/logs': typeof AppLogsIndexRoute
+  '/providers': typeof AppProvidersIndexRoute
   '/settings': typeof AppSettingsIndexRoute
 }
 export interface FileRoutesById {
@@ -75,9 +97,12 @@ export interface FileRoutesById {
   '/_app': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
   '/_app/aliases/$name': typeof AppAliasesNameRoute
+  '/_app/providers/$providerId': typeof AppProvidersProviderIdRoute
+  '/_app/(overview)/': typeof AppoverviewIndexRoute
   '/_app/aliases/': typeof AppAliasesIndexRoute
   '/_app/keys/': typeof AppKeysIndexRoute
   '/_app/logs/': typeof AppLogsIndexRoute
+  '/_app/providers/': typeof AppProvidersIndexRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
 }
 export interface FileRouteTypes {
@@ -86,27 +111,34 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/aliases/$name'
+    | '/providers/$providerId'
     | '/aliases/'
     | '/keys/'
     | '/logs/'
+    | '/providers/'
     | '/settings/'
   fileRoutesByTo: FileRoutesByTo
   to:
-    | '/'
     | '/login'
     | '/aliases/$name'
+    | '/providers/$providerId'
+    | '/'
     | '/aliases'
     | '/keys'
     | '/logs'
+    | '/providers'
     | '/settings'
   id:
     | '__root__'
     | '/_app'
     | '/login'
     | '/_app/aliases/$name'
+    | '/_app/providers/$providerId'
+    | '/_app/(overview)/'
     | '/_app/aliases/'
     | '/_app/keys/'
     | '/_app/logs/'
+    | '/_app/providers/'
     | '/_app/settings/'
   fileRoutesById: FileRoutesById
 }
@@ -130,6 +162,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_app/(overview)/': {
+      id: '/_app/(overview)/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof AppoverviewIndexRouteImport
+      parentRoute: typeof AppRoute
     }
     '/_app/aliases/': {
       id: '/_app/aliases/'
@@ -159,6 +198,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppLogsIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/providers/': {
+      id: '/_app/providers/'
+      path: '/providers'
+      fullPath: '/providers/'
+      preLoaderRoute: typeof AppProvidersIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/providers/$providerId': {
+      id: '/_app/providers/$providerId'
+      path: '/providers/$providerId'
+      fullPath: '/providers/$providerId'
+      preLoaderRoute: typeof AppProvidersProviderIdRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/settings/': {
       id: '/_app/settings/'
       path: '/settings'
@@ -171,17 +224,23 @@ declare module '@tanstack/react-router' {
 
 interface AppRouteChildren {
   AppAliasesNameRoute: typeof AppAliasesNameRoute
+  AppProvidersProviderIdRoute: typeof AppProvidersProviderIdRoute
+  AppoverviewIndexRoute: typeof AppoverviewIndexRoute
   AppAliasesIndexRoute: typeof AppAliasesIndexRoute
   AppKeysIndexRoute: typeof AppKeysIndexRoute
   AppLogsIndexRoute: typeof AppLogsIndexRoute
+  AppProvidersIndexRoute: typeof AppProvidersIndexRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppAliasesNameRoute: AppAliasesNameRoute,
+  AppProvidersProviderIdRoute: AppProvidersProviderIdRoute,
+  AppoverviewIndexRoute: AppoverviewIndexRoute,
   AppAliasesIndexRoute: AppAliasesIndexRoute,
   AppKeysIndexRoute: AppKeysIndexRoute,
   AppLogsIndexRoute: AppLogsIndexRoute,
+  AppProvidersIndexRoute: AppProvidersIndexRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,
 }
 

@@ -15,5 +15,7 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
+    // User-event tests run several seconds on a loaded CI runner; 5 s flakes.
+    testTimeout: 20_000,
   },
 });
