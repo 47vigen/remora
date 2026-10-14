@@ -1,5 +1,6 @@
 import { ComboBox, FieldError, Header, Input, Label, ListBox } from "@heroui/react";
-import { useState } from "react";
+import { use, useState } from "react";
+import { ComboBoxStateContext } from "react-aria-components";
 
 export type AddComboSection = { title: string; items: readonly string[] };
 
@@ -37,7 +38,8 @@ export function AddCombo({
     <ComboBox
       allowsCustomValue
       allowsEmptyCollection
-      menuTrigger="input"
+      // Opened by typing (see CommitInput), so clearing the box after an add does not reopen the list.
+      menuTrigger="manual"
       inputValue={text}
       onInputChange={change}
       selectedKey={null}
@@ -49,16 +51,7 @@ export function AddCombo({
     >
       <Label>{label}</Label>
       <ComboBox.InputGroup>
-        <Input
-          placeholder={placeholder}
-          onKeyDown={(e) => {
-            // Enter with no highlighted suggestion adds the typed text as it is.
-            if (e.key === "Enter" && !e.currentTarget.getAttribute("aria-activedescendant")) {
-              e.preventDefault();
-              commit(text);
-            }
-          }}
-        />
+        <CommitInput placeholder={placeholder} onCommit={() => commit(text)} />
         <ComboBox.Trigger />
       </ComboBox.InputGroup>
       <FieldError>{error}</FieldError>
@@ -77,5 +70,25 @@ export function AddCombo({
         </ListBox>
       </ComboBox.Popover>
     </ComboBox>
+  );
+}
+
+/** The text input; Enter with no highlighted suggestion adds the typed text as it is and closes the list. */
+function CommitInput({ placeholder, onCommit }: { placeholder?: string; onCommit(): void }) {
+  const state = use(ComboBoxStateContext);
+  return (
+    <Input
+      placeholder={placeholder}
+      onInput={() => {
+        if (state && !state.isOpen) state.open(null, "input");
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" && !e.currentTarget.getAttribute("aria-activedescendant")) {
+          e.preventDefault();
+          onCommit();
+          state?.close();
+        }
+      }}
+    />
   );
 }

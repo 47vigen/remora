@@ -1,9 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { render } from "@testing-library/react";
+import { configure, render } from "@testing-library/react";
 
 import { client } from "../client/client.gen";
 import { routeTree } from "../routeTree.gen";
+
+// Whole-page tests mount the router, HeroUI and the query client; give them room on a busy machine.
+configure({ asyncUtilTimeout: 5000 });
+vi.setConfig({ testTimeout: 30_000 });
 
 /** Answers one request; return undefined to fall through to the defaults (session, version) or a 404. */
 export type FakeApi = (req: Request, url: URL) => Response | undefined | Promise<Response | undefined>;

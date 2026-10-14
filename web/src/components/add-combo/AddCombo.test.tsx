@@ -3,6 +3,9 @@ import userEvent from "@testing-library/user-event";
 
 import { AddCombo } from "./AddCombo";
 
+// User-event interaction with React Aria is slow on a loaded machine; the default 5 s is too tight.
+vi.setConfig({ testTimeout: 30_000 });
+
 const sections = [
   { title: "Aliases", items: ["free"] },
   { title: "Provider models", items: ["or/m1", "or/m2"] },

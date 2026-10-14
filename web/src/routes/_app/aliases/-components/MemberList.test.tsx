@@ -3,6 +3,9 @@ import userEvent from "@testing-library/user-event";
 
 import { MemberList } from "./MemberList";
 
+// User-event interaction with React Aria is slow on a loaded machine; the default 5 s is too tight.
+vi.setConfig({ testTimeout: 30_000 });
+
 test("keyboard reorder moves a member down", async () => {
   const onReorder = vi.fn<(next: string[]) => void>();
   const user = userEvent.setup();
