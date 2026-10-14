@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
+	"github.com/47vigen/remora/internal/store"
 )
 
 // wsEcho is a fake front-door WebSocket that records each frame and echoes it back; reply, when set, answers
@@ -347,5 +349,43 @@ func TestWS_AliasKindMustBeChat(t *testing.T) {
 	frame := createFrame("fast")
 	if got := wsRoundTrip(t, c, frame); got != frame {
 		t.Fatalf("chat alias echo = %q, want %q", got, frame)
+	}
+}
+
+func TestWS_KeyChangeAppliesToOpenSocket(t *testing.T) {
+	f := newFixture(t)
+	echo := &wsEcho{}
+	f.upstream(echo.handler(t))
+	c, _, err := f.dialWS(t, keyLimited)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	frame := createFrame("fast")
+	if got := wsRoundTrip(t, c, frame); got != frame {
+		t.Fatalf("before the change: echo = %q", got)
+	}
+	// Narrow the key while the socket stays open.
+	err = f.st.Write(t.Context(), func(tx *store.Tx) error {
+		keys, err := tx.ClientKeys(t.Context())
+		if err != nil {
+			return err
+		}
+		for _, k := range keys {
+			if k.Name == "limited" {
+				k.Allow = []string{"up-a/*"}
+				_, err = tx.PutClientKey(t.Context(), k, "")
+				return err
+			}
+		}
+		return errors.New("key limited not found")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := wsRoundTrip(t, c, frame); !strings.Contains(got, `"model_not_allowed"`) {
+		t.Fatalf("after narrowing the key: %s, want model_not_allowed", got)
+	}
+	if n := len(echo.recorded()); n != 1 {
+		t.Fatalf("upstream recorded %d frames, want 1", n)
 	}
 }

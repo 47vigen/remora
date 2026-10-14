@@ -34,7 +34,8 @@ const nativeErrorKey = "is_bifrost_error"
 // maxErrorBody is how much of an upstream error body remora reads to map and scrub it. A larger body is replaced.
 const maxErrorBody = 1 << 20
 
-// maxSSELine is the longest SSE line remora holds to inspect; a longer line is forwarded as it arrives, unread.
+// maxSSELine is the longest SSE line remora holds to inspect; a longer line is forwarded as it arrives, unread,
+// unless it may be an error event, which is replaced with remora's own error.
 const maxSSELine = 1 << 20
 
 var (
@@ -213,8 +214,7 @@ func orNull(r json.RawMessage) json.RawMessage {
 // front door's native envelope becomes the route's error shape s, and any other error event (a top-level "error" key or
 // "type":"error") is scrubbed. Content events are never touched.
 func rewriteSSELine(line []byte, s shape) []byte {
-	if !bytes.HasPrefix(line, []byte("data:")) ||
-		!bytes.Contains(line, []byte(`"error"`)) && !bytes.Contains(line, []byte(nativeErrorKey)) {
+	if !mayBeSSEError(line) {
 		return line
 	}
 	payload := line[len("data:"):]
@@ -239,6 +239,12 @@ func rewriteSSELine(line []byte, s shape) []byte {
 	return append(res, ending...)
 }
 
+// mayBeSSEError reports whether an SSE line is one rewriteSSELine could treat as an error event.
+func mayBeSSEError(line []byte) bool {
+	return bytes.HasPrefix(line, []byte("data:")) &&
+		(bytes.Contains(line, []byte(`"error"`)) || bytes.Contains(line, []byte(nativeErrorKey)))
+}
+
 // isErrorEvent reports whether an event payload is an error: a JSON object with a top-level "error" key or
 // "type":"error".
 func isErrorEvent(body []byte) bool {
@@ -261,6 +267,7 @@ type sseScrubber struct {
 	line        []byte // the current line, being assembled
 	pending     []byte // bytes ready for the caller
 	passthrough bool   // inside an over-long line: forward it unread until its newline
+	discard     bool   // inside an over-long line that may be an error: drop it until its newline
 	err         error
 }
 
@@ -292,6 +299,14 @@ func (s *sseScrubber) fill() {
 	case s.passthrough:
 		s.pending, s.line = s.line, nil
 		s.passthrough = full
+	case s.discard:
+		s.line = nil
+		s.discard = full
+	case full && len(s.line) > maxSSELine && mayBeSSEError(s.line):
+		// Too long to inspect, and it may carry an engine error: replace it rather than forward it unscrubbed.
+		s.pending = append(append([]byte("data: "), errUpstreamBody(http.StatusBadGateway).body(s.shape)...), '\n')
+		s.line = nil
+		s.discard = true
 	case full && len(s.line) > maxSSELine:
 		s.pending, s.line = s.line, nil
 		s.passthrough = true

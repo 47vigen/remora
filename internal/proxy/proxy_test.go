@@ -870,3 +870,20 @@ func TestProxy_AliasesUnreadableFailsClosed(t *testing.T) {
 		t.Errorf("front door called %d times with unreadable aliases", n)
 	}
 }
+
+func TestProxy_SSEOversizedErrorReplaced(t *testing.T) {
+	f := newFixture(t)
+	big := "data: {\"error\":{\"message\":\"bifrost sk-bf-leak " + strings.Repeat("x", maxSSELine+(64<<10)) + "\"}}\n\n"
+	f.upstream(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[]}\n\n"+big+"data: [DONE]\n\n")
+	})
+	resp := f.do(t, http.MethodPost, "/v1/chat/completions", keyFull, "application/json", chatBody("fast"), nil)
+	body := string(resp.Body)
+	if strings.Contains(body, "bifrost") || strings.Contains(body, "sk-bf-") || strings.Contains(body, "xxxx") {
+		t.Fatalf("oversized error line forwarded: %d bytes", len(body))
+	}
+	if !strings.Contains(body, `"upstream_error"`) || !strings.HasSuffix(body, "data: [DONE]\n\n") {
+		t.Errorf("body = %q, want remora's error then the rest of the stream", body)
+	}
+}

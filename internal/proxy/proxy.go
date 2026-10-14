@@ -175,10 +175,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // authenticate finds the enabled client key the request presents (Authorization: Bearer, else x-api-key). On
 // failure it writes the error and returns false.
 func (p *Proxy) authenticate(w http.ResponseWriter, r *http.Request, sh shape) (store.ClientKey, bool) {
-	value := bearer(r.Header.Get("Authorization"))
-	if value == "" {
-		value = strings.TrimSpace(r.Header.Get("X-Api-Key"))
-	}
+	value := presentedKey(r)
 	if value == "" {
 		errInvalidKey.write(w, sh)
 		return store.ClientKey{}, false
@@ -197,6 +194,14 @@ func (p *Proxy) authenticate(w http.ResponseWriter, r *http.Request, sh shape) (
 		return store.ClientKey{}, false
 	}
 	return key, true
+}
+
+// presentedKey is the client key value the request presents: Authorization: Bearer, else x-api-key.
+func presentedKey(r *http.Request) string {
+	if v := bearer(r.Header.Get("Authorization")); v != "" {
+		return v
+	}
+	return strings.TrimSpace(r.Header.Get("X-Api-Key"))
 }
 
 func bearer(h string) string {

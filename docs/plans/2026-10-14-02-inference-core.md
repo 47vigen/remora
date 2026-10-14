@@ -104,6 +104,14 @@ where they differ.
   endpoints. When the aliases cannot be read, the request is refused (500), never sent unchecked.
 - A failed `Change` runs its recovery Sync after any engine call, deletions included, so a pass that only deleted
   re-creates what the rolled-back store still holds.
+- Every alias member, the first included, must name a provider with a key; otherwise the alias is invalid (skipped
+  in a Sync), because the engine refuses a keyless rule target as it refuses a keyless fallback.
+- The Responses WebSocket re-reads the client key on every `response.create`, so a key disabled, deleted or narrowed
+  while a socket is open applies to its next frame.
+- An SSE line over 1 MiB that may be an error event is replaced with remora's own error instead of being forwarded
+  unscrubbed; other long lines still pass through as they arrive.
+- `remora.yaml` must be one YAML document; a second one is an error, since the file is the whole truth.
+- `remora serve` writes its log through the same scrubber as `/v1`.
 - `remora apply` prints each generated client key value before it changes anything: when the output fails, nothing
   is stored; when the change fails afterwards, the error says the printed keys were not stored. Its error output
   passes through the same engine-name scrubber as `/v1`.

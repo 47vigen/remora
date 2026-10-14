@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -29,5 +31,13 @@ func TestNewServer_NoWriteTimeout(t *testing.T) {
 	}
 	if srv.ReadHeaderTimeout != readHeaderTimeout {
 		t.Errorf("ReadHeaderTimeout = %v, want %v", srv.ReadHeaderTimeout, readHeaderTimeout)
+	}
+}
+
+func TestServeLoggerScrubs(t *testing.T) {
+	var b bytes.Buffer
+	newServeLogger(&b, slog.LevelInfo).Error("reconcile: sync", "err", errors.New("bifrost: status 500 (key sk-bf-abc)"))
+	if out := b.String(); strings.Contains(strings.ToLower(out), "bifrost") || strings.Contains(out, "sk-bf-") {
+		t.Fatalf("log = %s, want engine words and keys scrubbed", out)
 	}
 }

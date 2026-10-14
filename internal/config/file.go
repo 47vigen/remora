@@ -74,6 +74,11 @@ func Parse(b []byte) (File, error) {
 	if err := dec.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
 		return File{}, fmt.Errorf("remora.yaml: %w", err)
 	}
+	// The file is the whole truth, so a second document must not be ignored silently.
+	var extra yaml.Node
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		return File{}, errors.New("remora.yaml: more than one YAML document; put everything in one")
+	}
 	if err := f.Validate(); err != nil {
 		return File{}, err
 	}

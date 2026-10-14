@@ -34,12 +34,18 @@ func runServe(ctx context.Context, getenv func(string) string, stderr io.Writer)
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
-	logger := slog.New(slog.NewJSONHandler(stderr, &slog.HandlerOptions{Level: cfg.LogLevel}))
+	logger := newServeLogger(stderr, cfg.LogLevel)
 	if err := serve(ctx, cfg, logger); err != nil {
 		logger.Error("serve failed", "err", err)
 		return 1
 	}
 	return 0
+}
+
+// newServeLogger logs JSON records to w through the same scrubber as /v1, so engine names and keys in an error
+// chain (a failed reconcile, say) never reach the operator's log. slog writes each record in one Write.
+func newServeLogger(w io.Writer, level slog.Leveler) *slog.Logger {
+	return slog.New(slog.NewJSONHandler(scrubWriter{w}, &slog.HandlerOptions{Level: level}))
 }
 
 // serve prepares the data directory, the store and the engine credentials, starts the engines and then serves the

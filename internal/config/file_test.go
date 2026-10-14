@@ -105,3 +105,10 @@ func TestSecretRef(t *testing.T) {
 		}
 	}
 }
+
+func TestParseRejectsSecondDocument(t *testing.T) {
+	src := "---\n---\nproviders:\n  - {name: up, kind: openai-compatible, base_url: \"http://up.test/v1\"}\n"
+	if _, err := Parse([]byte(src)); err == nil || !strings.Contains(err.Error(), "more than one YAML document") {
+		t.Fatalf("Parse = %v, want the one-document error", err)
+	}
+}

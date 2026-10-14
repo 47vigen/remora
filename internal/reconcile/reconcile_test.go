@@ -770,3 +770,25 @@ func TestChange_RecoveryAfterFailedDeletes(t *testing.T) {
 		t.Errorf("Sync after recovery made calls %q", ops(got))
 	}
 }
+
+func TestSync_PrimaryTargetWithoutKeySkipped(t *testing.T) {
+	h := newHarness(t)
+	h.base(t)
+	// up-c has no key: it cannot be a rule target, first member or not.
+	h.write(t, func(ctx context.Context, tx *store.Tx) error {
+		if err := tx.PutProvider(ctx, custom("up-c")); err != nil {
+			return err
+		}
+		return tx.PutAlias(ctx, chat("keyless", "up-c/m1", "up-a/m1"))
+	})
+	h.sync(t)
+	if len(h.eng.RulesNamed(RuleName("keyless"))) != 0 {
+		t.Error("rule pushed with a keyless provider as its target")
+	}
+	if len(h.eng.RulesNamed(RuleName("fast"))) != 1 {
+		t.Error("rule for fast missing: the bad alias blocked the pass")
+	}
+	if !strings.Contains(h.log.String(), "alias=keyless") || !strings.Contains(h.log.String(), "has no key") {
+		t.Errorf("log = %q", h.log.String())
+	}
+}

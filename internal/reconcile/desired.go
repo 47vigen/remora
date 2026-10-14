@@ -258,12 +258,13 @@ func (r *Reconciler) aliasRule(all map[string]alias.Alias, name string, isProvid
 		if !isTarget(t.Provider) {
 			return bifrost.RoutingRule{}, invalid("alias %q: member %s/%s: no provider %q", name, t.Provider, t.Model, t.Provider)
 		}
+		// The engine refuses a rule whose target or fallback names a provider without a key.
+		if !fallbackOK(t.Provider) {
+			return bifrost.RoutingRule{}, invalid("alias %q: member %s/%s: provider %q has no key", name, t.Provider, t.Model, t.Provider)
+		}
 		if i == 0 {
 			rule.Target = bifrost.Route(t)
 			continue
-		}
-		if !fallbackOK(t.Provider) {
-			return bifrost.RoutingRule{}, invalid("alias %q: fallback %s/%s: provider %q has no key", name, t.Provider, t.Model, t.Provider)
 		}
 		rule.Fallbacks = append(rule.Fallbacks, bifrost.Route(t))
 	}

@@ -108,10 +108,7 @@ func (p *Proxy) serveResponsesWS(w http.ResponseWriter, r *http.Request, key sto
 	}
 	ends := make(chan end, 2)
 	go func() {
-		ends <- end{fromClient: true, err: relayClientFrames(relayCtx, client, up, func(model string) *apiError {
-			_, e := p.checkAliasKind(relayCtx, model, alias.KindChat, "/v1/responses")
-			return e
-		}, key.Allow)}
+		ends <- end{fromClient: true, err: relayClientFrames(relayCtx, client, up, p.wsModelCheck(relayCtx, presentedKey(r)))}
 	}()
 	go func() { ends <- end{fromClient: false, err: relayServerFrames(relayCtx, up, client)} }()
 
@@ -158,13 +155,13 @@ func (p *Proxy) runWSHooks(w http.ResponseWriter, r *http.Request, upResp *http.
 
 // relayClientFrames copies the client's messages to the front door until either side fails, answering a denied
 // message itself instead of forwarding it.
-func relayClientFrames(ctx context.Context, client, up *websocket.Conn, kindCheck func(string) *apiError, allow []string) error {
+func relayClientFrames(ctx context.Context, client, up *websocket.Conn, check func(model string) *apiError) error {
 	for {
 		typ, data, err := client.Read(ctx)
 		if err != nil {
 			return err
 		}
-		if e := checkClientFrame(data, allow, kindCheck); e != nil {
+		if e := checkClientFrame(data, check); e != nil {
 			if err := client.Write(ctx, websocket.MessageText, e.wsEvent()); err != nil {
 				return err
 			}
@@ -196,7 +193,7 @@ func relayServerFrames(ctx context.Context, up, client *websocket.Conn) error {
 // passes unchecked only when it is a JSON object with exactly one "type" key, spelled exactly, naming another
 // event; anything that could be read as a response.create (the engine's decoder matches keys case-insensitively)
 // is checked like an HTTP request body: one "model", no "fallbacks", and the model allowed for the key.
-func checkClientFrame(data []byte, allow []string, kindCheck func(string) *apiError) *apiError {
+func checkClientFrame(data []byte, check func(model string) *apiError) *apiError {
 	if !mayBeCreate(data) {
 		return nil
 	}
@@ -206,14 +203,30 @@ func checkClientFrame(data []byte, allow []string, kindCheck func(string) *apiEr
 		return &errClientFallbacks
 	case err != nil:
 		return &errModelRequired
-	case !Allowed(allow, model):
-		e := errModelNotAllowed(model)
-		return &e
 	}
-	if kindCheck != nil {
-		return kindCheck(model)
+	return check(model)
+}
+
+// wsModelCheck checks the model of one response.create frame against the client key as it is now, not as it was
+// at the handshake: a key disabled, deleted or narrowed while the socket is open applies to its next frame.
+func (p *Proxy) wsModelCheck(ctx context.Context, value string) func(model string) *apiError {
+	return func(model string) *apiError {
+		key, err := p.store.ClientKeyByValue(ctx, value)
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			return &errInvalidKey
+		case err != nil:
+			p.log.ErrorContext(ctx, "proxy: look up client key", slog.Any("err", err))
+			return &errInternal
+		case !key.Enabled:
+			return &errInvalidKey
+		case !Allowed(key.Allow, model):
+			e := errModelNotAllowed(model)
+			return &e
+		}
+		_, e := p.checkAliasKind(ctx, model, alias.KindChat, "/v1/responses")
+		return e
 	}
-	return nil
 }
 
 // mayBeCreate reports whether the engine could read data as a response.create event.
