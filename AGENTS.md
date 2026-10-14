@@ -43,7 +43,8 @@ Run both before you call a change done:
 
 ## Rules
 
-- English only in files.
+- English only in files. The one exception is test data: streaming and transcription fixtures carry Persian text
+  with ZWNJ (U+200C) on purpose, compared byte for byte (see `docs/plans/README.md`, Testing).
 - Conventional Commits with scopes; one branch and one pull request per plan.
 - Never edit `engines/`. Move an engine only through `engines/versions.env` plus the submodule pin.
 - No owner infrastructure, host names, keys or product names anywhere, including fixtures.
