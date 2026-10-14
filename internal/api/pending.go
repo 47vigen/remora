@@ -15,16 +15,6 @@ func (s *Server) GetKeyUsage(context.Context, gen.GetKeyUsageRequestObject) (gen
 	return nil, errNotImplemented
 }
 
-// ListLogs is not implemented yet.
-func (s *Server) ListLogs(context.Context, gen.ListLogsRequestObject) (gen.ListLogsResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// GetLog is not implemented yet.
-func (s *Server) GetLog(context.Context, gen.GetLogRequestObject) (gen.GetLogResponseObject, error) {
-	return nil, errNotImplemented
-}
-
 // GetStats is not implemented yet.
 func (s *Server) GetStats(context.Context, gen.GetStatsRequestObject) (gen.GetStatsResponseObject, error) {
 	return nil, errNotImplemented

@@ -511,6 +511,21 @@ type fakeLogs struct {
 	histCalls  []bifrost.LogFilter
 }
 
+func (f *fakeLogs) add(rows ...bifrost.Log) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rows = append(f.rows, rows...)
+}
+
+func (f *fakeLogs) lastSearch() (bifrost.LogFilter, int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.searches) == 0 {
+		return bifrost.LogFilter{}, 0
+	}
+	return f.searches[len(f.searches)-1], len(f.searches)
+}
+
 func anyOf(set []string, v *string) bool {
 	if len(set) == 0 {
 		return true

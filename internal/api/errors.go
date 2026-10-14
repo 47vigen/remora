@@ -9,6 +9,7 @@ import (
 	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/auth"
 	"github.com/47vigen/remora/internal/config"
+	"github.com/47vigen/remora/internal/engine/bifrost"
 	"github.com/47vigen/remora/internal/reconcile"
 	"github.com/47vigen/remora/internal/store"
 )
@@ -62,7 +63,7 @@ func toAPIError(err error) apiError {
 		return apiError{http.StatusBadRequest, typeInvalidRequest, "invalid_request", string(br)}
 	case errors.As(err, &re):
 		return apiError{http.StatusBadRequest, typeInvalidRequest, "invalid_request", "Invalid request: " + re.Error()}
-	case errors.Is(err, store.ErrNotFound):
+	case errors.Is(err, store.ErrNotFound), errors.Is(err, bifrost.ErrNotFound):
 		return apiError{http.StatusNotFound, typeNotFound, "not_found", "Not found."}
 	case errors.Is(err, store.ErrDuplicate):
 		return apiError{http.StatusConflict, typeInvalidRequest, "conflict", "Already exists."}
