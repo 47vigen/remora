@@ -240,8 +240,8 @@ func engineProvider(p store.Provider, reserved, internal map[string]bool) (bifro
 	return bp, nil
 }
 
-// aliasRule validates one alias and builds its routing rule: the compiled chain is validated whole, then members on
-// a reserved (subscription) provider are mapped by ToEngineTarget. The first target is the rule's target, the rest
+// aliasRule validates one alias and builds its routing rule: the compiled chain is validated whole, Filter drops
+// cooling members, and members on a reserved (subscription) provider are mapped by ToEngineTarget. The first target is the rule's target, the rest
 // are its fallbacks.
 func (r *Reconciler) aliasRule(all map[string]alias.Alias, name string, isProvider, isTarget, fallbackOK func(string) bool, reserved map[string]bool) (bifrost.RoutingRule, error) {
 	if err := alias.ValidName(name); err != nil {
@@ -261,6 +261,11 @@ func (r *Reconciler) aliasRule(all map[string]alias.Alias, name string, isProvid
 		// The engine refuses a rule whose target or fallback names a provider without a key.
 		if !fallbackOK(t.Provider) {
 			return bifrost.RoutingRule{}, invalid("alias %q: member %s/%s: provider %q has no key", name, t.Provider, t.Model, t.Provider)
+		}
+	}
+	if r.Filter != nil && len(targets) > 0 {
+		if kept := r.Filter(slices.Clone(targets)); len(kept) > 0 {
+			targets = kept
 		}
 	}
 	rule := bifrost.RoutingRule{Name: RuleName(name), CEL: RuleCEL(name)}

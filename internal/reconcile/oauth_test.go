@@ -6,8 +6,10 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/47vigen/remora/internal/alias"
+	"github.com/47vigen/remora/internal/cooling"
 	"github.com/47vigen/remora/internal/engine/bifrost"
 	"github.com/47vigen/remora/internal/engine/cliproxyapi"
 	"github.com/47vigen/remora/internal/store"
@@ -169,5 +171,38 @@ func TestReconcileRunsAlso(t *testing.T) {
 	}
 	if len(calls) != 1 {
 		t.Errorf("Also ran %d times, want 1", len(calls))
+	}
+}
+
+func TestReconcileFiltersCooling(t *testing.T) {
+	h := newHarness(t)
+	h.withOAuth()
+	or := store.Provider{Name: "openrouter", Kind: store.KindBuiltin, Type: "openrouter"}
+	h.write(t, putAll([]store.Provider{or}, chat("pair", "openrouter/a", "openrouter/b"), chat("sub", "codex/gpt-x", "openrouter/b")))
+
+	ctx := context.Background()
+	cl := cooling.New(cooling.Config{}, h.rec.Sync, nil, nil)
+	h.rec.Filter = cl.Filter
+	h.sync(t)
+	if rs := h.eng.RulesNamed(RuleName("pair")); len(rs) != 1 || rs[0].Target != (bifrost.Route{Provider: "openrouter", Model: "a"}) {
+		t.Fatalf("before cooling: %+v", rs)
+	}
+
+	// A cooling member leaves the chain; Observe runs apply, which is Sync.
+	if err := cl.Observe(ctx, cooling.Event{At: time.Now(), Target: alias.Target{Provider: "openrouter", Model: "a"}, StatusCode: 402}); err != nil {
+		t.Fatal(err)
+	}
+	rs := h.eng.RulesNamed(RuleName("pair"))
+	if len(rs) != 1 || rs[0].Target != (bifrost.Route{Provider: "openrouter", Model: "b"}) || len(rs[0].Fallbacks) != 0 {
+		t.Fatalf("pair while a cools = %+v", rs)
+	}
+
+	// The filter sees user names: a cooling codex member is dropped before it is mapped to the OAuth engine.
+	if err := cl.Observe(ctx, cooling.Event{At: time.Now(), Target: alias.Target{Provider: "codex", Model: "gpt-x"}, StatusCode: 402}); err != nil {
+		t.Fatal(err)
+	}
+	rs = h.eng.RulesNamed(RuleName("sub"))
+	if len(rs) != 1 || rs[0].Target != (bifrost.Route{Provider: "openrouter", Model: "b"}) || len(rs[0].Fallbacks) != 0 {
+		t.Fatalf("sub while codex cools = %+v", rs)
 	}
 }

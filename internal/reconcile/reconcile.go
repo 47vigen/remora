@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/engine/bifrost"
 	"github.com/47vigen/remora/internal/store"
 )
@@ -71,6 +72,9 @@ type Reconciler struct {
 	Internal      []InternalProvider    // pushed like store providers, never deleted, valid as alias member providers
 	InternalRules []bifrost.RoutingRule // pushed by name like alias rules, never deleted (plan 03: one "remora-oauth-<name>" per OAuth provider); Priority as RulePriorityBase says
 	Reserved      []string              // user-facing OAuth provider names: no store provider may take one; valid as alias member providers, mapped by ToEngineTarget
+	// Filter, when set, drops members from a compiled alias chain before it becomes a routing rule (cooling). It sees
+	// user-facing targets, after the chain is validated, and an empty result leaves the chain whole.
+	Filter func(chain []alias.Target) []alias.Target
 	// Also runs in every SyncAll (so in every Run pass) before the front-door pass: work that belongs to the same
 	// reconcile cycle, such as the OAuth engine's own reconciliation. Errors are joined with the pass's.
 	Also     []func(ctx context.Context) error

@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 )
 
 func envFrom(m map[string]string) func(string) string {
@@ -62,6 +63,7 @@ func TestLoadOverrides(t *testing.T) {
 		EngineDir:     "/opt/e",
 		MasterKey:     "a2V5",
 		Ports:         Ports{Bifrost: 28080, CLIProxyAPI: 18317, Soniox: 18090},
+		Cooling:       Cooling{Count429: 3, Window429: time.Minute, Default: 5 * time.Minute, Poll: time.Second},
 	}
 	if c != want {
 		t.Errorf("Load = %+v, want %+v", c, want)
