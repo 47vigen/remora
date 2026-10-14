@@ -243,11 +243,11 @@ func (p *pass) run(ctx context.Context) error {
 	return nil
 }
 
-// mutate marks obj touched, then calls fn. A delete of something already gone is not an error.
+// mutate marks obj touched, then calls fn. A delete of something already gone is not an error. A delete is
+// recorded under "", which forces nothing but still makes a failed Change run its recovery Sync: a pass that only
+// deleted must re-create what the rolled-back store still holds.
 func (p *pass) mutate(obj string, fn func() error) error {
-	if obj != "" {
-		p.touched[obj] = true
-	}
+	p.touched[obj] = true
 	err := fn()
 	if errors.Is(err, bifrost.ErrNotFound) && obj == "" {
 		return nil

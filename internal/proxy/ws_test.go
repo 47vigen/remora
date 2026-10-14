@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -311,5 +312,40 @@ func TestWS_ClientClosePropagates(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("upstream never saw the close")
+	}
+}
+
+func TestWS_NotReadyUntilSynced(t *testing.T) {
+	f := newFixture(t)
+	echo := &wsEcho{}
+	f.upstream(echo.handler(t))
+	var ready atomic.Bool
+	f.px.Ready = ready.Load
+	if _, status, err := f.dialWS(t, keyFull); err == nil || status != http.StatusServiceUnavailable {
+		t.Fatalf("before sync: status %d err %v, want a refused 503 handshake", status, err)
+	}
+	ready.Store(true)
+	if _, _, err := f.dialWS(t, keyFull); err != nil {
+		t.Fatalf("after sync: %v", err)
+	}
+}
+
+func TestWS_AliasKindMustBeChat(t *testing.T) {
+	f := newFixture(t)
+	echo := &wsEcho{}
+	f.upstream(echo.handler(t))
+	c, _, err := f.dialWS(t, keyFull)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	if got := wsRoundTrip(t, c, createFrame("emb")); !strings.Contains(got, `"model_kind_mismatch"`) {
+		t.Fatalf("embeddings alias over the socket: %s, want model_kind_mismatch", got)
+	}
+	if n := len(echo.recorded()); n != 0 {
+		t.Fatalf("upstream recorded %d frames, want 0", n)
+	}
+	frame := createFrame("fast")
+	if got := wsRoundTrip(t, c, frame); got != frame {
+		t.Fatalf("chat alias echo = %q, want %q", got, frame)
 	}
 }

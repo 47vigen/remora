@@ -164,11 +164,33 @@ func applyFile(ctx context.Context, r *reconcile.Reconciler, f config.File, gete
 		clientValues[i] = v
 	}
 
-	var generated []string    // "<name>: <value>" lines, printed after the commit
-	var generatedIDs []string // their key ids, removed again when printing fails
+	// A key that needs a generated value is shown before anything is stored: when the output fails, nothing is
+	// committed, and no stored key exists whose value nobody saw. When the change fails after the values were
+	// shown, they were never stored, and the error says so.
+	var existing []store.ClientKey
+	if err := r.Store.Write(ctx, func(tx *store.Tx) (err error) {
+		existing, err = tx.ClientKeys(ctx)
+		return err
+	}); err != nil {
+		return err
+	}
+	had := map[string]bool{}
+	for _, k := range existing {
+		had[k.Name] = true
+	}
+	generated := map[string]bool{}
+	for i, k := range f.Keys {
+		if had[k.Name] || clientValues[i] != "" {
+			continue
+		}
+		clientValues[i] = store.GenerateKeyValue()
+		generated[k.Name] = true
+		if _, err := fmt.Fprintln(out, k.Name+": "+clientValues[i]); err != nil {
+			return fmt.Errorf("print generated keys: %w; nothing was changed", err)
+		}
+	}
+
 	err := r.Change(ctx, func(ctx context.Context, tx *store.Tx) error {
-		generated = generated[:0]
-		generatedIDs = generatedIDs[:0]
 		if err := removeUnlisted(ctx, tx, f); err != nil {
 			return err
 		}
@@ -196,43 +218,21 @@ func applyFile(ctx context.Context, r *reconcile.Reconciler, f config.File, gete
 			ids[k.Name] = k.ID
 		}
 		for i, k := range f.Keys {
-			value := clientValues[i]
 			id := ids[k.Name]
-			if id == "" && value == "" {
-				value = store.GenerateKeyValue()
-				generated = append(generated, k.Name+": "+value)
+			if id != "" && generated[k.Name] {
+				return fmt.Errorf("client key %q was created while apply ran", k.Name)
 			}
 			enabled := k.Enabled == nil || *k.Enabled
-			saved, err := tx.PutClientKey(ctx, store.ClientKey{ID: id, Name: k.Name, Allow: k.Allow, Enabled: enabled}, value)
-			if err != nil {
+			if _, err := tx.PutClientKey(ctx, store.ClientKey{ID: id, Name: k.Name, Allow: k.Allow, Enabled: enabled}, clientValues[i]); err != nil {
 				return err
-			}
-			if id == "" && clientValues[i] == "" {
-				generatedIDs = append(generatedIDs, saved.ID)
 			}
 		}
 		return nil
 	})
-	if err != nil {
-		return err
+	if err != nil && len(generated) > 0 {
+		return fmt.Errorf("%w; the generated keys printed above were not stored, apply again", err)
 	}
-	for _, line := range generated {
-		if _, err := fmt.Fprintln(out, line); err != nil {
-			// The value was shown nowhere: remove the keys again, so the next apply generates and prints new ones.
-			if rerr := r.Change(ctx, func(ctx context.Context, tx *store.Tx) error {
-				for _, id := range generatedIDs {
-					if err := tx.DeleteClientKey(ctx, id); err != nil {
-						return err
-					}
-				}
-				return nil
-			}); rerr != nil {
-				return fmt.Errorf("print generated keys: %w (removing them again also failed: %w)", err, rerr)
-			}
-			return fmt.Errorf("print generated keys: %w; they were not kept, apply again", err)
-		}
-	}
-	return nil
+	return err
 }
 
 // resolveSecret reads an "env:NAME" reference through getenv. Errors name the field.

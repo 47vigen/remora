@@ -396,3 +396,28 @@ func TestScrubWriter(t *testing.T) {
 		t.Errorf("scrubbed = %q", b.String())
 	}
 }
+
+func TestApplyFile_GeneratedKeyNotStoredWhenChangeFails(t *testing.T) {
+	ctx := context.Background()
+	h := newApplyHarness(t)
+	src := strings.Replace(applyBase, "{name: full, value: env:FULL_KEY, allow: [\"*\"]}", "{name: full, allow: [\"*\"]}", 1)
+	h.eng.FailOnce("CreateProvider")
+	var out bytes.Buffer
+	err := applyFile(ctx, h.rec, parseFile(t, src), testEnv, &out)
+	if err == nil || !strings.Contains(err.Error(), "were not stored") {
+		t.Fatalf("applyFile with a failing engine: err = %v, want the not-stored note", err)
+	}
+	if !regexp.MustCompile(`^full: sk-\S+\n$`).MatchString(out.String()) {
+		t.Errorf("out = %q, want the generated key shown before the change", out.String())
+	}
+	var keys []store.ClientKey
+	if err := h.st.Write(ctx, func(tx *store.Tx) (err error) {
+		keys, err = tx.ClientKeys(ctx)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 0 {
+		t.Fatalf("keys stored by a failed apply: %+v", keys)
+	}
+}

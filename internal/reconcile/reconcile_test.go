@@ -739,3 +739,34 @@ func TestSynced(t *testing.T) {
 		t.Fatal("not Synced after a successful Sync")
 	}
 }
+
+func TestChange_RecoveryAfterFailedDeletes(t *testing.T) {
+	h := newHarness(t)
+	h.base(t)
+	h.write(t, putAll([]store.Provider{custom("up-c")}))
+	h.sync(t)
+	h.eng.Mutations()
+	h.eng.FailOnce("DeleteProvider")
+
+	// Only deletions: the rule and up-c's key go, then deleting up-c fails and the store rolls back.
+	err := h.rec.Change(context.Background(), func(ctx context.Context, tx *store.Tx) error {
+		if err := tx.DeleteAlias(ctx, "fast"); err != nil {
+			return err
+		}
+		return tx.DeleteProvider(ctx, "up-c")
+	})
+	if err == nil {
+		t.Fatal("Change succeeded")
+	}
+	if len(h.eng.RulesNamed(RuleName("fast"))) != 1 {
+		t.Error("rule for fast not restored after the failed change")
+	}
+	if _, ok := h.eng.Key("up-c", "up-c-key"); !ok {
+		t.Error("key of up-c not restored after the failed change")
+	}
+	h.eng.Mutations()
+	h.sync(t)
+	if got := h.eng.Mutations(); len(got) != 0 {
+		t.Errorf("Sync after recovery made calls %q", ops(got))
+	}
+}

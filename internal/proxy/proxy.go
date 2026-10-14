@@ -144,19 +144,20 @@ func infoFrom(ctx context.Context) *reqInfo {
 // ServeHTTP serves one /v1 request.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	sh := shapeFor(r.URL.Path)
-	if r.Method == http.MethodGet && r.URL.Path == "/v1/responses" && isWebSocketUpgrade(r) {
-		if key, ok := p.authenticate(w, r, sh); ok {
-			p.serveResponsesWS(w, r, key)
-		}
-		return
-	}
+	ws := r.Method == http.MethodGet && r.URL.Path == "/v1/responses" && isWebSocketUpgrade(r)
 	rt, ok := routes[r.Method+" "+r.URL.Path]
-	if !ok {
+	if !ok && !ws {
 		errNotFound.write(w, sh)
 		return
 	}
 	if p.Ready != nil && !p.Ready() {
 		errNotReady.write(w, sh)
+		return
+	}
+	if ws {
+		if key, ok := p.authenticate(w, r, sh); ok {
+			p.serveResponsesWS(w, r, key)
+		}
 		return
 	}
 	key, ok := p.authenticate(w, r, sh)
@@ -236,21 +237,37 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt route, sh sha
 	}
 
 	info := &reqInfo{in: r, upstream: rt.upstream, shape: sh, model: model, vk: key.VKValue, body: raw}
-	if aliases, err := p.store.Aliases(ctx); err != nil {
-		p.log.WarnContext(ctx, "proxy: load aliases", slog.Any("err", err))
-	} else if a, ok := aliases[model]; ok {
-		if a.Kind != rt.aliasKind {
-			errAliasKind(model, a.Kind, r.URL.Path).write(w, sh)
-			return
-		}
-		info.isAlias = true
+	isAlias, e := p.checkAliasKind(ctx, model, rt.aliasKind, r.URL.Path)
+	if e != nil {
+		e.write(w, sh)
+		return
 	}
+	info.isAlias = isAlias
 
 	out := r.WithContext(context.WithValue(ctx, reqInfoKey{}, info))
 	out.Body = io.NopCloser(bytes.NewReader(raw))
 	out.ContentLength = int64(len(raw))
 	out.TransferEncoding = nil
 	p.rp.ServeHTTP(w, out)
+}
+
+// checkAliasKind reports whether model names an alias, and refuses an alias of another kind than the endpoint
+// serves. It fails closed: when the aliases cannot be read, the request is refused rather than sent unchecked.
+func (p *Proxy) checkAliasKind(ctx context.Context, model string, kind alias.Kind, path string) (bool, *apiError) {
+	aliases, err := p.store.Aliases(ctx)
+	if err != nil {
+		p.log.ErrorContext(ctx, "proxy: load aliases", slog.Any("err", err))
+		return false, &errInternal
+	}
+	a, ok := aliases[model]
+	if !ok {
+		return false, nil
+	}
+	if a.Kind != kind {
+		e := errAliasKind(model, a.Kind, path)
+		return true, &e
+	}
+	return true, nil
 }
 
 // rewrite points the outbound request at the front door and replaces every client credential and engine control

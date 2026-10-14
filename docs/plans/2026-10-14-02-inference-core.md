@@ -97,12 +97,16 @@ where they differ.
 - `serve` sets up the sealer before the engines start (a bad master key fails fast), runs the first Sync before the
   listener opens (a wiped engine never meets a `/v1` request first), then reconciles on the timer. The management
   client has a 30 s timeout and ignores proxy environment variables.
-- `/v1` answers 503 `not_ready` until a Sync has completed (`Reconciler.Synced`), so a failed first pass never serves
-  a stale front door; `/healthz` and the management API stay reachable. An alias is refused (400
-  `model_kind_mismatch`) on an endpoint of another kind: chat on chat completions, responses and messages; embeddings,
-  transcription and decisions on their own endpoints.
-- `remora apply` removes a generated client key again when printing its value fails, so the next apply generates a
-  new one; its error output passes through the same engine-name scrubber as `/v1`.
+- `/v1`, the Responses WebSocket included, answers 503 `not_ready` until a Sync has completed (`Reconciler.Synced`),
+  so a failed first pass never serves a stale front door; `/healthz` and the management API stay reachable. An alias
+  is refused (400 `model_kind_mismatch`) on an endpoint of another kind: chat on chat completions, responses (HTTP
+  and every WebSocket `response.create`) and messages; embeddings, transcription and decisions on their own
+  endpoints. When the aliases cannot be read, the request is refused (500), never sent unchecked.
+- A failed `Change` runs its recovery Sync after any engine call, deletions included, so a pass that only deleted
+  re-creates what the rolled-back store still holds.
+- `remora apply` prints each generated client key value before it changes anything: when the output fails, nothing
+  is stored; when the change fails afterwards, the error says the printed keys were not stored. Its error output
+  passes through the same engine-name scrubber as `/v1`.
 - The Responses WebSocket checks every client frame the engine could read as `response.create` (its decoder matches
   keys case-insensitively); mapped engine error events carry `"type":"error"`, and remora's own carry `"status"`.
 

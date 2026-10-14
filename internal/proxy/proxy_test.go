@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -44,6 +45,7 @@ type seen struct {
 // fixture is a real store, a fake front door and the proxy in front of it.
 type fixture struct {
 	st      *store.Store
+	dbPath  string
 	px      *Proxy
 	srv     *httptest.Server
 	hits    atomic.Int32
@@ -60,7 +62,8 @@ func okJSON(w http.ResponseWriter, _ *http.Request) {
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	ctx := context.Background()
-	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "remora.db"))
+	dbPath := filepath.Join(t.TempDir(), "remora.db")
+	st, err := store.Open(ctx, dbPath)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
@@ -113,7 +116,7 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatalf("seed store: %v", err)
 	}
 
-	f := &fixture{st: st}
+	f := &fixture{st: st, dbPath: dbPath}
 	h := http.HandlerFunc(okJSON)
 	f.handler.Store(&h)
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -846,5 +849,24 @@ func TestProxy_AliasKindMustMatchEndpoint(t *testing.T) {
 				t.Errorf("%s %s: refused request reached the front door", c.path, c.model)
 			}
 		}
+	}
+}
+
+func TestProxy_AliasesUnreadableFailsClosed(t *testing.T) {
+	f := newFixture(t)
+	db, err := sql.Open("sqlite", f.dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.ExecContext(t.Context(), `UPDATE aliases SET capabilities = 'not a list' WHERE name = 'emb'`); err != nil {
+		t.Fatal(err)
+	}
+	resp := f.do(t, http.MethodPost, "/v1/chat/completions", keyFull, "application/json", chatBody("emb"), nil)
+	if resp.StatusCode != http.StatusInternalServerError || !strings.Contains(string(resp.Body), `"internal_error"`) {
+		t.Fatalf("unreadable aliases: %d %s, want 500 internal_error", resp.StatusCode, resp.Body)
+	}
+	if n := f.hits.Load(); n != 0 {
+		t.Errorf("front door called %d times with unreadable aliases", n)
 	}
 }
