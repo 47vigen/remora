@@ -365,6 +365,10 @@ export type Change = {
      * The fields an update changes; empty for create and delete.
      */
     fields: Array<string>;
+    /**
+     * A client key value apply generated for a new key whose document gives none. Shown once, only in the answer of apply.
+     */
+    value?: string;
 };
 
 export type ConfigChanges = {

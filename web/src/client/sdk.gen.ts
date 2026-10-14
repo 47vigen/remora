@@ -26,15 +26,7 @@ export const getHealth = <ThrowOnError extends boolean = false>(options?: Option
 /**
  * Report the version of remora and of each engine it runs.
  */
-export const getVersion = <ThrowOnError extends boolean = false>(options?: Options<GetVersionData, ThrowOnError>): RequestResult<GetVersionResponses, GetVersionErrors, ThrowOnError> => (options?.client ?? client).get<GetVersionResponses, GetVersionErrors, ThrowOnError>({
-    security: [{
-            in: 'cookie',
-            name: 'remora_session',
-            type: 'apiKey'
-        }, { scheme: 'bearer', type: 'http' }],
-    url: '/api/system/version',
-    ...options
-});
+export const getVersion = <ThrowOnError extends boolean = false>(options?: Options<GetVersionData, ThrowOnError>): RequestResult<GetVersionResponses, GetVersionErrors, ThrowOnError> => (options?.client ?? client).get<GetVersionResponses, GetVersionErrors, ThrowOnError>({ url: '/api/system/version', ...options });
 
 /**
  * Sign in as the admin and receive a session cookie.
