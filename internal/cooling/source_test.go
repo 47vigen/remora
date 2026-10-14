@@ -117,9 +117,8 @@ func TestRunObservesAndExpires(t *testing.T) {
 
 	k.Set(t0.Add(5*time.Minute + time.Second))
 	waitFor(t, "member restored", func() bool { return len(cl.Snapshot()) == 0 })
-	if p.count() < 2 {
-		t.Errorf("apply calls = %d, want cooling and restore", p.count())
-	}
+	// The snapshot changes before the recompile is applied, so wait for the apply rather than read it once.
+	waitFor(t, "cooling and restore applied", func() bool { return p.count() >= 2 })
 }
 
 // TestRunSkipsRowsBeforeStart: the log feed replays recent rows when it starts, so a 402 (or a 429 burst) from before
