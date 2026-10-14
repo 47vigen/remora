@@ -6,6 +6,15 @@
 # Build: make image   (passes BIFROST_VERSION and CLIPROXYAPI_VERSION from engines/versions.env)
 
 # ---------------------------------------------------------------------------
+# web: the console, built by Vite into internal/web/dist and embedded in remora.
+FROM --platform=$BUILDPLATFORM oven/bun:1.4.3 AS web
+WORKDIR /src/web
+COPY web/package.json web/bun.lock ./
+RUN bun install --frozen-lockfile
+COPY web/ ./
+RUN bun run build
+
+# ---------------------------------------------------------------------------
 # remora: cross-compiled on the build platform.
 FROM --platform=$BUILDPLATFORM golang:1.27-trixie AS remora
 ARG TARGETOS
@@ -17,6 +26,7 @@ COPY go.mod go.sum* ./
 RUN go mod download
 COPY cmd/ cmd/
 COPY internal/ internal/
+COPY --from=web /src/internal/web/dist ./internal/web/dist
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
       -ldflags "-s -w -X github.com/47vigen/remora/internal/version.Version=${REMORA_VERSION} -X github.com/47vigen/remora/internal/version.Commit=${REMORA_COMMIT}" \
       -o /out/remora ./cmd/remora

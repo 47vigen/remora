@@ -9,3 +9,8 @@ engines/bifrost/tests/
 engines/bifrost/helm-charts/
 engines/bifrost/terraform/
 engines/cliproxyapi/docs/
+web/node_modules
+web/test-results
+web/playwright-report
+# The web stage builds the console; a local build must not leak into the image.
+internal/web/dist/
