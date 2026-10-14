@@ -33,6 +33,9 @@ type Service struct {
 
 	mu      sync.Mutex
 	pending map[string]*pending // by login state
+
+	recMu             sync.Mutex // serializes Reconcile
+	settingsWrittenAt time.Time  // under recMu: when this process last wrote the settings, zero once they settled
 }
 
 // pending is a login started here. done is set once its credential was adopted.
