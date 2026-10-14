@@ -37,7 +37,7 @@ jobs:
         with:
           go-version-file: go.mod
       # Prints kind= and title= for the outputs and one note line for the
-      # summary; for bump and unfork it stages the gitlink (and, for unfork,
+      # summary; for bump and unfork it stages the gitlink and its versions.env line (and, for unfork,
       # .gitmodules and docs/patches.md).
       - name: Decide
         id: decide
@@ -61,6 +61,7 @@ jobs:
             .gitmodules
             docs/patches.md
             engines/${{ matrix.engine }}
+            engines/versions.env
       # Auto-merge waits for every required check, including e2e and
       # quickstart; this job never merges by itself.
       - name: Enable auto-merge

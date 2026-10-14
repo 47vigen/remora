@@ -18,11 +18,30 @@ type Engine struct {
 	Path      string // "engines/bifrost"
 	Upstream  string // "https://github.com/maximhq/bifrost"
 	TagPrefix string // "transports/v" | "v"
+	// VersionVar is the engine's line in engines/versions.env, which must name the tag the gitlink points at.
+	VersionVar string // "BIFROST_VERSION" | "CLIPROXYAPI_VERSION"
 }
 
 var engines = []Engine{
-	{"bifrost", "engines/bifrost", "https://github.com/maximhq/bifrost", "transports/v"},
-	{"cliproxyapi", "engines/cliproxyapi", "https://github.com/router-for-me/CLIProxyAPI", "v"},
+	{"bifrost", "engines/bifrost", "https://github.com/maximhq/bifrost", "transports/v", "BIFROST_VERSION"},
+	{"cliproxyapi", "engines/cliproxyapi", "https://github.com/router-for-me/CLIProxyAPI", "v", "CLIPROXYAPI_VERSION"},
+}
+
+// WithVersion returns versions.env with the line for name set to value, keeping every other line as it is.
+func WithVersion(env, name, value string) (string, error) {
+	lines := strings.Split(env, "\n")
+	found := false
+	for i, line := range lines {
+		k, _, ok := strings.Cut(line, "=")
+		if ok && strings.TrimSpace(k) == name {
+			lines[i] = name + "=" + value
+			found = true
+		}
+	}
+	if !found {
+		return "", fmt.Errorf("%s has no %s line", versionsFile, name)
+	}
+	return strings.Join(lines, "\n"), nil
 }
 
 // Tag is an upstream release tag. SHA is the commit (peeled) SHA, never the tag object's.

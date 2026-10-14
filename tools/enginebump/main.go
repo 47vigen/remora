@@ -21,7 +21,10 @@ import (
 	"syscall"
 )
 
-const patchesFile = "docs/patches.md"
+const (
+	patchesFile  = "docs/patches.md"
+	versionsFile = "engines/versions.env"
+)
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -96,11 +99,23 @@ func run(ctx context.Context, args []string) error {
 	return apply(ctx, a, patchesMD)
 }
 
-// apply stages the decision: the gitlink always, and for unfork the upstream URL and the patch table row.
+// apply stages the decision: the gitlink and its engines/versions.env line always, and for unfork the upstream URL
+// and the patch table row.
 func apply(ctx context.Context, a Action, patchesMD string) error {
 	e := a.Engine
 	if _, err := command(ctx, "git", "update-index", "--cacheinfo", "160000,"+a.To.SHA+","+e.Path); err != nil {
 		return err
+	}
+	env, err := os.ReadFile(versionsFile)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", versionsFile, err)
+	}
+	updated, err := WithVersion(string(env), e.VersionVar, a.To.Name)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(versionsFile, []byte(updated), 0o644); err != nil { //nolint:gosec // a tracked file, world-readable like the rest of the checkout
+		return fmt.Errorf("write %s: %w", versionsFile, err)
 	}
 	if a.Kind != KindUnfork {
 		return nil

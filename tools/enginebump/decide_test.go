@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 	"reflect"
 	"sort"
 	"strings"
@@ -287,5 +288,32 @@ func TestPRBodyLinksEveryRelease(t *testing.T) {
 	}
 	if strings.Contains(body, "releases/tag/transports%2Fv2.3.0") {
 		t.Fatalf("body links the current release:\n%s", body)
+	}
+}
+
+func TestWithVersion(t *testing.T) {
+	env := "# pins\nBIFROST_VERSION=transports/v2.3.0\nCLIPROXYAPI_VERSION=v8.0.28\n"
+	got, err := WithVersion(env, "CLIPROXYAPI_VERSION", "v8.1.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# pins\nBIFROST_VERSION=transports/v2.3.0\nCLIPROXYAPI_VERSION=v8.1.0\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if _, err := WithVersion(env, "OTHER_VERSION", "v1"); err == nil {
+		t.Error("missing line: want an error")
+	}
+}
+
+func TestEveryEngineHasAVersionLine(t *testing.T) {
+	env, err := os.ReadFile("../../engines/versions.env")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range engines {
+		if _, err := WithVersion(string(env), e.VersionVar, "x"); err != nil {
+			t.Errorf("%s: %v", e.Name, err)
+		}
 	}
 }

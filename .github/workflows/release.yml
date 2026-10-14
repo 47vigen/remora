@@ -141,6 +141,11 @@ jobs:
   publish:
     needs: verify
     runs-on: ubuntu-24.04
+    # One publish at a time across every release, so two runs never race on
+    # the X.Y and latest tags.
+    concurrency:
+      group: release-publish
+      cancel-in-progress: false
     permissions:
       contents: read
       packages: write
@@ -148,6 +153,25 @@ jobs:
     outputs:
       digest: ${{ steps.index.outputs.digest }}
     steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0
+          fetch-tags: true
+      # X.Y moves only for the newest stable patch of that minor, and latest
+      # only for the newest stable release, so a rerun of an older release
+      # never takes a channel back. Prereleases (vX.Y.Z-rc.N) move neither.
+      - name: Channels
+        id: channels
+        run: |
+          minor=false latest=false
+          if [[ "$TAG" != *-* ]]; then
+            stable="$(git tag -l 'v*.*.*' | grep -v -- - | sort -V)"
+            mm="${TAG%.*}"
+            [[ "$(grep -F "$mm." <<<"$stable" | grep -E "^${mm//./\\.}\.[0-9]+$" | tail -n1)" == "$TAG" ]] && minor=true
+            [[ "$(tail -n1 <<<"$stable")" == "$TAG" ]] && latest=true
+          fi
+          { echo "minor=$minor"; echo "latest=$latest"; } >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v8
         with:
           pattern: digest-*
@@ -159,7 +183,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # Prerelease tags (vX.Y.Z-rc.N) never move X.Y or latest.
       - name: Tags
         id: meta
         uses: docker/metadata-action@v6
@@ -167,23 +190,19 @@ jobs:
           images: ${{ env.IMAGE }}
           tags: |
             type=semver,pattern={{version}},value=${{ env.TAG }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ env.TAG }},enable=${{ !contains(env.TAG, '-') }}
-            type=raw,value=latest,enable=${{ !contains(env.TAG, '-') }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ env.TAG }},enable=${{ steps.channels.outputs.minor }}
+            type=raw,value=latest,enable=${{ steps.channels.outputs.latest }}
           flavor: latest=false
+      # The index is pushed under a run-scoped staging tag first; no public
+      # tag points at it until its signature verifies.
       - name: Create the multi-arch index
-        working-directory: ${{ runner.temp }}/digests
-        run: |
-          mapfile -t tags < <(jq -r '.tags[]' <<<"$DOCKER_METADATA_OUTPUT_JSON")
-          args=()
-          for t in "${tags[@]}"; do args+=(-t "$t"); done
-          for arch in amd64 arm64; do args+=("${IMAGE}@$(cat "$arch")"); done
-          docker buildx imagetools create "${args[@]}"
-      - name: Read the index digest
         id: index
+        working-directory: ${{ runner.temp }}/digests
         env:
-          VERSION: ${{ steps.meta.outputs.version }}
+          STAGING: ${{ env.IMAGE }}:staging-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
-          digest="$(docker buildx imagetools inspect "${IMAGE}:${VERSION}" --format '{{json .Manifest}}' | jq -r .digest)"
+          docker buildx imagetools create -t "$STAGING" "${IMAGE}@$(cat amd64)" "${IMAGE}@$(cat arm64)"
+          digest="$(docker buildx imagetools inspect "$STAGING" --format '{{json .Manifest}}' | jq -r .digest)"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
       - uses: sigstore/cosign-installer@v3
       - name: Sign
@@ -197,6 +216,21 @@ jobs:
           cosign verify "${IMAGE}@${DIGEST}" \
             --certificate-identity-regexp '^https://github\.com/47vigen/remora/\.github/workflows/release\.yml@refs/' \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com
+      # Only now do the public tags move, all to the signed digest.
+      - name: Promote the release tags
+        env:
+          DIGEST: ${{ steps.index.outputs.digest }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          mapfile -t tags < <(jq -r '.tags[]' <<<"$DOCKER_METADATA_OUTPUT_JSON")
+          args=()
+          for t in "${tags[@]}"; do args+=(-t "$t"); done
+          docker buildx imagetools create "${args[@]}" "${IMAGE}@${DIGEST}"
+          got="$(docker buildx imagetools inspect "${IMAGE}:${VERSION}" --format '{{json .Manifest}}' | jq -r .digest)"
+          if [[ "$got" != "$DIGEST" ]]; then
+            echo "::error::${IMAGE}:${VERSION} is $got, want the signed $DIGEST"
+            exit 1
+          fi
 
   notes:
     needs: publish
