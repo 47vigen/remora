@@ -12,11 +12,19 @@
 #                     Docker's bridge network, else 172.17.0.1 (use host.docker.internal on Docker Desktop)
 #
 # Prints "quickstart: OK" and exits 0, or exits non-zero. It uses the README's own names: container "remora", volume
-# "remora-data" and host port 8080, plus container "qs-fakes" on host port 9090; all are removed on exit.
+# "remora-data" and host port 8080, plus container "qs-fakes" on host port 9090; all are removed on exit. It refuses
+# to start when any of them already exists.
 set -euo pipefail
 
 : "${REMORA_IMAGE:?set REMORA_IMAGE}"
 : "${FAKES_IMAGE:?set FAKES_IMAGE}"
+
+# The cleanup below removes the README's container and volume, so never start on a host that already has them.
+if docker container inspect remora >/dev/null 2>&1 || docker container inspect qs-fakes >/dev/null 2>&1 ||
+	docker volume inspect remora-data >/dev/null 2>&1; then
+	echo "quickstart: a remora or qs-fakes container or a remora-data volume already exists; remove it first" >&2
+	exit 2
+fi
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 work="$(mktemp -d)"

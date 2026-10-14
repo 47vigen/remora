@@ -39,7 +39,7 @@ Open <http://localhost:8080> and sign in with that password (`echo "$REMORA_ADMI
 3. **Keys → Create**: a key for your client. Its value is shown once; copy it then.
 
 The same from a shell, with the [management API](api/openapi.yaml): sign in (the session cookie goes to a
-temporary file), add the provider, and create a key that may call any OpenRouter model.
+temporary file, removed at the end), add the provider, and create a key that may call any OpenRouter model.
 
 ```sh
 export UPSTREAM_URL=https://openrouter.ai/api UPSTREAM_KEY=sk-or-your-key
@@ -52,6 +52,7 @@ jq -n --arg url "$UPSTREAM_URL" --arg key "$UPSTREAM_KEY" \
 REMORA_KEY="$(curl -fsS -b "$COOKIES" -H 'Content-Type: application/json' \
   -d '{"name":"my-app","allow":["openrouter/*"]}' http://localhost:8080/api/keys | jq -r .value)"
 export REMORA_KEY
+rm -f "$COOKIES"
 ```
 
 Call a model with the new key. Models are named `provider/model`. The engines load a new provider within a few

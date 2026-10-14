@@ -863,6 +863,9 @@ func TestEngineProviderBaseURLDropsV1(t *testing.T) {
 		{store.KindOpenAICompatible, "", "oc", "https://llm.example.com/", "https://llm.example.com"},
 		{store.KindOpenAICompatible, "", "oc", "https://llm.example.com/v1beta", "https://llm.example.com/v1beta"},
 		{store.KindTypeSafeCompatible, "", "ts", "https://ts.example.com/v1", "https://ts.example.com"},
+		{store.KindOpenAICompatible, "", "oc", "http://v1", "http://v1"},
+		{store.KindOpenAICompatible, "", "oc", "http://v1/", "http://v1"},
+		{store.KindOpenAICompatible, "", "oc", "http://v1:8080/v1", "http://v1:8080"},
 		{store.KindBuiltin, "openrouter", "openrouter", "https://router.example.com/api/v1", "https://router.example.com/api"},
 		{store.KindBuiltin, "openrouter", "openrouter", "", ""},
 	}

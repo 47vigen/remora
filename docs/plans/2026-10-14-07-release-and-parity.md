@@ -899,3 +899,6 @@ Expected: the engine table (`bifrost`, `cliproxyapi` versions), the pull-by-dige
   without that route the fakes' models never reached its catalog and every request was refused. The fakes now
   answer it (`openrouter.auth_key`, `TestDefaultAuthKey`). The engine also numbers non-streamed tool calls with an
   `index` field, so `TestToolsMultiTurn` compares tool calls by id, type, name and arguments.
+- Review fixes: the base URL's `/v1` is removed from the parsed path, so a host named `v1` is kept. The smoke script
+  refuses to start when the README's container or volume already exists, because its cleanup would remove them. The
+  README's shell quick start deletes its session cookie file at the end.

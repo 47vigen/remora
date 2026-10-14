@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -243,9 +244,14 @@ func (r *Reconciler) engineProvider(p store.Provider, reserved, internal map[str
 
 // engineBaseURL maps a provider's base URL to the front door's: the front door appends /v1/<endpoint> itself, while
 // providers publish their base URL with the /v1 the OpenAI SDKs expect, so a trailing /v1 is dropped.
-func engineBaseURL(u string) string {
-	u = strings.TrimRight(u, "/")
-	return strings.TrimSuffix(u, "/v1")
+func engineBaseURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return strings.TrimRight(raw, "/")
+	}
+	u.Path = strings.TrimSuffix(strings.TrimRight(u.Path, "/"), "/v1")
+	u.RawPath = ""
+	return strings.TrimRight(u.String(), "/")
 }
 
 // aliasRule validates one alias and builds its routing rule: the compiled chain is validated whole, Filter drops
