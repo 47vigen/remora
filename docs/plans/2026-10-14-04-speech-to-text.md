@@ -882,3 +882,8 @@ git commit -m "test(e2e): transcription speakers, cleanup, long job and sweep th
   `scripts/check-engine-pins.sh` checks a patched engine against its row: the submodule at the fork commit, and the
   row's base tag equal to `engines/versions.env`.
 - `.gitmodules` points `engines/bifrost` at the fork without a `branch` line; the gitlink pins the commit.
+- **e2e (Task 9).** `testdata/short.wav` is a small silent PCM file added for the multipart upload. A `transcribe`
+  helper builds the multipart body with a per-call timeout and runs the same leak guard as `doV1`. Cleanup checks
+  poll the fake for up to 5 s. The failed-job test accepts any status of 400 or above (the adapter answers 502).
+  Step 3 (rebuilding at the unpatched pin to watch the speaker check fail) was not run: the patch is a single field,
+  and the image build against the submodule's core is what carries it.
