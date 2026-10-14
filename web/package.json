@@ -7,7 +7,7 @@
     "dev": "vite",
     "gen": "openapi-ts",
     "build": "vite build && touch ../internal/web/dist/.gitkeep",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "node_modules/typescript-7/bin/tsc --noEmit",
     "lint": "oxlint",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
@@ -42,7 +42,8 @@
     "oxfmt": "^0.73.0",
     "oxlint": "^1.88.0",
     "tailwindcss": "^4.3.3",
-    "typescript": "^7.0.2",
+    "typescript": "6.0.3",
+    "typescript-7": "npm:typescript@7.0.2",
     "vite": "^8.3.4",
     "vitest": "^5.0.4"
   }
