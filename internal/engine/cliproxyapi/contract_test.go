@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/47vigen/remora/internal/engine/cliproxyapi"
+	"github.com/47vigen/remora/internal/proxy"
 )
 
 const (
@@ -507,6 +508,16 @@ func post(t *testing.T, e engine, method, path string, body map[string]any) (int
 	return resp.StatusCode, out
 }
 
+// mustJSON encodes a request body as the client sends it.
+func mustJSON(t *testing.T, v any) []byte {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("encode body: %v", err)
+	}
+	return b
+}
+
 // checkDropped asserts that every key remora reports as dropped is absent from the upstream body or carries a
 // different value there.
 func checkDropped(t *testing.T, reported []string, sent, recorded map[string]any) {
@@ -553,7 +564,12 @@ func TestContractCodexChatDrops(t *testing.T) {
 		t.Errorf("upstream model = %v, want gpt-test (prefix stripped)", rec["model"])
 	}
 	// What x-remora-dropped-params reports for this body (plan 03, Task 7).
-	checkDropped(t, []string{"max_tokens", "parallel_tool_calls", "stop", "temperature", "top_p"}, body, rec)
+	reported := proxy.CodexDroppedParams("/v1/chat/completions", mustJSON(t, body))
+	want := []string{"max_tokens", "parallel_tool_calls", "stop", "temperature", "top_p"}
+	if !slices.Equal(reported, want) {
+		t.Errorf("CodexDroppedParams = %q, want %q", reported, want)
+	}
+	checkDropped(t, reported, body, rec)
 }
 
 func TestContractCodexResponsesDrops(t *testing.T) {
@@ -586,9 +602,10 @@ func TestContractCodexResponsesDrops(t *testing.T) {
 	if rec["parallel_tool_calls"] != true {
 		t.Errorf("upstream parallel_tool_calls = %v, want true", rec["parallel_tool_calls"])
 	}
-	reported := []string{"max_output_tokens", "parallel_tool_calls", "store", "temperature", "top_p", "truncation", "user"}
-	if !slices.IsSorted(reported) {
-		t.Fatal("reported list must be sorted")
+	reported := proxy.CodexDroppedParams("/v1/responses", mustJSON(t, body))
+	want := []string{"max_output_tokens", "parallel_tool_calls", "store", "temperature", "top_p", "truncation", "user"}
+	if !slices.Equal(reported, want) {
+		t.Errorf("CodexDroppedParams = %q, want %q", reported, want)
 	}
 	checkDropped(t, reported, body, rec)
 }
