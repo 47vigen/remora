@@ -256,8 +256,14 @@ func TestNextBackoff(t *testing.T) {
 		attempt int
 		want    time.Duration
 	}{
-		{0, time.Second}, {1, 2 * time.Second}, {2, 4 * time.Second}, {3, 8 * time.Second},
-		{4, 16 * time.Second}, {5, 30 * time.Second}, {6, 30 * time.Second}, {100, 30 * time.Second},
+		{0, time.Second},
+		{1, 2 * time.Second},
+		{2, 4 * time.Second},
+		{3, 8 * time.Second},
+		{4, 16 * time.Second},
+		{5, 30 * time.Second},
+		{6, 30 * time.Second},
+		{100, 30 * time.Second},
 		{-1, time.Second},
 	}
 	for _, tt := range tests {
