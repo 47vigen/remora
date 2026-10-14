@@ -14,8 +14,18 @@ import (
 // In-memory port fakes. Later tasks extend them as their handlers need.
 
 type fakeProviders struct {
-	mu sync.Mutex
-	m  map[string]Provider
+	mu   sync.Mutex
+	m    map[string]Provider
+	test map[string]ProviderTest // Test's answer per provider; OK when absent
+}
+
+func (f *fakeProviders) setTest(name string, r ProviderTest) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.test == nil {
+		f.test = map[string]ProviderTest{}
+	}
+	f.test[name] = r
 }
 
 func (f *fakeProviders) List(context.Context) ([]Provider, error) {
@@ -71,7 +81,15 @@ func (f *fakeProviders) Delete(_ context.Context, name string) error {
 	return nil
 }
 
-func (f *fakeProviders) Test(context.Context, string) (ProviderTest, error) {
+func (f *fakeProviders) Test(_ context.Context, name string) (ProviderTest, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.m[name]; !ok {
+		return ProviderTest{}, fmt.Errorf("%w: provider %s", store.ErrNotFound, name)
+	}
+	if r, ok := f.test[name]; ok {
+		return r, nil
+	}
 	return ProviderTest{OK: true}, nil
 }
 
@@ -92,8 +110,16 @@ func (fakeAccounts) Import(context.Context, string, []byte) (Account, error) {
 }
 
 type fakeAliases struct {
-	mu sync.Mutex
-	m  map[string]alias.Alias
+	mu      sync.Mutex
+	m       map[string]alias.Alias
+	putErr  error // returned by Put when set
+	cooling []Cooling
+}
+
+func (f *fakeAliases) setCooling(c ...Cooling) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cooling = c
 }
 
 func (f *fakeAliases) List(context.Context) ([]alias.Alias, error) {
@@ -112,9 +138,18 @@ func (f *fakeAliases) Get(_ context.Context, name string) (alias.Alias, error) {
 	return a, nil
 }
 
-func (f *fakeAliases) Put(_ context.Context, a alias.Alias, _ bool) (alias.Alias, error) {
+func (f *fakeAliases) Put(_ context.Context, a alias.Alias, create bool) (alias.Alias, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.putErr != nil {
+		return alias.Alias{}, f.putErr
+	}
+	if _, ok := f.m[a.Name]; ok == create {
+		if create {
+			return alias.Alias{}, fmt.Errorf("%w: alias %s", store.ErrDuplicate, a.Name)
+		}
+		return alias.Alias{}, fmt.Errorf("%w: alias %s", store.ErrNotFound, a.Name)
+	}
 	if f.m == nil {
 		f.m = map[string]alias.Alias{}
 	}
@@ -125,6 +160,9 @@ func (f *fakeAliases) Put(_ context.Context, a alias.Alias, _ bool) (alias.Alias
 func (f *fakeAliases) Delete(_ context.Context, name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if _, ok := f.m[name]; !ok {
+		return fmt.Errorf("%w: alias %s", store.ErrNotFound, name)
+	}
 	delete(f.m, name)
 	return nil
 }
@@ -132,6 +170,9 @@ func (f *fakeAliases) Delete(_ context.Context, name string) error {
 func (f *fakeAliases) Chain(_ context.Context, name string) ([]alias.Target, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if _, ok := f.m[name]; !ok {
+		return nil, fmt.Errorf("%w: alias %s", store.ErrNotFound, name)
+	}
 	return alias.Compile(f.m, name, 0)
 }
 
@@ -146,7 +187,11 @@ func (f *fakeAliases) Compile(_ context.Context, a alias.Alias) ([]alias.Target,
 	return alias.Compile(all, a.Name, 0)
 }
 
-func (f *fakeAliases) Cooling(context.Context) ([]Cooling, error) { return nil, nil }
+func (f *fakeAliases) Cooling(context.Context) ([]Cooling, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.cooling), nil
+}
 
 type fakeKeys struct {
 	mu     sync.Mutex

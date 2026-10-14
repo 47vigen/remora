@@ -149,36 +149,6 @@ func (s *Server) GetLog(context.Context, gen.GetLogRequestObject) (gen.GetLogRes
 	return nil, errNotImplemented
 }
 
-// ListProviders is not implemented yet.
-func (s *Server) ListProviders(context.Context, gen.ListProvidersRequestObject) (gen.ListProvidersResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// CreateProvider is not implemented yet.
-func (s *Server) CreateProvider(context.Context, gen.CreateProviderRequestObject) (gen.CreateProviderResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// DeleteProvider is not implemented yet.
-func (s *Server) DeleteProvider(context.Context, gen.DeleteProviderRequestObject) (gen.DeleteProviderResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// GetProvider is not implemented yet.
-func (s *Server) GetProvider(context.Context, gen.GetProviderRequestObject) (gen.GetProviderResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// UpdateProvider is not implemented yet.
-func (s *Server) UpdateProvider(context.Context, gen.UpdateProviderRequestObject) (gen.UpdateProviderResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// TestProvider is not implemented yet.
-func (s *Server) TestProvider(context.Context, gen.TestProviderRequestObject) (gen.TestProviderResponseObject, error) {
-	return nil, errNotImplemented
-}
-
 // ChangePassword is not implemented yet.
 func (s *Server) ChangePassword(context.Context, gen.ChangePasswordRequestObject) (gen.ChangePasswordResponseObject, error) {
 	return nil, errNotImplemented

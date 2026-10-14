@@ -23,7 +23,10 @@ type Deps struct {
 }
 
 // Server implements the management API's strict server interface.
-type Server struct{ d Deps }
+type Server struct {
+	d     Deps
+	tests providerTests // each provider's last test result
+}
 
 var _ gen.StrictServerInterface = (*Server)(nil)
 

@@ -21,9 +21,12 @@ import (
 const testAdminPassword = "test-admin-password"
 
 type testEnv struct {
-	srv    *httptest.Server
-	client *http.Client // logged in
-	system *fakeSystem
+	srv       *httptest.Server
+	client    *http.Client // logged in
+	system    *fakeSystem
+	providers *fakeProviders
+	aliases   *fakeAliases
+	keys      *fakeKeys
 }
 
 // newTestEnv starts the management server over in-memory fakes and a real auth service, and logs a client in.
@@ -38,12 +41,12 @@ func newTestEnv(t *testing.T) *testEnv {
 	if _, err := auth.EnsureAdmin(ctx, st, testAdminPassword); err != nil {
 		t.Fatalf("EnsureAdmin: %v", err)
 	}
-	env := &testEnv{system: &fakeSystem{}}
+	env := &testEnv{system: &fakeSystem{}, providers: &fakeProviders{}, aliases: &fakeAliases{}, keys: &fakeKeys{}}
 	s := New(Deps{
-		Providers: &fakeProviders{},
+		Providers: env.providers,
 		Accounts:  fakeAccounts{},
-		Aliases:   &fakeAliases{},
-		Keys:      &fakeKeys{},
+		Aliases:   env.aliases,
+		Keys:      env.keys,
 		System:    env.system,
 		Names:     fakeNames{},
 		Auth:      auth.NewService(st, nil),
