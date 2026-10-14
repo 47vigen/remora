@@ -1,7 +1,7 @@
 version: "2"
 run:
   timeout: 5m
-  build-tags: [e2e]
+  build-tags: [e2e, engine]
 linters:
   exclusions:
     paths: [engines/]

@@ -63,6 +63,7 @@ func TestLoadOverrides(t *testing.T) {
 		EngineDir:     "/opt/e",
 		MasterKey:     "a2V5",
 		Ports:         Ports{Bifrost: 28080, CLIProxyAPI: 18317, Soniox: 18090},
+		Cooling:       Cooling{Count429: 3, Window429: time.Minute, Default: 5 * time.Minute, Poll: time.Second},
 
 		SonioxAddr:          "127.0.0.1:18090",
 		SonioxBaseURL:       "https://api.soniox.com",

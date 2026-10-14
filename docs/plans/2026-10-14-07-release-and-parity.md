@@ -178,7 +178,7 @@ Sections, each a short list:
   review** (a single maintainer cannot approve their own pull request, and it would block bot auto-merge);
   "Allow auto-merge" enabled in repository settings.
 - **The bot App**: create a GitHub App owned by the repository owner, permissions Contents and Pull requests
-  read/write, no webhook; install it on this repository only; store `REMORA_BOT_APP_ID` and
+  read/write, no webhook; install it on this repository only; store `REMORA_BOT_CLIENT_ID` (the App's Client ID) and
   `REMORA_BOT_PRIVATE_KEY` as repository secrets. Why: `GITHUB_TOKEN` events do not start workflows.
 - **First publish**: after the first release, open the `remora` package on GHCR, link it to the repository and set
   it public (GHCR creates new packages private).

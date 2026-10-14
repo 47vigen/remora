@@ -23,6 +23,7 @@ const (
 	keyFull    = "rk-e2e-full-key"
 	keyLimited = "rk-e2e-limited-key"
 	keyOff     = "rk-e2e-off-key"
+	keyCool    = "rk-e2e-cool-key"
 )
 
 // persian holds two zero-width non-joiners (U+200C); it is compared byte for byte.

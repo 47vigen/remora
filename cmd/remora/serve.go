@@ -10,11 +10,16 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"sync"
 	"time"
 
+	"github.com/47vigen/remora/internal/accounts"
 	"github.com/47vigen/remora/internal/api"
 	"github.com/47vigen/remora/internal/auth"
 	"github.com/47vigen/remora/internal/config"
+	"github.com/47vigen/remora/internal/cooling"
+	"github.com/47vigen/remora/internal/engine/bifrost"
+	"github.com/47vigen/remora/internal/engine/cliproxyapi"
 	"github.com/47vigen/remora/internal/proxy"
 	"github.com/47vigen/remora/internal/reconcile"
 	"github.com/47vigen/remora/internal/soniox"
@@ -89,7 +94,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	if err != nil {
 		return fmt.Errorf("render engine config: %w", err)
 	}
-	bifrost, err := supervise.BifrostEngine(cfg, creds)
+	frontDoorEngine, err := supervise.BifrostEngine(cfg, creds)
 	if err != nil {
 		return fmt.Errorf("render engine config: %w", err)
 	}
@@ -117,30 +122,42 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		}
 	}()
 	// The OAuth engine starts first because the front door calls it; it stops last.
-	if err := sup.Start(ctx, cliproxy, bifrost); err != nil {
+	if err := sup.Start(ctx, cliproxy, frontDoorEngine); err != nil {
 		return fmt.Errorf("start engines: %w", err)
 	}
 
 	// Reconcile the front door now that it is healthy, before the listener opens, so /v1 never meets an engine that
 	// lags the store (a fresh or wiped engine data directory). A failure is logged, not fatal: the timer retries,
 	// and /v1 stays closed (503) until a pass succeeds.
-	// Then reconcile on a timer; the goroutine ends before the engines stop and the store closes.
-	rec := newReconciler(cfg, st, frontDoor(cfg, creds), logger)
-	if err := rec.Sync(ctx); err != nil {
+	// The OAuth engine is reconciled in the same pass, before the front door: its settings and accounts first.
+	// Cooling leaves failing alias members out of the compiled rules; a change recompiles through Sync.
+	accts := accounts.New(accountsEngine(cfg, creds), st, logger)
+	fd := frontDoor(cfg, creds)
+	rec := newReconciler(cfg, st, fd, logger)
+	withOAuth(rec, cfg, creds.CLIProxyAPIKey)
+	rec.Also = []func(context.Context) error{accts.Reconcile}
+	cooler := cooling.New(cooling.Config{
+		Threshold: cfg.Cooling.Count429, Window: cfg.Cooling.Window429, Default: cfg.Cooling.Default,
+	}, rec.Sync, nil, logger)
+	rec.Filter = cooler.Filter
+	if err := rec.SyncAll(ctx); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		logger.Error("initial reconcile failed; retrying on the timer", "err", err)
 	}
+	// Then reconcile on a timer and follow the front door's log for cooling. These loops end before the engines stop
+	// and the store closes. Cooling is started before the listener opens: it skips log rows older than its start,
+	// which the tail replays from before a restart.
 	rctx, rcancel := context.WithCancel(ctx)
-	reconciled := make(chan struct{})
-	go func() {
-		defer close(reconciled)
-		rec.Run(rctx)
-	}()
+	var loops sync.WaitGroup
+	loops.Go(func() { rec.Run(rctx) })
+	tail := bifrost.NewTail(fd, cfg.Cooling.Poll, logger)
+	loops.Go(func() { tail.Run(rctx) })
+	loops.Go(func() { runCooling(rctx, cooler, tail, fd, logger) })
 	defer func() {
 		rcancel()
-		<-reconciled
+		loops.Wait()
 	}()
 
 	upstream, err := url.Parse(frontDoorURL(cfg))
@@ -153,6 +170,8 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	// management API and health stay reachable meanwhile.
 	px := proxy.New(upstream, st, logger)
 	px.Ready = rec.Synced
+	// The OAuth engine's members are served as "remora-oauth/<name>/<model>"; clients see "<name>/<model>".
+	px.OnResponse(proxy.ServedByHook(cliproxyapi.UserRef))
 	mux.Handle("/v1/", px)
 	srv := newServer(ctx, cfg.Listen, mux)
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.Listen)
@@ -238,6 +257,23 @@ func startSpeech(ctx context.Context, cfg config.Config, st *store.Store, logger
 		}
 		<-served
 	}, nil
+}
+
+// coolingFeedBuffer is how many log rows the cooling subscription holds before the tail drops it.
+const coolingFeedBuffer = 1024
+
+// runCooling feeds the front door's log rows to the cooler until ctx ends, subscribing again when the tail drops a
+// subscription that fell behind.
+func runCooling(ctx context.Context, cooler *cooling.Cooler, tail *bifrost.Tail, fd *bifrost.Client, logger *slog.Logger) {
+	for {
+		rows, cancel := tail.Subscribe(coolingFeedBuffer)
+		err := cooler.Run(ctx, rows, fd.GetLog, 0)
+		cancel()
+		if ctx.Err() != nil {
+			return
+		}
+		logger.Warn("cooling: log feed ended; subscribing again", "err", err)
+	}
 }
 
 // passwordLogLevel is the level of the one-time admin password line: warn, raised to error when the configured

@@ -5,14 +5,18 @@ providers:
   - {name: ts-a, kind: typesafe-compatible, base_url: http://fakes:9090/u/ts-a, allow_private_network: true, keys: [{name: main, value: env:E2E_UPSTREAM_KEY}]}
   - {name: ts-b, kind: typesafe-compatible, base_url: http://fakes:9090/u/ts-b, allow_private_network: true, keys: [{name: main, value: env:E2E_UPSTREAM_KEY}]}
   - {name: soniox, kind: soniox, keys: [{name: main, value: env:E2E_SONIOX_KEY}]}
+  - {name: cool-a, kind: openai-compatible, base_url: http://fakes:9090/u/cool-a, allow_private_network: true, keys: [{name: main, value: env:E2E_UPSTREAM_KEY}]}
+  - {name: cool-b, kind: openai-compatible, base_url: http://fakes:9090/u/cool-b, allow_private_network: true, keys: [{name: main, value: env:E2E_UPSTREAM_KEY}]}
 aliases:
   - {name: fast, kind: chat, members: [up-a/m1, up-b/m1], capabilities: [structured_outputs, tools], context_window: 131072}
   - {name: inner, kind: chat, members: [up-a/m1]}
   - {name: memory/fast, kind: chat, members: [inner, up-c/m1]}
   - {name: emb, kind: embeddings, members: [up-a/emb-1, up-b/emb-1]}
   - {name: jev, kind: decisions, members: [ts-a/jev, ts-b/jev]}
+  - {name: cool, kind: chat, members: [cool-a/m1, cool-b/m1]}
 keys:
   - {name: full, value: env:E2E_KEY_FULL, allow: ["*"]}
   - {name: limited, value: env:E2E_KEY_LIMITED, allow: [fast, "up-a/*"]}
   - {name: off, value: env:E2E_KEY_OFF, allow: ["*"], enabled: false}
   - {name: speech, value: env:E2E_KEY_SPEECH, allow: ["soniox/*"]}
+  - {name: cool, value: env:E2E_KEY_COOL, allow: [cool]}

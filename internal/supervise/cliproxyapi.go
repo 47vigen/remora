@@ -19,6 +19,30 @@ type cliproxyConfig struct {
 	Access        cliproxyAccess     `yaml:"access"`
 	OAuth         cliproxyOAuth      `yaml:"oauth"`
 	Plugins       cliproxyPlugins    `yaml:"plugins"`
+	Routing       cliproxyRouting    `yaml:"routing"`
+	Upstream      cliproxyUpstream   `yaml:"upstream"`
+}
+
+// cliproxyRouting and cliproxyUpstream carry the settings accounts.Reconcile also writes through the management API
+// (internal/accounts/reconcile.go). They are rendered here too because the engine answers HTTP shortly before its
+// config watcher runs, so a management write right after boot can be saved but never applied; what is in the file
+// at start is always loaded. force-model-prefix makes each credential answer only to "<prefix>/<model>".
+type cliproxyRouting struct {
+	Strategy         string           `yaml:"strategy"`
+	ForceModelPrefix bool             `yaml:"force-model-prefix"`
+	Cooldown         cliproxyCooldown `yaml:"cooldown"`
+}
+
+type cliproxyCooldown struct {
+	SaveCooldownStatus bool `yaml:"save-cooldown-status"`
+}
+
+type cliproxyUpstream struct {
+	Codex cliproxyCodex `yaml:"codex"`
+}
+
+type cliproxyCodex struct {
+	ModelLevelCooling bool `yaml:"model-level-cooling"`
 }
 
 type cliproxyServer struct {
@@ -64,6 +88,12 @@ func CLIProxyAPIEngine(cfg config.Config, c Credentials) (Engine, error) {
 		Access:  cliproxyAccess{APIKeys: []string{c.CLIProxyAPIKey}},
 		OAuth:   cliproxyOAuth{AuthDir: authDir},
 		Plugins: cliproxyPlugins{Enabled: false},
+		Routing: cliproxyRouting{
+			Strategy:         "round-robin",
+			ForceModelPrefix: true,
+			Cooldown:         cliproxyCooldown{SaveCooldownStatus: true},
+		},
+		Upstream: cliproxyUpstream{Codex: cliproxyCodex{ModelLevelCooling: true}},
 	}
 	data, err := yaml.Marshal(doc)
 	if err != nil {

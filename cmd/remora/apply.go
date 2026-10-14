@@ -15,6 +15,7 @@ import (
 	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/config"
 	"github.com/47vigen/remora/internal/engine/bifrost"
+	"github.com/47vigen/remora/internal/engine/cliproxyapi"
 	"github.com/47vigen/remora/internal/proxy"
 	"github.com/47vigen/remora/internal/reconcile"
 	"github.com/47vigen/remora/internal/store"
@@ -71,11 +72,15 @@ func apply(ctx context.Context, cfg config.Config, path string, getenv func(stri
 		}
 	}()
 	// The engine credentials are made by `remora serve`; apply only reads them.
-	user, err := engineValue(ctx, st, "admin_username")
+	user, err := engineValue(ctx, st, "bifrost", "admin_username")
 	if err != nil {
 		return err
 	}
-	password, err := engineValue(ctx, st, "admin_password")
+	password, err := engineValue(ctx, st, "bifrost", "admin_password")
+	if err != nil {
+		return err
+	}
+	oauthKey, err := engineValue(ctx, st, "cliproxyapi", "api_key")
 	if err != nil {
 		return err
 	}
@@ -83,11 +88,12 @@ func apply(ctx context.Context, cfg config.Config, path string, getenv func(stri
 		return err
 	}
 	r := newReconciler(cfg, st, frontDoor(cfg, supervise.Credentials{BifrostAdminUser: user, BifrostAdminPassword: password}), logger)
+	withOAuth(r, cfg, oauthKey)
 	return applyFile(ctx, r, f, getenv, out)
 }
 
-func engineValue(ctx context.Context, st *store.Store, key string) (string, error) {
-	v, ok, err := st.EngineValue(ctx, "bifrost", key)
+func engineValue(ctx context.Context, st *store.Store, engine, key string) (string, error) {
+	v, ok, err := st.EngineValue(ctx, engine, key)
 	if err != nil {
 		return "", err
 	}
@@ -116,6 +122,19 @@ func frontDoorURL(cfg config.Config) string {
 	return "http://127.0.0.1:" + strconv.Itoa(cfg.Ports.Bifrost)
 }
 
+// accountsURL is the OAuth engine's loopback base URL.
+func accountsURL(cfg config.Config) string {
+	return "http://127.0.0.1:" + strconv.Itoa(cfg.Ports.CLIProxyAPI)
+}
+
+// withOAuth registers the OAuth engine behind the front door: its internal provider with clientKey, one routing
+// rule per subscription provider, and the subscription provider names as reserved alias member providers.
+func withOAuth(r *reconcile.Reconciler, cfg config.Config, clientKey string) {
+	r.Internal = append(r.Internal, reconcile.OAuthProvider(clientKey, accountsURL(cfg)))
+	r.InternalRules = reconcile.OAuthRules()
+	r.Reserved = reconcile.OAuthReserved()
+}
+
 // managementTimeout bounds one management call. A reconcile pass holds the store's write lock, so a stuck engine
 // must not hold it for long.
 const managementTimeout = 30 * time.Second
@@ -123,10 +142,20 @@ const managementTimeout = 30 * time.Second
 // frontDoor is the front door's management client. Its transport ignores proxy environment variables: the engine is
 // on loopback.
 func frontDoor(cfg config.Config, c supervise.Credentials) *bifrost.Client {
+	return bifrost.New(frontDoorURL(cfg), c.BifrostAdminUser, c.BifrostAdminPassword, loopbackClient())
+}
+
+// accountsEngine is the OAuth engine's management client, on loopback like frontDoor.
+func accountsEngine(cfg config.Config, c supervise.Credentials) *cliproxyapi.Client {
+	return cliproxyapi.New(accountsURL(cfg), c.CLIProxyManagementSecret, loopbackClient())
+}
+
+// loopbackClient is an HTTP client for an engine's management API: it ignores proxy environment variables and
+// bounds each call by managementTimeout.
+func loopbackClient() *http.Client {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.Proxy = nil
-	return bifrost.New(frontDoorURL(cfg), c.BifrostAdminUser, c.BifrostAdminPassword,
-		&http.Client{Transport: tr, Timeout: managementTimeout})
+	return &http.Client{Transport: tr, Timeout: managementTimeout}
 }
 
 // applyFile makes the store match f in one reconcile.Change, so the engine matches too or nothing is written.

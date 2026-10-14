@@ -27,6 +27,10 @@ const (
 	EnvSonioxPollInterval  = "REMORA_SONIOX_POLL_INTERVAL"
 	EnvSonioxDeadline      = "REMORA_SONIOX_DEADLINE"
 	EnvSonioxSweepInterval = "REMORA_SONIOX_SWEEP_INTERVAL"
+	EnvCooling429Count     = "REMORA_COOLING_429_COUNT"
+	EnvCooling429Window    = "REMORA_COOLING_429_WINDOW"
+	EnvCoolingDefault      = "REMORA_COOLING_DEFAULT"
+	EnvCoolingPoll         = "REMORA_COOLING_POLL"
 )
 
 // Defaults applied when a variable is unset or empty.
@@ -42,6 +46,10 @@ const (
 	DefaultSonioxPollInterval  = time.Second
 	DefaultSonioxDeadline      = 30 * time.Minute
 	DefaultSonioxSweepInterval = 10 * time.Minute
+	DefaultCooling429Count     = 3
+	DefaultCooling429Window    = 60 * time.Second
+	DefaultCoolingDefault      = 5 * time.Minute
+	DefaultCoolingPoll         = time.Second
 )
 
 // Ports are the loopback ports of the internal processes. The Go fields name
@@ -50,6 +58,15 @@ type Ports struct {
 	Bifrost     int // REMORA_PORT_ROUTER
 	CLIProxyAPI int // REMORA_PORT_ACCOUNTS
 	Soniox      int // REMORA_PORT_SPEECH
+}
+
+// Cooling tunes when an alias member that keeps failing is left out of its chains, and how often the front door's
+// log is read for failures.
+type Cooling struct {
+	Count429  int           // REMORA_COOLING_429_COUNT, default 3: 429s within Window429 that cool a member
+	Window429 time.Duration // REMORA_COOLING_429_WINDOW, default 60s
+	Default   time.Duration // REMORA_COOLING_DEFAULT, default 5m: cooldown when the upstream gave no retry hint
+	Poll      time.Duration // REMORA_COOLING_POLL, default 1s: how often the front door's log is read
 }
 
 // Config is remora's runtime configuration.
@@ -68,6 +85,7 @@ type Config struct {
 	SonioxPollInterval  time.Duration // REMORA_SONIOX_POLL_INTERVAL, default 1s
 	SonioxDeadline      time.Duration // REMORA_SONIOX_DEADLINE, default 30m
 	SonioxSweepInterval time.Duration // REMORA_SONIOX_SWEEP_INTERVAL, default 10m
+	Cooling             Cooling       // REMORA_COOLING_*
 }
 
 // Load reads the configuration through getenv. Every error names its variable.
@@ -107,30 +125,51 @@ func Load(getenv func(string) string) (Config, error) {
 	if u, perr := url.Parse(c.SonioxBaseURL); perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return Config{}, fmt.Errorf("config: %s=%q: want an http or https URL", EnvSonioxBaseURL, c.SonioxBaseURL)
 	}
-	if c.SonioxPollInterval, err = duration(getenv, EnvSonioxPollInterval, DefaultSonioxPollInterval); err != nil {
+	if c.SonioxPollInterval, err = positiveDuration(getenv, EnvSonioxPollInterval, DefaultSonioxPollInterval); err != nil {
 		return Config{}, err
 	}
-	if c.SonioxDeadline, err = duration(getenv, EnvSonioxDeadline, DefaultSonioxDeadline); err != nil {
+	if c.SonioxDeadline, err = positiveDuration(getenv, EnvSonioxDeadline, DefaultSonioxDeadline); err != nil {
 		return Config{}, err
 	}
-	if c.SonioxSweepInterval, err = duration(getenv, EnvSonioxSweepInterval, DefaultSonioxSweepInterval); err != nil {
+	if c.SonioxSweepInterval, err = positiveDuration(getenv, EnvSonioxSweepInterval, DefaultSonioxSweepInterval); err != nil {
+		return Config{}, err
+	}
+
+	if c.Cooling.Count429, err = positiveInt(getenv, EnvCooling429Count, DefaultCooling429Count); err != nil {
+		return Config{}, err
+	}
+	if c.Cooling.Window429, err = positiveDuration(getenv, EnvCooling429Window, DefaultCooling429Window); err != nil {
+		return Config{}, err
+	}
+	if c.Cooling.Default, err = positiveDuration(getenv, EnvCoolingDefault, DefaultCoolingDefault); err != nil {
+		return Config{}, err
+	}
+	if c.Cooling.Poll, err = positiveDuration(getenv, EnvCoolingPoll, DefaultCoolingPoll); err != nil {
 		return Config{}, err
 	}
 	return c, nil
 }
 
-// duration reads a positive Go duration such as "500ms" or "1h".
-func duration(getenv func(string) string, env string, def time.Duration) (time.Duration, error) {
+func positiveInt(getenv func(string) string, env string, def int) (int, error) {
+	v := getenv(env)
+	if v == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("config: %s=%q: want a whole number of at least 1", env, v)
+	}
+	return n, nil
+}
+
+func positiveDuration(getenv func(string) string, env string, def time.Duration) (time.Duration, error) {
 	v := getenv(env)
 	if v == "" {
 		return def, nil
 	}
 	d, err := time.ParseDuration(v)
-	if err != nil {
-		return 0, fmt.Errorf("config: %s=%q: want a duration such as 500ms or 1h: %w", env, v, err)
-	}
-	if d <= 0 {
-		return 0, fmt.Errorf("config: %s=%q: must be positive", env, v)
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("config: %s=%q: want a positive duration such as 30s or 5m", env, v)
 	}
 	return d, nil
 }

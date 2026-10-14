@@ -9,12 +9,14 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/47vigen/remora/internal/config"
+	"github.com/47vigen/remora/internal/reconcile"
 	"github.com/47vigen/remora/internal/store"
 )
 
@@ -47,6 +49,19 @@ func TestServeLoggerScrubs(t *testing.T) {
 	newServeLogger(&b, slog.LevelInfo).Error("reconcile: sync", "err", errors.New("bifrost: status 500 (key sk-bf-abc)"))
 	if out := b.String(); strings.Contains(strings.ToLower(out), "bifrost") || strings.Contains(out, "sk-bf-") {
 		t.Fatalf("log = %s, want engine words and keys scrubbed", out)
+	}
+}
+
+func TestWithOAuth(t *testing.T) {
+	cfg := config.Config{Ports: config.Ports{CLIProxyAPI: 28317}}
+	r := &reconcile.Reconciler{}
+	withOAuth(r, cfg, "sk-test-oauth")
+	if len(r.Internal) != 1 || r.Internal[0].Provider.Name != "remora-oauth" ||
+		r.Internal[0].Provider.BaseURL != "http://127.0.0.1:28317" || r.Internal[0].Keys[0].Value != "sk-test-oauth" {
+		t.Errorf("Internal = %+v", r.Internal)
+	}
+	if len(r.InternalRules) == 0 || len(r.Reserved) != len(r.InternalRules) || !slices.Contains(r.Reserved, "codex") {
+		t.Errorf("InternalRules = %d, Reserved = %q", len(r.InternalRules), r.Reserved)
 	}
 }
 

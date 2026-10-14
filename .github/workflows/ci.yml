@@ -36,6 +36,27 @@ jobs:
           go-version-file: go.mod
       - run: go test -race ./...
 
+  engine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            engines/cliproxyapi/go.sum
+      - name: Export engine versions
+        run: cat engines/versions.env >> "$GITHUB_ENV"
+      # Built exactly as the Dockerfile's cliproxyapi stage builds it (cgo, on the runner).
+      - name: Build the OAuth engine
+        working-directory: engines/cliproxyapi
+        run: CGO_ENABLED=1 go build -buildvcs=false -trimpath -ldflags "-X main.Version=$CLIPROXYAPI_VERSION" -o "$RUNNER_TEMP/cliproxyapi" ./cmd/server
+      - name: Engine contract tests
+        run: REMORA_CLIPROXYAPI_BIN="$RUNNER_TEMP/cliproxyapi" go test -race -tags engine ./internal/engine/cliproxyapi/
+
   image:
     permissions:
       contents: read
