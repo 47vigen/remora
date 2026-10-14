@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,7 +11,7 @@ import (
 	"syscall"
 )
 
-const usage = "usage: remora <serve|apply|import|version|healthcheck>"
+const usage = "usage: remora <serve|export|apply|import|version|healthcheck>"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -28,15 +29,12 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	switch args[0] {
 	case "serve":
 		return runServe(ctx, getenv, stderr)
+	case "export":
+		return exitCode(stderr, "export", runExport(ctx, args[1:], stdout))
 	case "apply":
-		return runApply(ctx, args[1:], getenv, stdout, stderr)
+		return exitCode(stderr, "apply", runApply(ctx, args[1:], stdout, lookup(getenv)))
 	case "import":
-		env := func(k string) (string, bool) { v := getenv(k); return v, v != "" }
-		if err := runImport(ctx, args[1:], stdout, env); err != nil {
-			_, _ = fmt.Fprintf(stderr, "remora import: %v\n", err)
-			return 1
-		}
-		return 0
+		return exitCode(stderr, "import", runImport(ctx, args[1:], stdout, lookup(getenv)))
 	case "version":
 		return runVersion(stdout)
 	case "healthcheck":
@@ -44,5 +42,25 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	default:
 		_, _ = fmt.Fprintf(stderr, "unknown command %q\n%s\n", args[0], usage)
 		return 2
+	}
+}
+
+// lookup adapts getenv to the commands' env lookup: an empty variable counts as unset.
+func lookup(getenv func(string) string) func(string) (string, bool) {
+	return func(k string) (string, bool) {
+		v := getenv(k)
+		return v, v != ""
+	}
+}
+
+// exitCode reports a command's error on stderr and returns the exit code: 0 after -h or --help, else 1. The error
+// can carry an engine's own words; the operator sees remora's.
+func exitCode(stderr io.Writer, cmd string, err error) int {
+	switch {
+	case err == nil, errors.Is(err, errHelp):
+		return 0
+	default:
+		_, _ = fmt.Fprintf(scrubWriter{stderr}, "remora %s: %v\n", cmd, err)
+		return 1
 	}
 }

@@ -6,12 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
-	"net/http"
 	"strings"
 	"time"
-
-	"go.yaml.in/yaml/v3"
 
 	"github.com/47vigen/remora/internal/api/gen"
 	"github.com/47vigen/remora/internal/config"
@@ -29,10 +25,10 @@ type importTarget interface {
 	ImportAccount(ctx context.Context, c omniroute.Credential) error
 }
 
-// dialImport connects to the running remora. Plan 05 Task 14's API client (newClient, with --url and the admin
-// password login) replaces importClient here once it exists.
-func dialImport(_ context.Context, env func(string) (string, bool)) (importTarget, error) {
-	c, err := importClient(env)
+// dialImport connects to the running remora the way export and apply do, from the environment: REMORA_URL (else
+// the port of REMORA_LISTEN) and REMORA_TOKEN, else REMORA_ADMIN_PASSWORD.
+func dialImport(ctx context.Context, env func(string) (string, bool)) (importTarget, error) {
+	c, err := connFlags{}.dial(ctx, env)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +68,7 @@ func runImport(ctx context.Context, args []string, stdout io.Writer, env func(st
 	for _, w := range res.Warnings {
 		_, _ = fmt.Fprintf(stdout, "warning: %s\n", w)
 	}
-	doc, err := yaml.Marshal(res.Doc)
+	doc, err := config.Marshal(res.Doc)
 	if err != nil {
 		return err
 	}
@@ -88,7 +84,7 @@ func runImport(ctx context.Context, args []string, stdout io.Writer, env func(st
 	if len(changes) == 0 {
 		_, _ = fmt.Fprintln(stdout, "No changes to providers, aliases or keys.")
 	}
-	printImportChanges(stdout, changes)
+	printChanges(stdout, changes)
 	printAccounts(stdout, res.Credentials)
 	if !yes {
 		_, _ = fmt.Fprintln(stdout, "Run again with --yes to import.")
@@ -109,18 +105,6 @@ func runImport(ctx context.Context, args []string, stdout io.Writer, env func(st
 		_, _ = fmt.Fprintf(stdout, "Imported %s account %s.\n", c.Provider, accountName(c))
 	}
 	return nil
-}
-
-// printImportChanges prints one line per change: "+ provider openrouter", "~ alias fast (members)", "- key old".
-func printImportChanges(w io.Writer, cs []gen.Change) {
-	for _, c := range cs {
-		sign := map[gen.ChangeOp]string{gen.Create: "+", gen.Update: "~", gen.Delete: "-"}[c.Op]
-		line := fmt.Sprintf("%s %s %s", sign, c.Kind, c.Name)
-		if len(c.Fields) > 0 {
-			line += " (" + strings.Join(c.Fields, ", ") + ")"
-		}
-		_, _ = fmt.Fprintln(w, line)
-	}
 }
 
 func printAccounts(w io.Writer, creds []omniroute.Credential) {
@@ -148,60 +132,16 @@ func accountName(c omniroute.Credential) string {
 	return n
 }
 
-// importClient builds a management API client from the environment: REMORA_URL, else 127.0.0.1 on the port of
-// REMORA_LISTEN (default :8080), with REMORA_TOKEN as the bearer token.
-func importClient(env func(string) (string, bool)) (*gen.ClientWithResponses, error) {
-	url, ok := env("REMORA_URL")
-	if !ok || url == "" {
-		listen, ok := env(config.EnvListen)
-		if !ok || listen == "" {
-			listen = config.DefaultListen
-		}
-		_, port, err := net.SplitHostPort(listen)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", config.EnvListen, err)
-		}
-		url = "http://127.0.0.1:" + port
-	}
-	token, ok := env("REMORA_TOKEN")
-	if !ok || token == "" {
-		return nil, errors.New("set REMORA_TOKEN (Settings → API tokens)")
-	}
-	return gen.NewClientWithResponses(url, gen.WithRequestEditorFn(func(_ context.Context, r *http.Request) error {
-		r.Header.Set("Authorization", "Bearer "+token)
-		return nil
-	}))
-}
-
 // apiTarget is importTarget over the generated management API client.
 type apiTarget struct{ c *gen.ClientWithResponses }
 
-func configRequest(doc []byte, sec config.Secrets) gen.ConfigRequest {
-	prune := false
-	m := map[string]string(sec)
-	return gen.ConfigRequest{Document: string(doc), Prune: &prune, Secrets: &m}
-}
-
+// Plan and Apply never prune: an import adds to what remora has.
 func (t apiTarget) Plan(ctx context.Context, doc []byte, sec config.Secrets) ([]gen.Change, error) {
-	resp, err := t.c.PlanConfigWithResponse(ctx, configRequest(doc, sec))
-	if err != nil {
-		return nil, err
-	}
-	if resp.JSON200 == nil {
-		return nil, apiError("plan", resp.HTTPResponse, resp.JSONDefault)
-	}
-	return resp.JSON200.Changes, nil
+	return planConfig(ctx, t.c, configRequest(doc, sec, false))
 }
 
 func (t apiTarget) Apply(ctx context.Context, doc []byte, sec config.Secrets) ([]gen.Change, error) {
-	resp, err := t.c.ApplyConfigWithResponse(ctx, configRequest(doc, sec))
-	if err != nil {
-		return nil, err
-	}
-	if resp.JSON200 == nil {
-		return nil, apiError("apply", resp.HTTPResponse, resp.JSONDefault)
-	}
-	return resp.JSON200.Changes, nil
+	return applyConfig(ctx, t.c, configRequest(doc, sec, false))
 }
 
 func (t apiTarget) ImportAccount(ctx context.Context, c omniroute.Credential) error {
@@ -217,15 +157,4 @@ func (t apiTarget) ImportAccount(ctx context.Context, c omniroute.Credential) er
 		return apiError("account import", resp.HTTPResponse, resp.JSONDefault)
 	}
 	return nil
-}
-
-func apiError(what string, r *http.Response, e *gen.Error) error {
-	if e != nil && e.Error.Message != "" {
-		return fmt.Errorf("%s: %s", what, e.Error.Message)
-	}
-	status := "no response"
-	if r != nil {
-		status = r.Status
-	}
-	return fmt.Errorf("%s: %s", what, status)
 }

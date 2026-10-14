@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -231,4 +232,69 @@ func newServer(ctx context.Context, addr string, h http.Handler) *http.Server {
 		ReadHeaderTimeout: readHeaderTimeout,
 		BaseContext:       func(net.Listener) context.Context { return context.WithoutCancel(ctx) },
 	}
+}
+
+// setSealer loads (or creates) the master key and gives the store its sealer.
+func setSealer(st *store.Store, cfg config.Config) error {
+	master, err := store.LoadMasterKey(cfg.DataDir, cfg.MasterKey)
+	if err != nil {
+		return err
+	}
+	sl, err := store.NewSealer(master)
+	if err != nil {
+		return err
+	}
+	st.SetSealer(sl)
+	return nil
+}
+
+// frontDoorURL is the front door's loopback base URL.
+func frontDoorURL(cfg config.Config) string {
+	return "http://127.0.0.1:" + strconv.Itoa(cfg.Ports.Bifrost)
+}
+
+// accountsURL is the OAuth engine's loopback base URL.
+func accountsURL(cfg config.Config) string {
+	return "http://127.0.0.1:" + strconv.Itoa(cfg.Ports.CLIProxyAPI)
+}
+
+// withOAuth registers the OAuth engine behind the front door: its internal provider with clientKey, one routing
+// rule per subscription provider, and the subscription provider names as reserved alias member providers.
+func withOAuth(r *reconcile.Reconciler, cfg config.Config, clientKey string) {
+	r.Internal = append(r.Internal, reconcile.OAuthProvider(clientKey, accountsURL(cfg)))
+	r.InternalRules = reconcile.OAuthRules()
+	r.Reserved = reconcile.OAuthReserved()
+}
+
+// managementTimeout bounds one management call. A reconcile pass holds the store's write lock, so a stuck engine
+// must not hold it for long.
+const managementTimeout = 30 * time.Second
+
+// frontDoor is the front door's management client. Its transport ignores proxy environment variables: the engine is
+// on loopback.
+func frontDoor(cfg config.Config, c supervise.Credentials) *bifrost.Client {
+	return bifrost.New(frontDoorURL(cfg), c.BifrostAdminUser, c.BifrostAdminPassword, loopbackClient())
+}
+
+// accountsEngine is the OAuth engine's management client, on loopback like frontDoor.
+func accountsEngine(cfg config.Config, c supervise.Credentials) *cliproxyapi.Client {
+	return cliproxyapi.New(accountsURL(cfg), c.CLIProxyManagementSecret, loopbackClient())
+}
+
+// loopbackClient is an HTTP client for an engine's management API: it ignores proxy environment variables and
+// bounds each call by managementTimeout.
+func loopbackClient() *http.Client {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.Proxy = nil
+	return &http.Client{Transport: tr, Timeout: managementTimeout}
+}
+
+// scrubWriter replaces engine names and keys in everything written through it.
+type scrubWriter struct{ w io.Writer }
+
+func (s scrubWriter) Write(p []byte) (int, error) {
+	if _, err := s.w.Write(proxy.Scrub(p)); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }

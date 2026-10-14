@@ -26,8 +26,8 @@ type ProviderTest = config.ProviderTest
 // Providers is config.Providers.
 type Providers = config.Providers
 
-// Cooling is config.Cooling.
-type Cooling = config.Cooling
+// Cooling is config.CoolingMember.
+type Cooling = config.CoolingMember
 
 // Aliases is config.Aliases.
 type Aliases = config.Aliases

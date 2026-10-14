@@ -209,7 +209,7 @@ func (f fakeAliases) Chain(context.Context, string) ([]alias.Target, error) { re
 
 func (f fakeAliases) Compile(context.Context, alias.Alias) ([]alias.Target, error) { return nil, nil }
 
-func (f fakeAliases) Cooling(context.Context) ([]Cooling, error) { return nil, nil }
+func (f fakeAliases) Cooling(context.Context) ([]CoolingMember, error) { return nil, nil }
 
 type fakeKeys struct{ w *world }
 

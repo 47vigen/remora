@@ -37,8 +37,8 @@ type Providers interface {
 	Test(ctx context.Context, name string) (ProviderTest, error)
 }
 
-// Cooling is a target that is cooling down after failures.
-type Cooling struct {
+// CoolingMember is a target that is cooling down after failures.
+type CoolingMember struct {
 	Target alias.Target
 	Until  time.Time
 	Reason string
@@ -52,7 +52,7 @@ type Aliases interface {
 	Delete(ctx context.Context, name string) error
 	Chain(ctx context.Context, name string) ([]alias.Target, error)     // compiled, before cooling
 	Compile(ctx context.Context, a alias.Alias) ([]alias.Target, error) // an unsaved alias against the stored ones; stores nothing
-	Cooling(ctx context.Context) ([]Cooling, error)
+	Cooling(ctx context.Context) ([]CoolingMember, error)
 }
 
 // Key is a client key for /v1. Its value is shown once, at creation.

@@ -6,380 +6,98 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log/slog"
-	"net/http"
 	"os"
-	"strconv"
-	"time"
 
-	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/config"
-	"github.com/47vigen/remora/internal/engine/bifrost"
-	"github.com/47vigen/remora/internal/engine/cliproxyapi"
-	"github.com/47vigen/remora/internal/proxy"
-	"github.com/47vigen/remora/internal/reconcile"
-	"github.com/47vigen/remora/internal/store"
-	"github.com/47vigen/remora/internal/supervise"
 )
 
-const applyUsage = "usage: remora apply -f <remora.yaml>"
+const applyUsage = "usage: remora apply -f FILE [--yes] [--prune=true] [--url URL] [--token TOKEN]"
 
-// runApply implements `remora apply -f <file>`: it makes the store match the file and reconciles the front door. It
-// runs as a second process next to `remora serve`, on the same data directory and engines.
-func runApply(ctx context.Context, args []string, getenv func(string) string, stdout, stderr io.Writer) int {
+// runApply implements `remora apply -f FILE [--yes] [--prune=true]` against a running remora. The file is parsed
+// locally first. Every env:NAME it references and env holds is sent as a secret (an unset one keeps the stored
+// secret). The server's plan is printed; without --yes nothing changes, with it the plan is applied. With --prune
+// (the default) what remora has and the file does not is deleted.
+func runApply(ctx context.Context, args []string, stdout io.Writer, env func(string) (string, bool)) error {
 	fs := flag.NewFlagSet("apply", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs.SetOutput(stdout)
+	fs.Usage = func() {
+		_, _ = fmt.Fprintln(fs.Output(), applyUsage)
+		fs.PrintDefaults()
+	}
 	path := fs.String("f", "", "the remora.yaml to apply")
-	if err := fs.Parse(args); err != nil || *path == "" || fs.NArg() != 0 {
-		if err == nil {
-			_, _ = fmt.Fprintln(stderr, applyUsage)
-		}
-		return 2
+	yes := fs.Bool("yes", false, "make the changes; without it, only show them")
+	prune := fs.Bool("prune", true, "delete what remora has and the file does not")
+	var conn connFlags
+	conn.register(fs)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *path == "" || fs.NArg() != 0 {
+		return errors.New(applyUsage)
 	}
 
-	cfg, err := config.Load(getenv)
-	if err != nil {
-		_, _ = fmt.Fprintln(stderr, err)
-		return 1
-	}
-	// Errors and log lines can carry an engine's own words; the operator sees remora's.
-	stderr = scrubWriter{stderr}
-	logger := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: cfg.LogLevel}))
-	if err := apply(ctx, cfg, *path, getenv, stdout, logger); err != nil {
-		_, _ = fmt.Fprintf(stderr, "remora apply: %v\n", err)
-		return 1
-	}
-	return 0
-}
-
-func apply(ctx context.Context, cfg config.Config, path string, getenv func(string) string, out io.Writer, logger *slog.Logger) (err error) {
-	b, err := os.ReadFile(path) //nolint:gosec // G304: the operator names the file to apply.
+	doc, err := os.ReadFile(*path)
 	if err != nil {
 		return err
 	}
-	f, err := config.Parse(b)
+	f, err := config.Parse(doc)
 	if err != nil {
 		return err
 	}
+	sec := referencedSecrets(f, env)
 
-	st, err := store.Open(ctx, cfg.DBPath())
-	if err != nil {
-		return fmt.Errorf("open store: %w", err)
-	}
-	defer func() {
-		if cerr := st.Close(); cerr != nil {
-			err = errors.Join(err, fmt.Errorf("close store: %w", cerr))
-		}
-	}()
-	// The engine credentials are made by `remora serve`; apply only reads them.
-	user, err := engineValue(ctx, st, "bifrost", "admin_username")
+	c, err := conn.dial(ctx, env)
 	if err != nil {
 		return err
 	}
-	password, err := engineValue(ctx, st, "bifrost", "admin_password")
+	req := configRequest(doc, sec, *prune)
+	changes, err := planConfig(ctx, c, req)
 	if err != nil {
 		return err
 	}
-	oauthKey, err := engineValue(ctx, st, "cliproxyapi", "api_key")
-	if err != nil {
-		return err
-	}
-	if err := setSealer(st, cfg); err != nil {
-		return err
-	}
-	r := &reconcile.Reconciler{
-		Store:  st,
-		Engine: frontDoor(cfg, supervise.Credentials{BifrostAdminUser: user, BifrostAdminPassword: password}),
-		Log:    logger,
-	}
-	withOAuth(r, cfg, oauthKey)
-	return applyFile(ctx, r, f, getenv, out)
-}
-
-func engineValue(ctx context.Context, st *store.Store, engine, key string) (string, error) {
-	v, ok, err := st.EngineValue(ctx, engine, key)
-	if err != nil {
-		return "", err
-	}
-	if !ok || v == "" {
-		return "", errors.New("no engine credentials in the data directory: start `remora serve` first")
-	}
-	return v, nil
-}
-
-// setSealer loads (or creates) the master key and gives the store its sealer.
-func setSealer(st *store.Store, cfg config.Config) error {
-	master, err := store.LoadMasterKey(cfg.DataDir, cfg.MasterKey)
-	if err != nil {
-		return err
-	}
-	sl, err := store.NewSealer(master)
-	if err != nil {
-		return err
-	}
-	st.SetSealer(sl)
-	return nil
-}
-
-// frontDoorURL is the front door's loopback base URL.
-func frontDoorURL(cfg config.Config) string {
-	return "http://127.0.0.1:" + strconv.Itoa(cfg.Ports.Bifrost)
-}
-
-// accountsURL is the OAuth engine's loopback base URL.
-func accountsURL(cfg config.Config) string {
-	return "http://127.0.0.1:" + strconv.Itoa(cfg.Ports.CLIProxyAPI)
-}
-
-// withOAuth registers the OAuth engine behind the front door: its internal provider with clientKey, one routing
-// rule per subscription provider, and the subscription provider names as reserved alias member providers.
-func withOAuth(r *reconcile.Reconciler, cfg config.Config, clientKey string) {
-	r.Internal = append(r.Internal, reconcile.OAuthProvider(clientKey, accountsURL(cfg)))
-	r.InternalRules = reconcile.OAuthRules()
-	r.Reserved = reconcile.OAuthReserved()
-}
-
-// managementTimeout bounds one management call. A reconcile pass holds the store's write lock, so a stuck engine
-// must not hold it for long.
-const managementTimeout = 30 * time.Second
-
-// frontDoor is the front door's management client. Its transport ignores proxy environment variables: the engine is
-// on loopback.
-func frontDoor(cfg config.Config, c supervise.Credentials) *bifrost.Client {
-	return bifrost.New(frontDoorURL(cfg), c.BifrostAdminUser, c.BifrostAdminPassword, loopbackClient())
-}
-
-// accountsEngine is the OAuth engine's management client, on loopback like frontDoor.
-func accountsEngine(cfg config.Config, c supervise.Credentials) *cliproxyapi.Client {
-	return cliproxyapi.New(accountsURL(cfg), c.CLIProxyManagementSecret, loopbackClient())
-}
-
-// loopbackClient is an HTTP client for an engine's management API: it ignores proxy environment variables and
-// bounds each call by managementTimeout.
-func loopbackClient() *http.Client {
-	tr := http.DefaultTransport.(*http.Transport).Clone()
-	tr.Proxy = nil
-	return &http.Client{Transport: tr, Timeout: managementTimeout}
-}
-
-// applyFile makes the store match f in one reconcile.Change, so the engine matches too or nothing is written.
-// Provider keys are matched by provider and name, client keys by name; what the file does not name is deleted. A
-// new client key without a value gets a generated one, printed to out as "<name>: <value>" once the change has
-// committed. Secrets are resolved through getenv before anything is written.
-func applyFile(ctx context.Context, r *reconcile.Reconciler, f config.File, getenv func(string) string, out io.Writer) error {
-	if err := f.Validate(); err != nil {
-		return err
-	}
-	providerSecrets := make([][]string, len(f.Providers))
-	for i, p := range f.Providers {
-		providerSecrets[i] = make([]string, len(p.Keys))
-		for j, k := range p.Keys {
-			v, err := resolveSecret(getenv, fmt.Sprintf("providers[%d].keys[%d].value", i, j), k.Value)
-			if err != nil {
-				return err
-			}
-			providerSecrets[i][j] = v
-		}
-	}
-	clientValues := make([]string, len(f.Keys))
-	for i, k := range f.Keys {
-		if k.Value == "" {
-			continue
-		}
-		v, err := resolveSecret(getenv, fmt.Sprintf("keys[%d].value", i), k.Value)
-		if err != nil {
-			return err
-		}
-		clientValues[i] = v
-	}
-
-	// A key that needs a generated value is shown before anything is stored: when the output fails, nothing is
-	// committed, and no stored key exists whose value nobody saw. When the change fails after the values were
-	// shown, they were never stored, and the error says so.
-	var existing []store.ClientKey
-	if err := r.Store.Write(ctx, func(tx *store.Tx) (err error) {
-		existing, err = tx.ClientKeys(ctx)
-		return err
-	}); err != nil {
-		return err
-	}
-	had := map[string]bool{}
-	for _, k := range existing {
-		had[k.Name] = true
-	}
-	generated := map[string]bool{}
-	for i, k := range f.Keys {
-		if had[k.Name] || clientValues[i] != "" {
-			continue
-		}
-		clientValues[i] = store.GenerateKeyValue()
-		generated[k.Name] = true
-		if _, err := fmt.Fprintln(out, k.Name+": "+clientValues[i]); err != nil {
-			return fmt.Errorf("print generated keys: %w; nothing was changed", err)
-		}
-	}
-
-	err := r.Change(ctx, func(ctx context.Context, tx *store.Tx) error {
-		if err := removeUnlisted(ctx, tx, f); err != nil {
-			return err
-		}
-		if err := putProviders(ctx, tx, f, providerSecrets); err != nil {
-			return err
-		}
-		for _, a := range f.Aliases {
-			members := make([]alias.Member, len(a.Members))
-			for i, m := range a.Members {
-				members[i] = alias.Member{Ref: m}
-			}
-			if err := tx.PutAlias(ctx, alias.Alias{
-				Name: a.Name, Kind: alias.Kind(a.Kind), Members: members,
-				Capabilities: a.Capabilities, ContextWindow: a.ContextWindow,
-			}); err != nil {
-				return err
-			}
-		}
-		existing, err := tx.ClientKeys(ctx)
-		if err != nil {
-			return err
-		}
-		ids := map[string]string{}
-		for _, k := range existing {
-			ids[k.Name] = k.ID
-		}
-		for i, k := range f.Keys {
-			id := ids[k.Name]
-			if id != "" && generated[k.Name] {
-				return fmt.Errorf("client key %q was created while apply ran", k.Name)
-			}
-			enabled := k.Enabled == nil || *k.Enabled
-			if _, err := tx.PutClientKey(ctx, store.ClientKey{ID: id, Name: k.Name, Allow: k.Allow, Enabled: enabled}, clientValues[i]); err != nil {
-				return err
-			}
-		}
+	if len(changes) == 0 {
+		_, _ = fmt.Fprintln(stdout, "No changes.")
 		return nil
-	})
-	if err != nil && len(generated) > 0 {
-		return fmt.Errorf("%w; the generated keys printed above were not stored, apply again", err)
 	}
-	return err
-}
-
-// resolveSecret reads an "env:NAME" reference through getenv. Errors name the field.
-func resolveSecret(getenv func(string) string, field, ref string) (string, error) {
-	name, err := config.SecretRef(ref)
-	if err != nil {
-		return "", fmt.Errorf("%s: %w", field, err)
+	printChanges(stdout, changes)
+	if !*yes {
+		_, _ = fmt.Fprintln(stdout, "Run again with --yes to apply.")
+		return nil
 	}
-	v := getenv(name)
-	if v == "" {
-		return "", fmt.Errorf("%s: environment variable %s is not set", field, name)
-	}
-	return v, nil
-}
-
-// removeUnlisted deletes the aliases, client keys, provider keys and providers the file does not name.
-func removeUnlisted(ctx context.Context, tx *store.Tx, f config.File) error {
-	wantAlias := map[string]bool{}
-	for _, a := range f.Aliases {
-		wantAlias[a.Name] = true
-	}
-	aliases, err := tx.Aliases(ctx)
+	applied, err := applyConfig(ctx, c, req)
 	if err != nil {
 		return err
 	}
-	for name := range aliases {
-		if !wantAlias[name] {
-			if err := tx.DeleteAlias(ctx, name); err != nil {
-				return err
-			}
+	noun := "changes"
+	if len(applied) == 1 {
+		noun = "change"
+	}
+	_, _ = fmt.Fprintf(stdout, "Applied %d %s.\n", len(applied), noun)
+	printGenerated(stdout, applied)
+	return nil
+}
+
+// referencedSecrets reads every env:NAME the document references from env; only those are sent.
+func referencedSecrets(f config.File, env func(string) (string, bool)) config.Secrets {
+	sec := config.Secrets{}
+	add := func(ref string) {
+		name, err := config.SecretRef(ref)
+		if err != nil {
+			return
+		}
+		if v, ok := env(name); ok {
+			sec[name] = v
 		}
 	}
-
-	wantClient := map[string]bool{}
-	for _, k := range f.Keys {
-		wantClient[k.Name] = true
-	}
-	clients, err := tx.ClientKeys(ctx)
-	if err != nil {
-		return err
-	}
-	for _, k := range clients {
-		if !wantClient[k.Name] {
-			if err := tx.DeleteClientKey(ctx, k.ID); err != nil {
-				return err
-			}
-		}
-	}
-
-	wantKey := map[[2]string]bool{}
-	wantProvider := map[string]bool{}
 	for _, p := range f.Providers {
-		wantProvider[p.Name] = true
 		for _, k := range p.Keys {
-			wantKey[[2]string{p.Name, k.Name}] = true
+			add(k.Value)
 		}
 	}
-	keys, err := tx.ProviderKeys(ctx)
-	if err != nil {
-		return err
-	}
-	for _, k := range keys {
-		if !wantKey[[2]string{k.Provider, k.Name}] {
-			if err := tx.DeleteProviderKey(ctx, k.ID); err != nil {
-				return err
-			}
+	for _, k := range f.Keys {
+		if k.Value != "" {
+			add(k.Value)
 		}
 	}
-	providers, err := tx.Providers(ctx)
-	if err != nil {
-		return err
-	}
-	for _, p := range providers {
-		if !wantProvider[p.Name] {
-			if err := tx.DeleteProvider(ctx, p.Name); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// putProviders upserts the file's providers and their keys, keeping the id of a key already stored under the same
-// provider and name.
-func putProviders(ctx context.Context, tx *store.Tx, f config.File, secrets [][]string) error {
-	keys, err := tx.ProviderKeys(ctx)
-	if err != nil {
-		return err
-	}
-	ids := map[[2]string]string{}
-	for _, k := range keys {
-		ids[[2]string{k.Provider, k.Name}] = k.ID
-	}
-	for i, p := range f.Providers {
-		if err := tx.PutProvider(ctx, store.Provider{
-			Name: p.Name, Kind: store.ProviderKind(p.Kind), Type: p.Type,
-			BaseURL: p.BaseURL, AllowPrivateNetwork: p.AllowPrivateNetwork,
-		}); err != nil {
-			return err
-		}
-		for j, k := range p.Keys {
-			if err := tx.PutProviderKey(ctx, store.ProviderKey{
-				ID: ids[[2]string{p.Name, k.Name}], Provider: p.Name, Name: k.Name,
-				Secret: secrets[i][j], Enabled: true,
-			}); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// scrubWriter replaces engine names and keys in everything written through it.
-type scrubWriter struct{ w io.Writer }
-
-func (s scrubWriter) Write(p []byte) (int, error) {
-	if _, err := s.w.Write(proxy.Scrub(p)); err != nil {
-		return 0, err
-	}
-	return len(p), nil
+	return sec
 }
