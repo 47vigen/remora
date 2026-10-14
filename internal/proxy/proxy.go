@@ -83,6 +83,7 @@ type routeKind int
 
 const (
 	routeForward routeKind = iota // proxied to the front door
+	routeModels                   // served by remora from its aliases
 )
 
 // route is one /v1 endpoint.
@@ -100,6 +101,7 @@ var routes = map[string]route{
 	"POST /v1/audio/transcriptions": {kind: routeForward, upstream: "/v1/audio/transcriptions"},
 	"POST /v1/decisions":            {kind: routeForward, upstream: "/v1/decisions"},
 	"POST /v1/systemone":            {kind: routeForward, upstream: "/typesafe/v1/systemone"},
+	"GET /v1/models":                {kind: routeModels},
 }
 
 // shapeFor is the error shape of a remora path, whatever the method: the SDK that calls it reads that shape.
@@ -145,8 +147,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if rt.kind == routeForward {
+	switch rt.kind {
+	case routeForward:
 		p.forward(w, r, rt, sh, key)
+	case routeModels:
+		p.serveModels(w, r, key)
 	}
 }
 
