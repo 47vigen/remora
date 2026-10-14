@@ -1,0 +1,13 @@
+services:
+  fakes:
+    image: ${FAKES_IMAGE:-remora-fakes:dev}
+    ports: ["127.0.0.1::9090"]
+  remora:
+    image: ${REMORA_IMAGE:-remora:dev}
+    environment:
+      REMORA_ADMIN_PASSWORD: e2e-admin-password
+    ports:
+      - "127.0.0.1::8080"
+      - "127.0.0.1::18080"   # published on purpose: proves the engines are bound to loopback
+      - "127.0.0.1::18317"
+    depends_on: [fakes]
