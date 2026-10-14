@@ -26,6 +26,16 @@ test("no engine or vendor brand outside derived-file headers and credits", () =>
       /^\/\/ Derived from maximhq\/bifrost ui\/\S+ \(Apache-2\.0\); modified\.\n/,
       "",
     );
-    expect(body, f).not.toMatch(/bifrost|maxim|cliproxy/i);
+    // "maximum" (maximumFractionDigits) is a JavaScript word, not the brand.
+    expect(body, f).not.toMatch(/bifrost|maxim(?!um)|cliproxy/i);
+  }
+});
+test("every derived file carries the exact header and is listed in THIRD_PARTY_NOTICES.md", () => {
+  const notices = readFileSync(join(SRC, "../../THIRD_PARTY_NOTICES.md"), "utf8");
+  for (const f of own.filter((f) => readFileSync(f, "utf8").startsWith("// Derived from maximhq/bifrost"))) {
+    expect(readFileSync(f, "utf8").split("\n")[0]).toMatch(
+      /^\/\/ Derived from maximhq\/bifrost ui\/\S+ \(Apache-2\.0\); modified\.$/,
+    );
+    expect(notices).toContain(`web/src/${relative(SRC, f)}`);
   }
 });

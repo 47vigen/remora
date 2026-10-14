@@ -12,6 +12,22 @@ as remora's own [`LICENSE`](LICENSE).
 
 Bifrost is built from source and shipped as a binary in the image.
 
+## Bifrost UI by Maxim AI, Apache-2.0, https://github.com/maximhq/bifrost, files derived (modified, not synced)
+
+These files in `web/src` are derived from Bifrost's `ui/` source and carry a header naming the file they come from.
+They were copied once and modified; they are not kept in sync.
+
+- `web/src/components/provider-icon/icons.tsx`
+- `web/src/components/provider-icon/icons.test.ts`
+- `web/src/lib/providers.ts`
+- `web/src/lib/providers.test.ts`
+- `web/src/lib/provider-meta.ts`
+- `web/src/lib/numbers.ts`
+- `web/src/lib/download.ts`
+- `web/src/lib/chart.ts`
+- `web/src/lib/live-socket.ts`
+- `web/src/lib/live-socket.test.ts`
+
 ## CLIProxyAPI
 
 Copyright © Luis Pater and Router-For.ME.
