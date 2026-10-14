@@ -1,0 +1,8 @@
+[submodule "engines/bifrost"]
+	path = engines/bifrost
+	url = https://github.com/maximhq/bifrost
+	shallow = true
+[submodule "engines/cliproxyapi"]
+	path = engines/cliproxyapi
+	url = https://github.com/router-for-me/CLIProxyAPI
+	shallow = true
