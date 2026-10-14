@@ -869,3 +869,16 @@ git commit -m "test(e2e): transcription speakers, cleanup, long job and sweep th
 
 - Spec coverage: adapter and port (Tasks 5, 7), parameter pass-through and booleans (3), bounded poll and deadline (5), delete in a finally path (5), `verbose_json` with speaker segments (4), sweep (6), custom provider registration (7), upstream patch and `docs/patches.md` (8), the spec's e2e item "transcription through the Soniox fake with segments, speakers and deletion verified" (9).
 - Not covered here, owned elsewhere: remora's `/v1` proxy has no timeout shorter than `SonioxDeadline + 60s` (plan 02, `TestProxy_NoResponseTimeout`); a forked engine is never bumped automatically and returns to upstream through plan 07's bump workflow; `soniox` as a provider kind in the OpenAPI contract and UI (plans 05, 06).
+
+## Corrections found during implementation
+
+- **The image must build against the submodule's core.** `transports/go.mod` requires the published
+  `github.com/maximhq/bifrost/core` module, so a patch in the submodule's `core/` never reached the binary. The
+  Dockerfile now copies `engines/bifrost/core` and builds with `go mod edit -replace github.com/maximhq/bifrost/core=../core`.
+  At `transports/v2.3.0` the submodule's `core/` is byte-identical to `core/v1.12.0`, the version transports requires,
+  so the only difference is the patch.
+- **The upstream PR is the owner's call** (Task 8 Step 6). Until it is opened, the `upstream PR` cell of
+  `docs/patches.md` reads `pending`. The bump tool accepts `pending` and holds the engine on its fork, and
+  `scripts/check-engine-pins.sh` checks a patched engine against its row: the submodule at the fork commit, and the
+  row's base tag equal to `engines/versions.env`.
+- `.gitmodules` points `engines/bifrost` at the fork without a `branch` line; the gitlink pins the commit.
