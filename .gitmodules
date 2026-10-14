@@ -1,6 +1,6 @@
 [submodule "engines/bifrost"]
 	path = engines/bifrost
-	url = https://github.com/maximhq/bifrost
+	url = https://github.com/47vigen/bifrost.git
 	shallow = true
 [submodule "engines/cliproxyapi"]
 	path = engines/cliproxyapi

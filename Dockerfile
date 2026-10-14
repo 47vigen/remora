@@ -33,6 +33,11 @@ COPY engines/bifrost/transports/ ./
 # The dashboard UI is not shipped. main.go embeds bifrost-http/ui with `all:`,
 # which needs at least one file; a lone dotfile is never served.
 RUN mkdir -p bifrost-http/ui && touch bifrost-http/ui/.keep
+# Build against the submodule's own core module instead of the published one, so a patch carried on the engine's
+# fork (docs/patches.md) is in the binary. Without a patch this is the same source: the pinned tag's core is the
+# core release that transports requires.
+COPY engines/bifrost/core/ /src/core/
+RUN go mod edit -replace github.com/maximhq/bifrost/core=../core
 RUN GOWORK=off CGO_ENABLED=1 go build -trimpath -tags sqlite_static \
       -ldflags "-s -w -X main.Version=v${BIFROST_VERSION#transports/v}" \
       -o /out/bifrost ./bifrost-http

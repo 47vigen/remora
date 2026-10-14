@@ -192,6 +192,10 @@ func newestMajorAbove(tags []Tag, prefix string, major int) (Tag, bool) {
 // the upstream release tag the fork branch starts from.
 type Patch struct{ Engine, PR, BaseTag string }
 
+// PRPending is the upstream PR cell of a patch whose upstream pull request is not opened yet. Such an engine is held
+// on its fork: there is nothing upstream to wait for.
+const PRPending = "pending"
+
 var prURL = regexp.MustCompile(`^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]+$`)
 
 func isTableLine(line string) bool { return strings.HasPrefix(strings.TrimSpace(line), "|") }
@@ -281,8 +285,9 @@ func ParsePatches(md string) ([]Patch, error) {
 		switch {
 		case !knownEngine(p.Engine):
 			return nil, fmt.Errorf("docs/patches.md line %d: unknown engine %q", i+1, p.Engine)
-		case !prURL.MatchString(p.PR):
-			return nil, fmt.Errorf("docs/patches.md line %d: upstream PR %q is not a pull request URL", i+1, p.PR)
+		case p.PR != PRPending && !prURL.MatchString(p.PR):
+			return nil, fmt.Errorf("docs/patches.md line %d: upstream PR %q is neither a pull request URL nor %q", i+1,
+				p.PR, PRPending)
 		case p.BaseTag == "":
 			return nil, fmt.Errorf("docs/patches.md line %d: empty base tag", i+1)
 		}
@@ -412,6 +417,12 @@ func decideFork(ctx context.Context, a Action, gitlink string, tags []Tag, patch
 		return a, fmt.Errorf("%s: no upstream release of major %s", e.Name, semver.Major(baseV))
 	}
 	a.To = latest
+	if patch.PR == PRPending {
+		a.Kind = KindHold
+		a.Note = fmt.Sprintf("%s: on a fork; its upstream pull request is not opened yet (latest %s)", e.Name,
+			latest.Name)
+		return a, nil
+	}
 	in, err := merged(ctx, patch.PR, latest)
 	if err != nil {
 		return a, fmt.Errorf("%s: check %s against %s: %w", e.Name, patch.PR, latest.Name, err)

@@ -80,7 +80,11 @@ type Reconciler struct {
 	Also     []func(ctx context.Context) error
 	Interval time.Duration // 0 = 60s
 	MaxDepth int           // 0 = alias.DefaultMaxDepth
-	Log      *slog.Logger
+	// SonioxURL is the speech adapter's base URL, e.g. "http://127.0.0.1:18090"; "" = a soniox provider is invalid.
+	SonioxURL string
+	// SonioxDeadline is the adapter's deadline; 0 = 30m. The front door waits 60 s longer.
+	SonioxDeadline time.Duration
+	Log            *slog.Logger
 
 	synced     atomic.Bool // a Sync has completed
 	alsoSynced atomic.Bool // a SyncAll has run every Also step without an error

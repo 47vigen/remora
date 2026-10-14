@@ -133,6 +133,15 @@ func TestParsePatches(t *testing.T) {
 		t.Fatalf("ParsePatches (no table) = %v, %v; want empty, nil", got, err)
 	}
 
+	pending := "| engine | upstream PR | base tag |\n|---|---|---|\n| bifrost | pending | transports/v2.3.0 |\n"
+	got, err = ParsePatches(pending)
+	if err != nil || !reflect.DeepEqual(got, []Patch{{"bifrost", PRPending, "transports/v2.3.0"}}) {
+		t.Fatalf("ParsePatches (pending) = %v, %v; want the row with %q", got, err, PRPending)
+	}
+	if _, err := ParsePatches("| engine | upstream PR | base tag |\n|---|---|---|\n| bifrost | soon | transports/v2.3.0 |\n"); err == nil {
+		t.Fatal("ParsePatches accepted an upstream PR that is neither a URL nor pending")
+	}
+
 	empty := "| engine | upstream PR | base tag |\n|---|---|---|\n"
 	got, err = ParsePatches(empty)
 	if err != nil || len(got) != 0 {
@@ -221,6 +230,7 @@ func TestDecide(t *testing.T) {
 		{name: "major", e: cliproxyapi, url: cliproxyapi.Upstream, gitlink: "s28", tags: withMajor, merged: never, kind: KindMajor, from: "v8.0.28", note: "v9.0.0"},
 		{name: "untagged", e: cliproxyapi, url: cliproxyapi.Upstream, gitlink: "dead", tags: cliTags, merged: never, err: "pin engines/cliproxyapi to a release tag by hand"},
 		{name: "fork held", e: bifrost, url: fork, gitlink: "forkhead", tags: bifTags, patch: patch, merged: mergedIn("none"), kind: KindHold, note: patch.PR},
+		{name: "fork with the upstream PR pending", e: bifrost, url: fork, gitlink: "forkhead", tags: bifTags, patch: &Patch{"bifrost", PRPending, "transports/v2.3.0"}, merged: never, kind: KindHold, from: "transports/v2.3.0", note: "not opened yet"},
 		{name: "fork unfork", e: bifrost, url: fork, gitlink: "forkhead", tags: bifTags, patch: patch, merged: mergedIn("transports/v2.4.0"), kind: KindUnfork, to: "transports/v2.4.0"},
 		{name: "fork without row", e: bifrost, url: fork, gitlink: "forkhead", tags: bifTags, merged: never, err: "engines/bifrost points at a fork with no docs/patches.md row"},
 		{name: "merged errors", e: bifrost, url: fork, gitlink: "forkhead", tags: bifTags, patch: patch, merged: func(context.Context, string, Tag) (bool, error) { return false, errBoom }, errIs: errBoom},

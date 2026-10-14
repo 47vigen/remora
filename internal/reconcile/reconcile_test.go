@@ -623,7 +623,7 @@ func TestChange_Invalid(t *testing.T) {
 		{"builtin with an unknown type", nil, putAll([]store.Provider{builtin("up-z", "up-z")}), ErrInvalid},
 		{"builtin named unlike its type", nil, putAll([]store.Provider{builtin("or", "openrouter")}), ErrInvalid},
 		{"custom without base URL", nil, putAll([]store.Provider{{Name: "up-n", Kind: store.KindOpenAICompatible}}), ErrInvalid},
-		{"soniox before plan 04", nil, putAll([]store.Provider{{Name: "soniox", Kind: store.KindSoniox, BaseURL: "http://x.test"}}), ErrInvalid},
+		{"soniox without the adapter", nil, putAll([]store.Provider{{Name: "soniox", Kind: store.KindSoniox, BaseURL: "http://x.test"}}), ErrInvalid},
 		{"alias prefix is a provider", nil, putAll(nil, chat("up-a/x", "up-a/m1")), ErrInvalid},
 		{"alias prefix is a standard provider", nil, putAll(nil, chat("openai/x", "up-a/m1")), ErrInvalid},
 		{"cycle", nil, putAll(nil, chat("p", "q"), chat("q", "p")), alias.ErrCycle},
