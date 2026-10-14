@@ -28,6 +28,9 @@ type testEnv struct {
 	aliases   *fakeAliases
 	keys      *fakeKeys
 	accounts  *fakeAccounts
+	names     *fakeNames
+	logs      *fakeLogs
+	server    *Server
 }
 
 // newTestEnv starts the management server over in-memory fakes and a real auth service, and logs a client in.
@@ -42,16 +45,21 @@ func newTestEnv(t *testing.T) *testEnv {
 	if _, err := auth.EnsureAdmin(ctx, st, testAdminPassword); err != nil {
 		t.Fatalf("EnsureAdmin: %v", err)
 	}
-	env := &testEnv{system: &fakeSystem{}, providers: &fakeProviders{}, aliases: &fakeAliases{}, keys: &fakeKeys{}, accounts: &fakeAccounts{}}
+	env := &testEnv{
+		system: &fakeSystem{}, providers: &fakeProviders{}, aliases: &fakeAliases{}, keys: &fakeKeys{},
+		accounts: &fakeAccounts{}, names: &fakeNames{}, logs: &fakeLogs{},
+	}
 	s := New(Deps{
 		Providers: env.providers,
 		Accounts:  env.accounts,
 		Aliases:   env.aliases,
 		Keys:      env.keys,
 		System:    env.system,
-		Names:     fakeNames{},
+		Names:     env.names,
+		Logs:      env.logs,
 		Auth:      auth.NewService(st, nil),
 	})
+	env.server = s
 	env.srv = httptest.NewServer(s.Handler())
 	t.Cleanup(env.srv.Close)
 

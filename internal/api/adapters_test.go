@@ -17,6 +17,7 @@ import (
 
 	"github.com/47vigen/remora/internal/accounts"
 	"github.com/47vigen/remora/internal/alias"
+	"github.com/47vigen/remora/internal/engine/bifrost"
 	"github.com/47vigen/remora/internal/engine/cliproxyapi"
 	"github.com/47vigen/remora/internal/engine/cliproxyapi/cliproxyapitest"
 	"github.com/47vigen/remora/internal/reconcile"
@@ -383,6 +384,34 @@ func TestAccountsOverHTTPNeverNameEngine(t *testing.T) {
 		}
 		if lower := strings.ToLower(body); strings.Contains(lower, "cliproxy") || strings.Contains(lower, "bifrost") {
 			t.Errorf("%s %s answer names an engine: %s", c.method, c.path, body)
+		}
+	}
+}
+
+func TestNamesAdapterTranslatesSubscriptionProviders(t *testing.T) {
+	names := NewNames(nil)
+	ctx := context.Background()
+	if got := names.Target(ctx, bifrost.OAuthProvider, "codex/gpt-x"); got != (alias.Target{Provider: "codex", Model: "gpt-x"}) {
+		t.Errorf("Target(oauth) = %+v", got)
+	}
+	if got := names.Target(ctx, "openrouter", "vendor/m"); got != (alias.Target{Provider: "openrouter", Model: "vendor/m"}) {
+		t.Errorf("Target(openrouter) = %+v", got)
+	}
+	cases := []struct {
+		provider, model string
+		ps, ms          []string
+	}{
+		{"", "", nil, nil},
+		{"codex", "", []string{bifrost.OAuthProvider}, nil},
+		{"", "codex/gpt-x", []string{bifrost.OAuthProvider}, []string{"codex/gpt-x"}},
+		{"or", "", []string{"or"}, nil},
+		{"", "or/vendor/m", []string{"or"}, []string{"vendor/m"}},
+		{"or", "or/a", []string{"or"}, []string{"a"}},
+	}
+	for _, c := range cases {
+		ps, ms := names.EngineFilter(ctx, c.provider, c.model)
+		if !slices.Equal(ps, c.ps) || !slices.Equal(ms, c.ms) {
+			t.Errorf("EngineFilter(%q, %q) = %v, %v; want %v, %v", c.provider, c.model, ps, ms, c.ps, c.ms)
 		}
 	}
 }

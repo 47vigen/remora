@@ -13,6 +13,8 @@ import (
 
 	"github.com/47vigen/remora/internal/accounts"
 	"github.com/47vigen/remora/internal/alias"
+	"github.com/47vigen/remora/internal/engine/bifrost"
+	"github.com/47vigen/remora/internal/engine/cliproxyapi"
 	"github.com/47vigen/remora/internal/reconcile"
 	"github.com/47vigen/remora/internal/store"
 	"github.com/47vigen/remora/internal/version"
@@ -447,20 +449,32 @@ func (a namesAdapter) RuleByAlias(ctx context.Context, name string) (string, boo
 	return id, ok
 }
 
-// Target maps an engine provider and model to remora's names. Store providers keep their names in the engine; the
-// OAuth engine's internal provider is translated once plan 03 lands.
+// Target maps an engine provider and model to remora's names: store providers keep their names in the engine; the
+// OAuth engine's internal provider serves "<name>/<model>", shown as provider <name>.
 func (a namesAdapter) Target(_ context.Context, engineProvider, engineModel string) alias.Target {
-	return alias.Target{Provider: engineProvider, Model: engineModel}
+	return userTarget(engineProvider, engineModel)
 }
 
-// EngineFilter maps a remora provider and model filter to engine names; see Target.
+// EngineFilter maps a remora provider and served-model ("<provider>/<model>") filter to engine names; see Target. A
+// subscription provider filters on the OAuth engine's internal provider, whose models carry the provider name.
 func (a namesAdapter) EngineFilter(_ context.Context, provider, model string) ([]string, []string) {
 	var ps, ms []string
 	if provider != "" {
-		ps = []string{provider}
+		ps = []string{engineProvider(provider)}
 	}
 	if model != "" {
-		ms = []string{model}
+		p, m, ok := strings.Cut(model, "/")
+		switch {
+		case !ok:
+			ms = []string{model}
+		case isSubscription(p):
+			ms = []string{model}
+		default:
+			ms = []string{m}
+		}
+		if ok && provider == "" {
+			ps = []string{engineProvider(p)}
+		}
 	}
 	return ps, ms
 }
@@ -579,4 +593,18 @@ func (a accountsAdapter) Import(ctx context.Context, provider string, credential
 		return Account{}, err
 	}
 	return toAccount(acc), nil
+}
+
+// isSubscription reports whether name is a subscription provider served by the OAuth engine.
+func isSubscription(name string) bool {
+	_, ok := cliproxyapi.ProviderByName(name)
+	return ok
+}
+
+// engineProvider is the front-door provider that serves a remora provider.
+func engineProvider(name string) string {
+	if isSubscription(name) {
+		return bifrost.OAuthProvider
+	}
+	return name
 }

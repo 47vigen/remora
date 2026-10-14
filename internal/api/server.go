@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/47vigen/remora/internal/api/gen"
 	"github.com/47vigen/remora/internal/auth"
@@ -11,8 +12,7 @@ import (
 )
 
 // Deps are the services the management API runs on. A nil port answers 501 not_implemented for the operations
-// that need it (remora.yaml export, plan and apply need Providers, Aliases and Keys). Later tasks add the log source
-// and the log tail.
+// that need it (remora.yaml export, plan and apply need Providers, Aliases and Keys; logs and stats need Logs).
 type Deps struct {
 	Providers Providers
 	Accounts  Accounts // plan 03's accounts.Service, through NewAccounts
@@ -20,6 +20,7 @@ type Deps struct {
 	Keys      Keys
 	System    System
 	Names     EngineNames
+	Logs      LogSource // the front door's request log
 	Auth      *auth.Service
 	Log       *slog.Logger
 }
@@ -27,15 +28,16 @@ type Deps struct {
 // Server implements the management API's strict server interface.
 type Server struct {
 	d     Deps
-	cfg   *config.Service // remora.yaml over Providers, Aliases and Keys; nil while one is missing
-	tests providerTests   // each provider's last test result
+	cfg   *config.Service  // remora.yaml over Providers, Aliases and Keys; nil while one is missing
+	tests providerTests    // each provider's last test result
+	now   func() time.Time // the clock for default time ranges
 }
 
 var _ gen.StrictServerInterface = (*Server)(nil)
 
 // New returns a Server over d.
 func New(d Deps) *Server {
-	s := &Server{d: d}
+	s := &Server{d: d, now: time.Now}
 	if d.Providers != nil && d.Aliases != nil && d.Keys != nil {
 		s.cfg = config.NewService(d.Providers, d.Aliases, d.Keys)
 	}

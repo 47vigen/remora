@@ -163,6 +163,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		Keys:      api.NewKeys(st, rec),
 		System:    api.NewSystem(sup),
 		Names:     api.NewNames(st),
+		Logs:      fd,
 		Auth:      auth.NewService(st, nil),
 		Log:       logger,
 	})

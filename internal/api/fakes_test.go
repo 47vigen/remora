@@ -11,6 +11,7 @@ import (
 
 	"github.com/47vigen/remora/internal/accounts"
 	"github.com/47vigen/remora/internal/alias"
+	"github.com/47vigen/remora/internal/engine/bifrost"
 	"github.com/47vigen/remora/internal/store"
 )
 
@@ -431,18 +432,59 @@ func (f *fakeSystem) Version() (string, []EngineVersion) {
 	return "v0.0.0-test", []EngineVersion{{Name: "accounts-engine", Version: "v2"}, {Name: "front-door", Version: "v1"}}
 }
 
-type fakeNames struct{}
-
-func (fakeNames) KeyByVK(context.Context, string) (string, string, bool) { return "", "", false }
-func (fakeNames) VKByKey(context.Context, string) (string, bool)         { return "", false }
-func (fakeNames) AliasByRule(context.Context, string) (string, bool)     { return "", false }
-func (fakeNames) RuleByAlias(context.Context, string) (string, bool)     { return "", false }
-func (fakeNames) Target(_ context.Context, p, m string) alias.Target {
-	return alias.Target{Provider: p, Model: m}
+// fakeNames translates with fixed tables: keys maps a client key id to its virtual key id, rules an alias name to
+// its routing rule id. Target is the real translation (userTarget) unless targets overrides an engine pair.
+// EngineFilter prefixes each remora name with "fd-" so tests can see it was translated.
+type fakeNames struct {
+	keys    map[string]string
+	rules   map[string]string
+	targets map[[2]string]alias.Target
 }
 
-func (fakeNames) EngineFilter(_ context.Context, p, m string) ([]string, []string) {
-	return []string{p}, []string{m}
+func (f *fakeNames) KeyByVK(_ context.Context, vk string) (string, string, bool) {
+	for id, v := range f.keys {
+		if v == vk {
+			return id, "name-" + id, true
+		}
+	}
+	return "", "", false
+}
+
+func (f *fakeNames) VKByKey(_ context.Context, id string) (string, bool) {
+	vk, ok := f.keys[id]
+	return vk, ok
+}
+
+func (f *fakeNames) AliasByRule(_ context.Context, rule string) (string, bool) {
+	for name, r := range f.rules {
+		if r == rule {
+			return name, true
+		}
+	}
+	return "", false
+}
+
+func (f *fakeNames) RuleByAlias(_ context.Context, name string) (string, bool) {
+	r, ok := f.rules[name]
+	return r, ok
+}
+
+func (f *fakeNames) Target(_ context.Context, p, m string) alias.Target {
+	if t, ok := f.targets[[2]string{p, m}]; ok {
+		return t
+	}
+	return userTarget(p, m)
+}
+
+func (f *fakeNames) EngineFilter(_ context.Context, p, m string) ([]string, []string) {
+	var ps, ms []string
+	if p != "" {
+		ps = []string{"fd-" + p}
+	}
+	if m != "" {
+		ms = []string{"fd-" + m}
+	}
+	return ps, ms
 }
 
 func cmpString(a, b string) int {
@@ -453,4 +495,110 @@ func cmpString(a, b string) int {
 		return 1
 	}
 	return 0
+}
+
+// fakeLogs is an in-memory front-door log. SearchLogs filters rows by status, parent, virtual key and routing rule,
+// sorts and pages them like the engine, and leaves out error details and bodies as the engine's list does; GetLog
+// answers the whole row. It records every filter it is called with.
+type fakeLogs struct {
+	mu        sync.Mutex
+	rows      []bifrost.Log
+	stats     func(bifrost.LogFilter) bifrost.LogStats // nil answers zeros
+	histogram []bifrost.HistogramBucket
+
+	searches   []bifrost.LogFilter
+	statsCalls []bifrost.LogFilter
+	histCalls  []bifrost.LogFilter
+}
+
+func anyOf(set []string, v *string) bool {
+	if len(set) == 0 {
+		return true
+	}
+	return v != nil && slices.Contains(set, *v)
+}
+
+func (f *fakeLogs) SearchLogs(_ context.Context, fl bifrost.LogFilter) (bifrost.LogPage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.searches = append(f.searches, fl)
+	var out []bifrost.Log
+	for _, l := range f.rows {
+		if len(fl.Status) > 0 && !slices.Contains(fl.Status, l.Status) ||
+			fl.ParentRequestID != "" && (l.ParentRequestID == nil || *l.ParentRequestID != fl.ParentRequestID) ||
+			!anyOf(fl.VirtualKeyIDs, l.VirtualKeyID) || !anyOf(fl.RoutingRuleIDs, l.RoutingRuleID) {
+			continue
+		}
+		l.ErrorDetails, l.InputHistory, l.OutputMessage, l.Params = nil, nil, nil, nil
+		out = append(out, l)
+	}
+	desc := fl.Order != "asc"
+	slices.SortStableFunc(out, func(a, b bifrost.Log) int {
+		var c int
+		switch fl.SortBy {
+		case "latency":
+			c = cmpFloat(a.Latency, b.Latency)
+		default:
+			c = a.Timestamp.Compare(b.Timestamp)
+		}
+		if desc {
+			c = -c
+		}
+		return c
+	})
+	total := int64(len(out))
+	limit := fl.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if fl.Offset >= len(out) {
+		return bifrost.LogPage{Logs: []bifrost.Log{}, Total: total}, nil
+	}
+	out = out[fl.Offset:min(fl.Offset+limit, len(out))]
+	return bifrost.LogPage{Logs: slices.Clone(out), Total: total}, nil
+}
+
+func cmpFloat(a, b *float64) int {
+	var x, y float64
+	if a != nil {
+		x = *a
+	}
+	if b != nil {
+		y = *b
+	}
+	switch {
+	case x < y:
+		return -1
+	case x > y:
+		return 1
+	}
+	return 0
+}
+
+func (f *fakeLogs) GetLog(_ context.Context, id string) (bifrost.Log, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, l := range f.rows {
+		if l.ID == id {
+			return l, nil
+		}
+	}
+	return bifrost.Log{}, fmt.Errorf("%w: log %s", store.ErrNotFound, id)
+}
+
+func (f *fakeLogs) LogStats(_ context.Context, fl bifrost.LogFilter) (bifrost.LogStats, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.statsCalls = append(f.statsCalls, fl)
+	if f.stats == nil {
+		return bifrost.LogStats{}, nil
+	}
+	return f.stats(fl), nil
+}
+
+func (f *fakeLogs) Histogram(_ context.Context, fl bifrost.LogFilter) ([]bifrost.HistogramBucket, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.histCalls = append(f.histCalls, fl)
+	return slices.Clone(f.histogram), nil
 }
