@@ -118,7 +118,8 @@ func apply(ctx context.Context, a Action, patchesMD string) error {
 		return fmt.Errorf("write %s: %w", versionsFile, err)
 	}
 	if a.Kind != KindUnfork {
-		return nil
+		_, err := command(ctx, "git", "add", "--", versionsFile)
+		return err
 	}
 	if _, err := command(ctx, "git", "config", "-f", ".gitmodules", "submodule."+e.Path+".url",
 		e.Upstream); err != nil {
@@ -131,7 +132,8 @@ func apply(ctx context.Context, a Action, patchesMD string) error {
 	if err := os.WriteFile(patchesFile, []byte(md), 0o644); err != nil { //nolint:gosec // a tracked doc, world-readable like the rest of the checkout
 		return fmt.Errorf("write %s: %w", patchesFile, err)
 	}
-	return nil
+	_, err = command(ctx, "git", "add", "--", versionsFile, ".gitmodules", patchesFile)
+	return err
 }
 
 func engineByName(name string) (Engine, bool) {
