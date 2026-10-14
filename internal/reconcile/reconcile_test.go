@@ -343,6 +343,31 @@ func TestSync_AliasChange(t *testing.T) {
 	}
 }
 
+// TestChange_AliasRecreatedKeepsRuleID recreates an alias inside one Change, which clears its stored rule id in the
+// transaction. The pass must compare against the transaction's view, or the commit loses the id the engine holds.
+func TestChange_AliasRecreatedKeepsRuleID(t *testing.T) {
+	h := newHarness(t)
+	h.base(t)
+	h.sync(t)
+	ctx := context.Background()
+	before, err := h.st.AliasRuleIDs(ctx)
+	if err != nil || before["fast"] == "" {
+		t.Fatalf("AliasRuleIDs = (%v, %v)", before, err)
+	}
+	if err := h.rec.Change(ctx, func(ctx context.Context, tx *store.Tx) error {
+		if err := tx.DeleteAlias(ctx, "fast"); err != nil {
+			return err
+		}
+		return tx.PutAlias(ctx, chat("fast", "up-a/m1", "up-b/m1"))
+	}); err != nil {
+		t.Fatalf("Change: %v", err)
+	}
+	after, err := h.st.AliasRuleIDs(ctx)
+	if err != nil || after["fast"] != before["fast"] {
+		t.Errorf("AliasRuleIDs after recreate = (%v, %v), want fast: %q", after, err, before["fast"])
+	}
+}
+
 func TestSync_NestedAliasFlattened(t *testing.T) {
 	h := newHarness(t)
 	h.write(t, putAll([]store.Provider{custom("up-a"), custom("up-c")},

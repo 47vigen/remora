@@ -338,6 +338,43 @@ func TestAliases(t *testing.T) {
 	}
 }
 
+// TestTxAliasRuleIDs checks that the transaction reads its own uncommitted rule ids, not the committed ones.
+func TestTxAliasRuleIDs(t *testing.T) {
+	ctx := context.Background()
+	s := openSealed(t)
+	fast := alias.Alias{Name: "fast", Kind: alias.KindChat, Members: []alias.Member{{Ref: "up-a/m1"}}}
+	slow := alias.Alias{Name: "slow", Kind: alias.KindChat, Members: []alias.Member{{Ref: "up-a/m1"}}}
+	write(t, s, func(ctx context.Context, tx *Tx) error {
+		if err := tx.PutAlias(ctx, fast); err != nil {
+			return err
+		}
+		return tx.SetAliasRuleID(ctx, "fast", "r1")
+	})
+	write(t, s, func(ctx context.Context, tx *Tx) error {
+		if err := tx.DeleteAlias(ctx, "fast"); err != nil {
+			return err
+		}
+		if err := tx.PutAlias(ctx, fast); err != nil {
+			return err
+		}
+		if err := tx.PutAlias(ctx, slow); err != nil {
+			return err
+		}
+		if err := tx.SetAliasRuleID(ctx, "slow", "r2"); err != nil {
+			return err
+		}
+		ids, err := tx.AliasRuleIDs(ctx)
+		if err != nil || !reflect.DeepEqual(ids, map[string]string{"slow": "r2"}) {
+			t.Errorf("tx.AliasRuleIDs = (%v, %v), want {slow: r2}", ids, err)
+		}
+		return nil
+	})
+	ids, err := s.AliasRuleIDs(ctx)
+	if err != nil || !reflect.DeepEqual(ids, map[string]string{"slow": "r2"}) {
+		t.Errorf("AliasRuleIDs after commit = (%v, %v), want {slow: r2}", ids, err)
+	}
+}
+
 func TestEngineMACs(t *testing.T) {
 	s := openSealed(t)
 	write(t, s, func(ctx context.Context, tx *Tx) error {

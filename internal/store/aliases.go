@@ -17,6 +17,12 @@ func (s *Store) AliasRuleIDs(ctx context.Context) (map[string]string, error) {
 	return stringMap(ctx, s.db, "SELECT name, engine_rule_id FROM aliases WHERE engine_rule_id != ''")
 }
 
+// AliasRuleIDs maps alias name to the front door's routing rule id, as this transaction sees it (its own
+// uncommitted writes included).
+func (tx *Tx) AliasRuleIDs(ctx context.Context) (map[string]string, error) {
+	return stringMap(ctx, tx.tx, "SELECT name, engine_rule_id FROM aliases WHERE engine_rule_id != ''")
+}
+
 // Aliases returns every alias by name, members in order.
 func (tx *Tx) Aliases(ctx context.Context) (map[string]alias.Alias, error) {
 	return loadAliases(ctx, tx.tx)

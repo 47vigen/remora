@@ -434,7 +434,7 @@ func (p *pass) pushVKs(ctx context.Context, d *desiredState, eng []bifrost.Virtu
 // returns the rules to delete: unknown names, and every rule but one for a wanted name. Rules of the OAuth engine
 // integration are never returned.
 func (p *pass) pushRules(ctx context.Context, d *desiredState, eng []bifrost.RoutingRule) ([]stale, error) {
-	storedIDs, err := p.r.Store.AliasRuleIDs(ctx)
+	storedIDs, err := p.tx.AliasRuleIDs(ctx)
 	if err != nil {
 		return nil, err
 	}
