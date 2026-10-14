@@ -15,6 +15,7 @@ import { Route as AppAliasesIndexRouteImport } from './routes/_app/aliases/index
 import { Route as AppAliasesNameRouteImport } from './routes/_app/aliases/$name'
 import { Route as AppKeysIndexRouteImport } from './routes/_app/keys/index'
 import { Route as AppLogsIndexRouteImport } from './routes/_app/logs/index'
+import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -45,6 +46,11 @@ const AppLogsIndexRoute = AppLogsIndexRouteImport.update({
   path: '/logs/',
   getParentRoute: () => AppRoute,
 } as any)
+const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
+  id: '/settings/',
+  path: '/settings/',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppRouteWithChildren
@@ -53,6 +59,7 @@ export interface FileRoutesByFullPath {
   '/aliases/': typeof AppAliasesIndexRoute
   '/keys/': typeof AppKeysIndexRoute
   '/logs/': typeof AppLogsIndexRoute
+  '/settings/': typeof AppSettingsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof AppRouteWithChildren
@@ -61,6 +68,7 @@ export interface FileRoutesByTo {
   '/aliases': typeof AppAliasesIndexRoute
   '/keys': typeof AppKeysIndexRoute
   '/logs': typeof AppLogsIndexRoute
+  '/settings': typeof AppSettingsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -70,13 +78,27 @@ export interface FileRoutesById {
   '/_app/aliases/': typeof AppAliasesIndexRoute
   '/_app/keys/': typeof AppKeysIndexRoute
   '/_app/logs/': typeof AppLogsIndexRoute
+  '/_app/settings/': typeof AppSettingsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/login' | '/aliases/$name' | '/aliases/' | '/keys/' | '/logs/'
+    | '/'
+    | '/login'
+    | '/aliases/$name'
+    | '/aliases/'
+    | '/keys/'
+    | '/logs/'
+    | '/settings/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/aliases/$name' | '/aliases' | '/keys' | '/logs'
+  to:
+    | '/'
+    | '/login'
+    | '/aliases/$name'
+    | '/aliases'
+    | '/keys'
+    | '/logs'
+    | '/settings'
   id:
     | '__root__'
     | '/_app'
@@ -85,6 +107,7 @@ export interface FileRouteTypes {
     | '/_app/aliases/'
     | '/_app/keys/'
     | '/_app/logs/'
+    | '/_app/settings/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -136,6 +159,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppLogsIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/settings/': {
+      id: '/_app/settings/'
+      path: '/settings'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof AppSettingsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
@@ -144,6 +174,7 @@ interface AppRouteChildren {
   AppAliasesIndexRoute: typeof AppAliasesIndexRoute
   AppKeysIndexRoute: typeof AppKeysIndexRoute
   AppLogsIndexRoute: typeof AppLogsIndexRoute
+  AppSettingsIndexRoute: typeof AppSettingsIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -151,6 +182,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppAliasesIndexRoute: AppAliasesIndexRoute,
   AppKeysIndexRoute: AppKeysIndexRoute,
   AppLogsIndexRoute: AppLogsIndexRoute,
+  AppSettingsIndexRoute: AppSettingsIndexRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
