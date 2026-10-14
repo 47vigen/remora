@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { configure, render } from "@testing-library/react";
 
+import "./dom-shims";
 import { client } from "../client/client.gen";
 import { routeTree } from "../routeTree.gen";
 
@@ -17,18 +18,6 @@ export type FakeApi = (req: Request, url: URL) => Response | undefined | Promise
  * recorded in `requests`, so a test can assert what a page sent.
  */
 export function renderRoute(path: string, api: FakeApi) {
-  // The app layout follows the system theme; jsdom has no matchMedia.
-  window.matchMedia ??= (query: string) =>
-    ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      addListener: () => {},
-      removeListener: () => {},
-      dispatchEvent: () => false,
-    }) as MediaQueryList;
   const requests: Request[] = [];
   const fetch = async (input: RequestInfo | URL): Promise<Response> => {
     const req = input as Request;
