@@ -402,7 +402,7 @@ Triggers: `push: tags: ['v*.*.*']`, and `workflow_dispatch` with input `tag` (re
 |---|---|---|---|
 | `build` (matrix `{platform: linux/amd64, runner: ubuntu-24.04}`, `{platform: linux/arm64, runner: ubuntu-24.04-arm}`) | `${{ matrix.runner }}` | `contents: read`, `packages: write` | checkout `ref: TAG`, `submodules: recursive`; `cat engines/versions.env >> "$GITHUB_ENV"`; `docker/setup-buildx-action@v3`; `docker/login-action@v3` to ghcr.io with `GITHUB_TOKEN`; `docker/build-push-action@v6` with `platforms: ${{ matrix.platform }}`, `build-args` `REMORA_VERSION=${TAG}`, `REMORA_COMMIT=${{ github.sha }}`, `BIFROST_VERSION`, `CLIPROXYAPI_VERSION` (from env), `sbom: true`, `provenance: mode=max`, `outputs: type=image,name=${IMAGE},push-by-digest=true,name-canonical=true,push=true`, `cache-from/to: type=gha,scope=${{ matrix.platform }}`; upload the digest as artifact `digest-<arch>` |
 | `verify` (same matrix), `needs: build` | `${{ matrix.runner }}` | `contents: read`, `packages: read` | checkout `ref: TAG`; login; `docker pull ${IMAGE}@<digest of this arch>`; assert `docker run --rm <ref> version` output contains `TAG`; `docker build -f test/fakes/Dockerfile -t remora-fakes:dev .`; `REMORA_IMAGE=<ref> FAKES_IMAGE=remora-fakes:dev scripts/quickstart-smoke.sh`; `go test -tags e2e -count=1 -timeout 45m ./test/e2e/...` with `REMORA_IMAGE=<ref>` |
-| `publish`, `needs: verify` | `ubuntu-24.04` | `contents: read`, `packages: write`, `id-token: write` | download both digests; `docker/metadata-action@v5` with `images: IMAGE`, tags `type=semver,pattern={{version}},value=TAG`, `type=semver,pattern={{major}}.{{minor}},value=TAG,enable=${{ !contains(TAG, '-') }}`, `type=raw,value=latest,enable=${{ !contains(TAG, '-') }}`, `flavor: latest=false`; `docker buildx imagetools create` with those tags from both `IMAGE@sha256:<digest>`; read the index digest with `docker buildx imagetools inspect`; `sigstore/cosign-installer@v3`; `cosign sign --yes ${IMAGE}@<index digest>`; then the verify command below; output `digest` |
+| `publish`, `needs: verify` | `ubuntu-24.04` | `contents: read`, `packages: write`, `id-token: write` | download both digests; `docker/metadata-action@v5` with `images: IMAGE`, tags `type=semver,pattern={{version}},value=TAG`, `type=semver,pattern={{major}}.{{minor}},value=TAG,enable=${{ !contains(TAG, '-') }}`, `type=raw,value=latest,enable=${{ !contains(TAG, '-') }}`, `flavor: latest=false`; job concurrency `release-publish` (one publish at a time across releases); X.Y is enabled only when TAG is the newest stable patch of its minor and `latest` only when TAG is the newest stable tag, so a rerun of an older release never takes a channel back; `docker buildx imagetools create` from both `IMAGE@sha256:<digest>` under a run-scoped staging tag only; read the index digest with `docker buildx imagetools inspect`; `sigstore/cosign-installer@v3`; `cosign sign --yes ${IMAGE}@<index digest>`; then the verify command below; only then `imagetools create` the public tags from the signed digest and check the version tag resolves to it; output `digest` |
 | `notes`, `needs: publish` | `ubuntu-24.04` | `contents: write`, `packages: read` | checkout; login; `docker create --platform linux/amd64 IMAGE@digest` and `docker cp <id>:/usr/local/lib/remora/engines/versions.json .`; write `sbom-linux-amd64.spdx.json` and `sbom-linux-arm64.spdx.json` from `docker buildx imagetools inspect IMAGE@digest --format '{{ json (index .SBOM "linux/amd64").SPDX }}'` (and arm64); `gh release view TAG --json body -q .body`, cut everything from the marker line onward (idempotent re-runs), append `scripts/release-notes.sh` output, `gh release edit TAG --notes-file`; `gh release upload TAG sbom-*.spdx.json --clobber` |
 
 Verify command (also used in README and `docs/maintaining.md`):
@@ -495,7 +495,8 @@ func PRBody(a Action, between []Tag) string // a release-notes link per tag, URL
 ```
 
 CLI: `go run ./tools/enginebump -engine bifrost -body pr-body.md` prints `kind=<k>`, `title=<t>` lines (for
-`$GITHUB_OUTPUT`) and the `Note` to stderr. For `bump` it runs `git update-index --cacheinfo 160000,<sha>,<path>`;
+`$GITHUB_OUTPUT`) and the `Note` to stderr. For `bump` it runs `git update-index --cacheinfo 160000,<sha>,<path>` and sets the engine's line in
+`engines/versions.env` to the new tag (`check-engine-pins.sh` compares the two);
 for `unfork` it also runs `git config -f .gitmodules submodule.<path>.url <Upstream>` and rewrites
 `docs/patches.md` with `WithoutPatch`. `-dry-run` changes nothing. `merged` is implemented with
 `gh api repos/<o>/<r>/pulls/<n> --jq .merged,.merge_commit_sha` and
@@ -610,7 +611,7 @@ Steps:
    with `GH_TOKEN` = the App token (read-only API calls).
 5. If `kind` is `bump` or `unfork`: `peter-evans/create-pull-request@v7` with the App token,
    `branch: engine-bump/${{ matrix.engine }}`, `title` and `commit-message` = `steps.decide.outputs.title`,
-   `body-path: pr-body.md`, `delete-branch: true`, `add-paths: .gitmodules, docs/patches.md` plus the gitlink
+   `body-path: pr-body.md`, `delete-branch: true`, `add-paths: .gitmodules, docs/patches.md, engines/versions.env` plus the gitlink
    (already staged by the tool).
 6. If a pull request was created or updated: `gh pr merge --auto --squash "$PR_URL"` with the App token.
 
