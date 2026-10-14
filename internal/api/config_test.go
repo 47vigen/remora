@@ -165,11 +165,8 @@ func TestApplyConfigReportsPartialFailure(t *testing.T) {
 	}
 }
 
-// pendingOperations are the operations plan 05 has not implemented yet (Tasks 8–11: logs, stats and key usage).
-// Remove each one as its task lands.
-var pendingOperations = map[string]bool{
-	"GetKeyUsage": true, "GetStats": true,
-}
+// pendingOperations are the operations plan 05 has not implemented yet. Remove each one as its task lands.
+var pendingOperations = map[string]bool{}
 
 // TestNoUnimplementedLeft calls every operation of the generated interface over HTTP, with path parameters set and
 // an empty JSON object as the body, and expects an answer other than 501.
