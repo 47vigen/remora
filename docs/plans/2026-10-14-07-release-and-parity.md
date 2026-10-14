@@ -874,3 +874,10 @@ Expected: the engine table (`bifrost`, `cliproxyapi` versions), the pull-by-dige
   `test/e2e.TestProviderOpenAICompatible`).
 - Task 7: the fakes had no `/v1/responses` route; `openai.responses` (POST `/v1/responses`) was added with a default
   answer, for `TestResponsesAgentMessage` and the Responses half of `TestMaxTokensAndReasoningEffort`.
+- Task 7 (gap tests, load and audio logs): `TestConcurrentHeavyRequests`, `TestLargePromptNoQueueDeadline`,
+  `TestLongStreamNoDeadline`, `TestFailingChainFailsFast` and `TestTranscriptionLogged` live in
+  `test/e2e/parity_load_test.go`, not `parity_gaps_test.go`; the parity proofs name the directory, so they resolve
+  either way. A long stream needs time between chunks, which the fakes could not script: `control.Step` gains
+  `interval_ms` (a wait before every SSE event after the first), unit-tested in `TestSSEInterval`, so the fakes
+  image must be rebuilt for these tests. The deadline tests outlast the reference deployment's 15 s queue deadline;
+  the engines' own configured deadlines (600 s per request, 300 s between stream chunks) are too long for CI.

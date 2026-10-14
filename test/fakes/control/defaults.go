@@ -199,7 +199,7 @@ func streamChat(w http.ResponseWriter, r *http.Request, model, content string) {
 	h.Set("Content-Type", "text/event-stream")
 	h.Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
-	writeSSE(w, r, events)
+	writeSSE(w, r, events, 0)
 }
 
 // splitRunes cuts s into at most n non-empty pieces on rune boundaries.

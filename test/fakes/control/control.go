@@ -22,6 +22,9 @@ type Step struct {
 	Body    string            `json:"body,omitempty"`     // written verbatim
 	DelayMS int               `json:"delay_ms,omitempty"` // before the first byte; honours request cancellation
 	SSE     []string          `json:"sse,omitempty"`      // when set: text/event-stream, one flushed `data:` event each, then [DONE]
+	// IntervalMS, with SSE, waits this long before every event after the first, [DONE] included; it honours request
+	// cancellation. It makes a stream last as long as a test needs.
+	IntervalMS int `json:"interval_ms,omitempty"`
 }
 
 // Script is the ordered replies for one (upstream, route).
@@ -172,7 +175,7 @@ func writeStep(w http.ResponseWriter, r *http.Request, step Step) {
 	}
 	w.WriteHeader(status)
 	if step.SSE != nil {
-		writeSSE(w, r, step.SSE)
+		writeSSE(w, r, step.SSE, time.Duration(step.IntervalMS)*time.Millisecond)
 		return
 	}
 	if step.Body != "" {
@@ -181,11 +184,20 @@ func writeStep(w http.ResponseWriter, r *http.Request, step Step) {
 }
 
 // writeSSE sends each entry verbatim as one `data:` event, flushing after
-// each, then the terminating `data: [DONE]` event. It stops when the client
-// goes away.
-func writeSSE(w http.ResponseWriter, r *http.Request, entries []string) {
+// each, then the terminating `data: [DONE]` event, waiting interval before
+// every event but the first. It stops when the client goes away.
+func writeSSE(w http.ResponseWriter, r *http.Request, entries []string, interval time.Duration) {
 	rc := http.NewResponseController(w)
-	for _, e := range append(entries[:len(entries):len(entries)], "[DONE]") {
+	for i, e := range append(entries[:len(entries):len(entries)], "[DONE]") {
+		if i > 0 && interval > 0 {
+			t := time.NewTimer(interval)
+			select {
+			case <-r.Context().Done():
+				t.Stop()
+				return
+			case <-t.C:
+			}
+		}
 		if r.Context().Err() != nil {
 			return
 		}

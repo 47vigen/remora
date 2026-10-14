@@ -1,6 +1,7 @@
 package control_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -288,6 +289,48 @@ func TestDelay(t *testing.T) {
 			t.Fatalf("ctx err = %v", ctx.Err())
 		}
 	})
+}
+
+// TestSSEInterval proves interval_ms spaces the events of a scripted stream: each event is flushed on its own, and
+// the next one follows only after the interval, so a stream can last as long as a test needs.
+func TestSSEInterval(t *testing.T) {
+	srv := newServer(t)
+	putScript(t, srv.URL, "a", control.RouteOpenAIChat, control.Script{Steps: []control.Step{
+		{SSE: []string{`{"n":1}`, `{"n":2}`, `{"n":3}`}, IntervalMS: 100},
+	}})
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL+"/u/a/v1/chat/completions", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	r := bufio.NewReader(resp.Body)
+	first, err := r.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read first event: %v", err)
+	}
+	firstAt := time.Since(start)
+	if first != "data: {\"n\":1}\n" {
+		t.Fatalf("first line %q", first)
+	}
+	if firstAt >= 100*time.Millisecond {
+		t.Fatalf("first event after %v, want it before the first interval", firstAt)
+	}
+	rest, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "\ndata: {\"n\":2}\n\ndata: {\"n\":3}\n\ndata: [DONE]\n\n"; string(rest) != want {
+		t.Fatalf("rest %q, want %q", rest, want)
+	}
+	// Three intervals: before events 2 and 3 and before [DONE].
+	if elapsed := time.Since(start); elapsed < 300*time.Millisecond {
+		t.Fatalf("stream took %v, want >= 300ms", elapsed)
+	}
 }
 
 func TestReset(t *testing.T) {
