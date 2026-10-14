@@ -887,3 +887,33 @@ func TestProxy_SSEOversizedErrorReplaced(t *testing.T) {
 		t.Errorf("body = %q, want remora's error then the rest of the stream", body)
 	}
 }
+
+func TestProxy_SSEErrorLateInOversizedLine(t *testing.T) {
+	f := newFixture(t)
+	big := "data: {\"pad\":\"" + strings.Repeat("x", maxSSELine+(64<<10)) + "\",\"error\":{\"message\":\"bifrost sk-bf-leak\"}}\n\n"
+	f.upstream(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, big+"data: [DONE]\n\n")
+	})
+	resp := f.do(t, http.MethodPost, "/v1/chat/completions", keyFull, "application/json", chatBody("fast"), nil)
+	body := string(resp.Body)
+	if strings.Contains(body, "bifrost") || strings.Contains(body, "sk-bf-") {
+		t.Fatal("error late in an oversized line forwarded unscrubbed")
+	}
+	if !strings.Contains(body, `"upstream_error"`) || !strings.HasSuffix(body, "data: [DONE]\n\n") {
+		t.Errorf("body tail = %q, want remora's error then the rest of the stream", body[max(0, len(body)-300):])
+	}
+}
+
+func TestProxy_RoutingHeadersScrubbed(t *testing.T) {
+	f := newFixture(t)
+	f.upstream(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(headerRoutingProvider, "bifrost-up")
+		w.Header().Set(headerRoutingModel, "m1")
+		okJSON(w, nil)
+	})
+	resp := f.do(t, http.MethodPost, "/v1/chat/completions", keyFull, "application/json", chatBody("fast"), nil)
+	if v := resp.Header.Get(headerServedBy); v == "" || strings.Contains(strings.ToLower(v), "bifrost") {
+		t.Errorf("%s = %q, want a scrubbed value", headerServedBy, v)
+	}
+}

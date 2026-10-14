@@ -792,3 +792,22 @@ func TestSync_PrimaryTargetWithoutKeySkipped(t *testing.T) {
 		t.Errorf("log = %q", h.log.String())
 	}
 }
+
+func TestSynced_ClearedByAFailedPassThatChangedTheEngine(t *testing.T) {
+	h := newHarness(t)
+	h.base(t)
+	h.sync(t)
+	// A pass that fails after calling the engine leaves it partly reconciled.
+	h.write(t, putAll(nil, chat("slow", "up-a/m2")))
+	h.eng.FailOnce("CreateRoutingRule")
+	if err := h.rec.Sync(context.Background()); err == nil {
+		t.Fatal("Sync with a failing engine: want an error")
+	}
+	if h.rec.Synced() {
+		t.Fatal("still Synced after a pass that changed the engine and failed")
+	}
+	h.sync(t)
+	if !h.rec.Synced() {
+		t.Fatal("not Synced after a successful Sync")
+	}
+}

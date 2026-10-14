@@ -82,11 +82,12 @@ func setRemoraHeaders(h http.Header, info *reqInfo) {
 	provider, model := h.Get(headerRoutingProvider), h.Get(headerRoutingModel)
 	fallback := strings.EqualFold(strings.TrimSpace(h.Get(headerRoutingIsFallback)), "true")
 	cleanResponseHeaders(h)
+	// These values are set after cleanResponseHeaders, so they are scrubbed here: a name may contain an engine word.
 	if info.isAlias {
-		h.Set(headerAlias, info.model)
+		h.Set(headerAlias, scrubString(info.model))
 	}
 	if provider != "" && model != "" {
-		h.Set(headerServedBy, provider+"/"+model)
+		h.Set(headerServedBy, scrubString(provider+"/"+model))
 	}
 	h.Set(headerFallback, strconv.FormatBool(fallback))
 }
@@ -239,6 +240,14 @@ func rewriteSSELine(line []byte, s shape) []byte {
 	return append(res, ending...)
 }
 
+// markerOverlap is how many bytes of a forwarded chunk are kept to find an error marker split across chunks.
+var markerOverlap = len(nativeErrorKey) - 1
+
+// mayBeSSEErrorPart reports whether a piece of an over-long data line holds an error marker.
+func mayBeSSEErrorPart(b []byte) bool {
+	return bytes.Contains(b, []byte(`"error"`)) || bytes.Contains(b, []byte(nativeErrorKey))
+}
+
 // mayBeSSEError reports whether an SSE line is one rewriteSSELine could treat as an error event.
 func mayBeSSEError(line []byte) bool {
 	return bytes.HasPrefix(line, []byte("data:")) &&
@@ -268,6 +277,7 @@ type sseScrubber struct {
 	pending     []byte // bytes ready for the caller
 	passthrough bool   // inside an over-long line: forward it unread until its newline
 	discard     bool   // inside an over-long line that may be an error: drop it until its newline
+	tail        []byte // the last bytes forwarded in passthrough, so a marker split across chunks is still seen
 	err         error
 }
 
@@ -297,6 +307,17 @@ func (s *sseScrubber) fill() {
 	s.line = append(s.line, chunk...) // chunk is only valid until the next read
 	switch {
 	case s.passthrough:
+		// Keep looking for an error marker in the rest of the line, across chunk boundaries: once one shows up,
+		// the line is cut there and remora's own error follows, so an engine error is never forwarded unscrubbed.
+		s.tail = append(s.tail, s.line...)
+		scan := s.tail
+		if mayBeSSEErrorPart(scan) {
+			s.pending = append([]byte("\n\n"), s.sseError()...)
+			s.line, s.tail = nil, nil
+			s.passthrough, s.discard = false, full
+			break
+		}
+		s.tail = append([]byte(nil), scan[max(0, len(scan)-markerOverlap):]...)
 		s.pending, s.line = s.line, nil
 		s.passthrough = full
 	case s.discard:
@@ -304,10 +325,11 @@ func (s *sseScrubber) fill() {
 		s.discard = full
 	case full && len(s.line) > maxSSELine && mayBeSSEError(s.line):
 		// Too long to inspect, and it may carry an engine error: replace it rather than forward it unscrubbed.
-		s.pending = append(append([]byte("data: "), errUpstreamBody(http.StatusBadGateway).body(s.shape)...), '\n')
+		s.pending = s.sseError()
 		s.line = nil
 		s.discard = true
 	case full && len(s.line) > maxSSELine:
+		s.tail = append(s.tail[:0], s.line[max(0, len(s.line)-markerOverlap):]...)
 		s.pending, s.line = s.line, nil
 		s.passthrough = true
 	case full:
@@ -315,6 +337,11 @@ func (s *sseScrubber) fill() {
 	default:
 		s.pending, s.line = rewriteSSELine(s.line, s.shape), nil
 	}
+}
+
+// sseError is remora's own error event, replacing a line too long to inspect.
+func (s *sseScrubber) sseError() []byte {
+	return append(append([]byte("data: "), errUpstreamBody(http.StatusBadGateway).body(s.shape)...), '\n')
 }
 
 func (s *sseScrubber) Close() error { return s.src.Close() }

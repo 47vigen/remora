@@ -94,16 +94,21 @@ func (r *Reconciler) Sync(ctx context.Context) error {
 	return nil
 }
 
-// Synced reports whether a Sync has completed since the process started: until then the front door may lack or
-// hold stale providers, rules and keys.
+// Synced reports whether the front door holds the store's state: false until a Sync completes, and again after a
+// pass that changed the engine fails, until a later pass succeeds.
 func (r *Reconciler) Synced() bool { return r.synced.Load() }
 
-// sync runs one non-strict pass; objects in force are pushed even when their MAC matches.
+// sync runs one non-strict pass; objects in force are pushed even when their MAC matches. A pass that fails after
+// it changed the engine leaves it partly reconciled, so Synced reports false until a pass succeeds again.
 func (r *Reconciler) sync(ctx context.Context, force map[string]bool) error {
+	touched := map[string]bool{}
 	err := r.Store.Write(ctx, func(tx *store.Tx) error {
-		return (&pass{r: r, tx: tx, force: force, touched: map[string]bool{}}).run(ctx)
+		return (&pass{r: r, tx: tx, force: force, touched: touched}).run(ctx)
 	})
 	if err != nil {
+		if len(touched) > 0 {
+			r.synced.Store(false)
+		}
 		return fmt.Errorf("reconcile: sync: %w", err)
 	}
 	return nil
@@ -127,6 +132,8 @@ func (r *Reconciler) Change(ctx context.Context, fn func(ctx context.Context, tx
 	if len(touched) > 0 {
 		if rerr := r.sync(context.WithoutCancel(ctx), touched); rerr != nil {
 			r.log().Error("reconcile: recovery after a failed change", "err", rerr)
+		} else {
+			r.synced.Store(true)
 		}
 	}
 	return fmt.Errorf("reconcile: change: %w", err)

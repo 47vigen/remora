@@ -109,7 +109,10 @@ where they differ.
 - The Responses WebSocket re-reads the client key on every `response.create`, so a key disabled, deleted or narrowed
   while a socket is open applies to its next frame.
 - An SSE line over 1 MiB that may be an error event is replaced with remora's own error instead of being forwarded
-  unscrubbed; other long lines still pass through as they arrive.
+  unscrubbed; other long lines pass through as they arrive, but are still scanned, and an error marker later in the
+  line cuts it there and appends remora's error. `X-Remora-Alias` and `X-Remora-Served-By` values are scrubbed too.
+- `Synced` turns false again when a pass that already changed the engine fails, so `/v1` answers `not_ready` until
+  a later pass (or a failed Change's recovery) succeeds; a pass that fails before any engine change keeps it.
 - `remora.yaml` must be one YAML document; a second one is an error, since the file is the whole truth.
 - `remora serve` writes its log through the same scrubber as `/v1`.
 - `remora apply` prints each generated client key value before it changes anything: when the output fails, nothing
