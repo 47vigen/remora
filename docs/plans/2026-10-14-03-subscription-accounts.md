@@ -742,3 +742,24 @@ These need real subscription accounts. They cannot be e2e-tested. Everything aro
 - Codex chat → Responses translation against the real Codex backend, with `x-remora-dropped-params` on real traffic.
 - Real quota signals, per-account cooldowns, cooldown reset and token refresh over days.
 - Cooling triggered by a real 402 or 429 relayed by the OAuth engine.
+
+## Corrections found during implementation
+
+- **OAuth engine settings (Task 5).** The engine's GET /config reads its file, and a PATCH in the moment before its
+  reload hook exists is saved but not applied. Reconcile now reads the settings and PATCHes only what is missing, and
+  the supervisor renders the routing and cooling settings into the engine's config at boot, so a fresh start never
+  depends on that window. This also avoids an engine reload on every pass.
+- **OAuth engine errors (Task 1).** An error carries both the engine's `error` and `message` fields, and any spelling
+  of the engine's name in it is replaced, so no engine name or data path reaches a user.
+- **Front-door wiring (Task 6).** The internal OAuth provider sets `allow_private_network` (the engine is on
+  loopback). OAuth rules take priorities 100 and up, below `RulePriorityBase`. The OAuth engine's own reconcile runs
+  in the same pass through `Reconciler.Also` and `SyncAll`; a cooling change runs only the front-door Sync.
+- **`x-remora-dropped-params` (Task 7).** The header is set by a built-in step after all response hooks, so it sees
+  the renamed served-by. `service_tier` on chat is reported as dropped unless it is a value the engine keeps.
+- **Log reading (Task 8).** `GetLog` on a 404 returns `bifrost.ErrNotFound`, like the rest of the client. `Tail`
+  starts its window at now minus the lookback, then at the newest row seen minus the lookback.
+- **Cooling replay.** Replayed 402 and 429 rows from before a restart are not counted twice.
+- **e2e (Task 12).** The cool alias uses `m1`, a model the fake lists (the front door refuses a model its provider
+  does not list). compose sets `REMORA_COOLING_429_COUNT=1000` and `REMORA_COOLING_DEFAULT=1s`, so the earlier
+  fallback tests' scripted 429s and 402s do not cool `up-a` for later tests; the 402 subtests wait out the cooldown
+  they start. The 429 threshold is covered by the cooling unit tests.
