@@ -82,7 +82,8 @@ type Reconciler struct {
 	MaxDepth int           // 0 = alias.DefaultMaxDepth
 	Log      *slog.Logger
 
-	synced atomic.Bool // a Sync has completed
+	synced     atomic.Bool // a Sync has completed
+	alsoSynced atomic.Bool // a SyncAll has run every Also step without an error
 }
 
 func (r *Reconciler) log() *slog.Logger {
@@ -103,8 +104,11 @@ func (r *Reconciler) Sync(ctx context.Context) error {
 }
 
 // Synced reports whether the front door holds the store's state: false until a Sync completes, and again after a
-// pass that changed the engine fails, until a later pass succeeds.
-func (r *Reconciler) Synced() bool { return r.synced.Load() }
+// pass that changed the engine fails, until a later pass succeeds. With Also steps, it also stays false until one
+// SyncAll has run all of them without an error, so the engines behind the front door start from the store too.
+func (r *Reconciler) Synced() bool {
+	return r.synced.Load() && (len(r.Also) == 0 || r.alsoSynced.Load())
+}
 
 // sync runs one non-strict pass; objects in force are pushed even when their MAC matches. A pass that fails after
 // it changed the engine leaves it partly reconciled, so Synced reports false until a pass succeeds again.
@@ -154,6 +158,9 @@ func (r *Reconciler) SyncAll(ctx context.Context) error {
 		if err := fn(ctx); err != nil {
 			errs = append(errs, err)
 		}
+	}
+	if len(errs) == 0 {
+		r.alsoSynced.Store(true)
 	}
 	if err := r.Sync(ctx); err != nil {
 		errs = append(errs, err)
