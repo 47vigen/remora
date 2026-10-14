@@ -76,6 +76,30 @@ driver), `crypto/aes` GCM + `crypto/hkdf`, `github.com/coder/websocket` (WebSock
 | Health: `GET /health` → `{"status":"ok",...}`; management auth: HTTP Basic | `handlers/health.go:27-34`; `handlers/middlewares.go:1741-1752` |
 | Provider defaults: concurrency 1000, buffer 5000 | `core/schemas/provider.go:13-21,257-258` |
 
+## Corrections found during implementation
+
+Checked against the pinned front door (transports/v2.3.0, 9237ec0) and the real binary; these override the text above
+where they differ.
+
+- Routing-rule priority is unique per scope (a duplicate answers 409). Every rule remora pushes takes its own priority
+  at or above `RulePriorityBase = 1000`, keeps it across updates, and never renumbers another; below 1000 is left to
+  the `remora-oauth-*` rules.
+- A key update needs the key value (an empty value answers 400), so the reconciler always sends the decrypted secret.
+  Key values starting with `env.` or `vault.` are refused before any call: the engine would resolve them itself.
+- A provider needs a key before it can be a rule target or fallback; desired-state validation checks this.
+- A virtual key's `value` is a plain string on create and list; the client also accepts the object form.
+- Key ids and names are unique across providers (remora sends its key id as both); rule names are not unique, so the
+  reconciler dedupes them. Deleting an unknown provider answers 200; updating an unknown provider creates it.
+- Management errors are nested: `{"is_bifrost_error":false,"status_code":N,"error":{"message":..}}`.
+- The front door's real mid-stream error is nested under `"error"`; both forms are mapped. Error bodies over 1 MiB are
+  replaced with remora's own error. `Expect`, `Server`, the front door's CORS headers and any header naming the engine
+  are dropped.
+- `serve` sets up the sealer before the engines start (a bad master key fails fast), runs the first Sync before the
+  listener opens (a wiped engine never meets a `/v1` request first), then reconciles on the timer. The management
+  client has a 30 s timeout and ignores proxy environment variables.
+- The Responses WebSocket checks every client frame the engine could read as `response.create` (its decoder matches
+  keys case-insensitively); mapped engine error events carry `"type":"error"`, and remora's own carry `"status"`.
+
 ## Decisions
 
 - **Seeding before plan 05 (the `remora apply -f` minimal form).** Task 9 adds `remora apply -f remora.yaml` as a
@@ -102,7 +126,8 @@ driver), `crypto/aes` GCM + `crypto/hkdf`, `github.com/coder/websocket` (WebSock
   engine's own log `alias` column is its model mapping, not a remora alias). A table `engine_sync` remembers an HMAC of each object as last pushed, so a timer pass makes no
   calls when nothing changed.
 - **Alias routing rule.** CEL `model == "<name>" && provider in ["", "openai", "typesafe"]` (the three default
-  providers a bare name parses to on the surfaces remora exposes), priority 0, scope global. Alias names match
+  providers a bare name parses to on the surfaces remora exposes), scope global, and a priority of its own at or above
+  `RulePriorityBase` (1000; the engine refuses two rules with one priority in a scope). Alias names match
   `^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`, and the part before a `/` must not be a provider name, so the engine
   never splits an alias as a provider model.
 - **Allowlist globs.** `Allowed` keeps the `path.Match` contract and adds two rules users need: the pattern `*`
@@ -176,7 +201,7 @@ const OAuthProvider = "remora-oauth" // the OAuth engine's front-door provider (
 Wire values the client always sends: `network_config.max_retries: 0`, `default_request_timeout_in_seconds: 600`,
 `stream_idle_timeout_in_seconds: 300`, `concurrency_and_buffer_size: {1000, 5000}`, key `models: ["*"]`,
 `weight: 1`; virtual key `allow_all_providers: true`, `description: "managed by remora"`; rule `enabled: true`,
-`scope: "global"`, `priority: 0`, target `weight: 1`.
+`scope: "global"`, a unique `priority` (see "Corrections found during implementation"), target `weight: 1`.
 
 - [ ] **Step 1: Write the failing tests** — one `httptest.Server` that records method, path, Basic auth and decoded
   JSON body, and serves canned answers in the engine's shapes from the table above.
@@ -684,8 +709,8 @@ func TestAllowed(t *testing.T) {
 Run: `go test -race ./internal/proxy/... -run 'TestExtractModel|TestAllowed'`
 Expected: FAIL, `undefined: ExtractModel`.
 
-- [ ] **Step 3: Implement** with `mime/multipart.NewReader` over the held bytes and `encoding/json` into
-  `map[string]json.RawMessage`.
+- [ ] **Step 3: Implement** with `mime/multipart.NewReader` over the held bytes and an `encoding/json` token walk of
+  the top level (raw values), so a duplicate or other-case `model` key is seen and refused.
 
 - [ ] **Step 4: Run to verify it passes**
 
