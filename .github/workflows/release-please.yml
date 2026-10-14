@@ -1,0 +1,32 @@
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      # Pull requests and tags made with GITHUB_TOKEN start no workflows, so the
+      # release pull request would get no CI and the tag would never start
+      # release.yml. The bot App's token does both (docs/maintaining.md).
+      - name: Create bot token
+        id: app
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.REMORA_BOT_APP_ID }}
+          private-key: ${{ secrets.REMORA_BOT_PRIVATE_KEY }}
+      - uses: googleapis/release-please-action@v5
+        with:
+          token: ${{ steps.app.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

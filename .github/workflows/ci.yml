@@ -109,3 +109,12 @@ jobs:
         with:
           name: e2e-compose-logs
           path: e2e-compose.log
+
+  actionlint:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Lint workflows
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:latest -color
