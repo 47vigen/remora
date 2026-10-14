@@ -10,7 +10,7 @@ import (
 	"syscall"
 )
 
-const usage = "usage: remora <serve|version|healthcheck>"
+const usage = "usage: remora <serve|apply|version|healthcheck>"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -28,6 +28,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	switch args[0] {
 	case "serve":
 		return runServe(ctx, getenv, stderr)
+	case "apply":
+		return runApply(ctx, args[1:], getenv, stdout, stderr)
 	case "version":
 		return runVersion(stdout)
 	case "healthcheck":

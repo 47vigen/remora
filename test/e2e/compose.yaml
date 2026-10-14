@@ -6,6 +6,13 @@ services:
     image: ${REMORA_IMAGE:-remora:dev}
     environment:
       REMORA_ADMIN_PASSWORD: e2e-admin-password
+      # Test values only; testdata/remora.yaml reads them through env: references.
+      E2E_UPSTREAM_KEY: e2e-upstream-key
+      E2E_KEY_FULL: rk-e2e-full-key
+      E2E_KEY_LIMITED: rk-e2e-limited-key
+      E2E_KEY_OFF: rk-e2e-off-key
+    volumes:
+      - ./testdata:/e2e:ro
     ports:
       - "127.0.0.1::8080"
       - "127.0.0.1::18080"   # published on purpose: proves the engines are bound to loopback
