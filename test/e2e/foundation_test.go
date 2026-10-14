@@ -104,9 +104,10 @@ func wantEngines(t *testing.T) []engineVersion {
 	if v["BIFROST_VERSION"] == "" || v["CLIPROXYAPI_VERSION"] == "" {
 		t.Fatalf("versions.env is missing an engine: %v", v)
 	}
+	// Start order: the OAuth engine starts first because the front door calls it.
 	return []engineVersion{
-		{Name: "bifrost", Version: v["BIFROST_VERSION"]},
 		{Name: "cliproxyapi", Version: v["CLIPROXYAPI_VERSION"]},
+		{Name: "bifrost", Version: v["BIFROST_VERSION"]},
 	}
 }
 
