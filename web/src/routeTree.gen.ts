@@ -13,6 +13,7 @@ import { Route as AppRouteImport } from './routes/_app'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppoverviewIndexRouteImport } from './routes/_app/(overview)/index'
 import { Route as AppProvidersIndexRouteImport } from './routes/_app/providers/index'
+import { Route as AppProvidersProviderIdRouteImport } from './routes/_app/providers/$providerId'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -33,14 +34,21 @@ const AppProvidersIndexRoute = AppProvidersIndexRouteImport.update({
   path: '/providers/',
   getParentRoute: () => AppRoute,
 } as any)
+const AppProvidersProviderIdRoute = AppProvidersProviderIdRouteImport.update({
+  id: '/providers/$providerId',
+  path: '/providers/$providerId',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppoverviewIndexRoute
   '/login': typeof LoginRoute
+  '/providers/$providerId': typeof AppProvidersProviderIdRoute
   '/providers/': typeof AppProvidersIndexRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
+  '/providers/$providerId': typeof AppProvidersProviderIdRoute
   '/': typeof AppoverviewIndexRoute
   '/providers': typeof AppProvidersIndexRoute
 }
@@ -48,15 +56,22 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
+  '/_app/providers/$providerId': typeof AppProvidersProviderIdRoute
   '/_app/(overview)/': typeof AppoverviewIndexRoute
   '/_app/providers/': typeof AppProvidersIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/providers/'
+  fullPaths: '/' | '/login' | '/providers/$providerId' | '/providers/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/login' | '/' | '/providers'
-  id: '__root__' | '/_app' | '/login' | '/_app/(overview)/' | '/_app/providers/'
+  to: '/login' | '/providers/$providerId' | '/' | '/providers'
+  id:
+    | '__root__'
+    | '/_app'
+    | '/login'
+    | '/_app/providers/$providerId'
+    | '/_app/(overview)/'
+    | '/_app/providers/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -94,15 +109,24 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppProvidersIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/providers/$providerId': {
+      id: '/_app/providers/$providerId'
+      path: '/providers/$providerId'
+      fullPath: '/providers/$providerId'
+      preLoaderRoute: typeof AppProvidersProviderIdRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
 interface AppRouteChildren {
+  AppProvidersProviderIdRoute: typeof AppProvidersProviderIdRoute
   AppoverviewIndexRoute: typeof AppoverviewIndexRoute
   AppProvidersIndexRoute: typeof AppProvidersIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppProvidersProviderIdRoute: AppProvidersProviderIdRoute,
   AppoverviewIndexRoute: AppoverviewIndexRoute,
   AppProvidersIndexRoute: AppProvidersIndexRoute,
 }

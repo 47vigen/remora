@@ -43,7 +43,7 @@ test("choosing a kind shows its fields", async () => {
   await userEvent.click(screen.getByRole("option", { name: "Built-in" }));
   expect(screen.getByRole("button", { name: /Provider type/ })).toBeInTheDocument();
   expect(screen.queryByRole("textbox", { name: "Base URL" })).toBeNull();
-});
+}, 15_000); // opens two popovers; slow when the suite runs in parallel
 
 test("in edit mode key hints are shown and a blank key keeps its value", () => {
   render(

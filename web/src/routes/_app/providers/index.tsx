@@ -195,7 +195,13 @@ function ProvidersPage() {
             items={rows.items}
             subscriptions={rows.subscriptions}
             testing={testing}
-            onOpen={(name) => void go({ href: `/providers/${encodeURIComponent(name)}` })}
+            onOpen={(name) =>
+              void go({
+                to: "/providers/$providerId",
+                params: { providerId: name },
+                search: { page: 1, pageSize: 25, q: "" },
+              })
+            }
             onTest={(p) => test.mutate({ path: { name: p.name } })}
             onDelete={(p) => {
               remove.reset();
