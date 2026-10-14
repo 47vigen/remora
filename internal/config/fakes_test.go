@@ -229,7 +229,7 @@ func (f fakeKeys) Get(_ context.Context, id string) (Key, error) {
 	return k, nil
 }
 
-func (f fakeKeys) Create(_ context.Context, name string, allow []string, value string) (Key, string, error) {
+func (f fakeKeys) Create(_ context.Context, name string, allow []string, value string, enabled bool) (Key, string, error) {
 	f.w.mu.Lock()
 	defer f.w.mu.Unlock()
 	if err := f.w.write("create key " + name); err != nil {
@@ -239,7 +239,7 @@ func (f fakeKeys) Create(_ context.Context, name string, allow []string, value s
 		value = fmt.Sprintf("sk-generated-%d", f.w.nextID)
 	}
 	f.w.nextID++
-	k := Key{ID: fmt.Sprintf("id-%d", f.w.nextID), Name: name, Allow: allow, Enabled: true}
+	k := Key{ID: fmt.Sprintf("id-%d", f.w.nextID), Name: name, Allow: allow, Enabled: enabled}
 	f.w.keys[k.ID], f.w.values[k.ID] = k, value
 	return k, value, nil
 }

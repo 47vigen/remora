@@ -17,6 +17,7 @@ import (
 
 	"github.com/47vigen/remora/internal/accounts"
 	"github.com/47vigen/remora/internal/alias"
+	"github.com/47vigen/remora/internal/cooling"
 	"github.com/47vigen/remora/internal/engine/bifrost"
 	"github.com/47vigen/remora/internal/engine/cliproxyapi"
 	"github.com/47vigen/remora/internal/engine/cliproxyapi/cliproxyapitest"
@@ -93,7 +94,7 @@ func TestAliasesAndNamesAdapters(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Create provider: %v", err)
 	}
-	as := NewAliases(st, rec)
+	as := NewAliases(st, rec, nil)
 	fast := alias.Alias{Name: "fast", Kind: alias.KindChat, Members: []alias.Member{{Ref: "up/m1"}, {Ref: "up/m2"}}}
 	if _, err := as.Put(ctx, fast, true); err != nil {
 		t.Fatalf("Put: %v", err)
@@ -138,7 +139,7 @@ func TestKeysAdapter(t *testing.T) {
 	st, rec, _ := adapterStore(t)
 	ks := NewKeys(st, rec)
 
-	k, value, err := ks.Create(ctx, "svc", []string{"fast"}, "")
+	k, value, err := ks.Create(ctx, "svc", []string{"fast"}, "", true)
 	if err != nil || value == "" || k.ID == "" || !k.Enabled {
 		t.Fatalf("Create = %+v %q %v", k, value, err)
 	}
@@ -385,6 +386,18 @@ func TestAccountsOverHTTPNeverNameEngine(t *testing.T) {
 		if lower := strings.ToLower(body); strings.Contains(lower, "cliproxy") || strings.Contains(lower, "bifrost") {
 			t.Errorf("%s %s answer names an engine: %s", c.method, c.path, body)
 		}
+	}
+}
+
+func TestAliasesAdapterCooling(t *testing.T) {
+	until := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
+	snap := []cooling.Cooling{{Target: alias.Target{Provider: "up", Model: "m1"}, Until: until, Reason: "402"}}
+	got, err := NewAliases(nil, nil, func() []cooling.Cooling { return snap }).Cooling(context.Background())
+	if err != nil || len(got) != 1 || got[0].Target != snap[0].Target || !got[0].Until.Equal(until) || got[0].Reason != "402" {
+		t.Errorf("Cooling = %+v, %v", got, err)
+	}
+	if got, err := NewAliases(nil, nil, nil).Cooling(context.Background()); err != nil || len(got) != 0 {
+		t.Errorf("Cooling without a cooler = %+v, %v", got, err)
 	}
 }
 

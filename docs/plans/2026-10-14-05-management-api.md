@@ -853,6 +853,10 @@ func TestManagementEndToEnd(t *testing.T) {
   filter for a subscription provider matches every subscription provider's rows (the front door serves them all
   from one provider); model, key and alias filters are exact. Without `from`/`to`, lists and stats cover the last
   24 hours. `group_by=key` names groups by key id.
+- **Review fixes.** `Keys.Create` takes the enabled state, so a disabled key from `remora.yaml` is created disabled
+  in one write. A failed apply's error carries `applied`, the changes made before it with any generated key value,
+  and `remora apply` prints those values before the error. The aliases adapter reports the live cooler's snapshot.
+  `POST /api/providers/{name}/test` still answers 501 in production (tracked as a follow-up issue).
 - **Tokens (Task 12).** `auth.Service` gained thin `ListTokens` and `DeleteToken` wrappers.
 - **`remora.yaml` (Tasks 13–14).** The ports moved to `internal/config` (the api package aliases them). A change
   carries an optional `value`, so a generated client key is shown once by `apply`. Migration `0005` also adds

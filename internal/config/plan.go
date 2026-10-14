@@ -328,14 +328,9 @@ func (s *Service) keySteps(ctx context.Context, want File, sec Secrets) ([]step,
 				return nil, unset(fmt.Sprintf("key %q", name), env)
 			}
 			steps = append(steps, created("key", name, func(ctx context.Context) (string, error) {
-				k, v, err := s.k.Create(ctx, name, allow, value)
+				_, v, err := s.k.Create(ctx, name, allow, value, enabled)
 				if err != nil {
 					return "", err
-				}
-				if !enabled {
-					if _, err := s.k.Update(ctx, k.ID, KeyPatch{Enabled: &enabled}); err != nil {
-						return "", err
-					}
 				}
 				if value != "" {
 					return "", nil

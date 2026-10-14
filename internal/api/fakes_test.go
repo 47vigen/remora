@@ -349,7 +349,7 @@ func (f *fakeKeys) Get(_ context.Context, id string) (Key, error) {
 	return k, nil
 }
 
-func (f *fakeKeys) Create(_ context.Context, name string, allow []string, value string) (Key, string, error) {
+func (f *fakeKeys) Create(_ context.Context, name string, allow []string, value string, enabled bool) (Key, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.m == nil {
@@ -359,7 +359,7 @@ func (f *fakeKeys) Create(_ context.Context, name string, allow []string, value 
 		value = store.GenerateKeyValue()
 	}
 	k := Key{
-		ID: fmt.Sprintf("k%d", len(f.m)+1), Name: name, Prefix: store.KeyPrefix(value), Allow: allow, Enabled: true,
+		ID: fmt.Sprintf("k%d", len(f.m)+1), Name: name, Prefix: store.KeyPrefix(value), Allow: allow, Enabled: enabled,
 		CreatedAt: time.Now().UTC(),
 	}
 	f.m[k.ID], f.values[k.ID] = k, value

@@ -69,7 +69,7 @@ func (s *Server) CreateKey(ctx context.Context, req gen.CreateKeyRequestObject) 
 		return nil, badRequest("value cannot be empty; leave it out to generate one")
 	}
 	allow := append([]string{}, b.Allow...)
-	k, value, err := s.d.Keys.Create(ctx, b.Name, allow, deref(b.Value))
+	k, value, err := s.d.Keys.Create(ctx, b.Name, allow, deref(b.Value), true)
 	if err != nil {
 		return nil, err
 	}

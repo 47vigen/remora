@@ -33,7 +33,7 @@ func (e *testEnv) populate(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, _, err := e.keys.Create(ctx, "full", []string{"*"}, "sk-client-secret-value"); err != nil {
+	if _, _, err := e.keys.Create(ctx, "full", []string{"*"}, "sk-client-secret-value", true); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -162,6 +162,13 @@ func TestApplyConfigReportsPartialFailure(t *testing.T) {
 	}
 	if _, err := env.providers.Get(context.Background(), "p"); err != nil {
 		t.Error("the change before the failure was not kept")
+	}
+	var e gen.Error
+	if err := json.Unmarshal(body, &e); err != nil {
+		t.Fatal(err)
+	}
+	if e.Error.Applied == nil || len(*e.Error.Applied) != 1 || (*e.Error.Applied)[0].Name != "p" {
+		t.Errorf("applied = %+v; want the provider created before the failure", e.Error.Applied)
 	}
 }
 

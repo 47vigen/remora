@@ -321,6 +321,10 @@ keys:
 	if k, _ := w.keyByName("off"); k.Enabled || w.values[k.ID] != "sk-off" {
 		t.Errorf("off = %+v value %q", k, w.values[k.ID])
 	}
+	// The disabled key is created disabled in one write, never created enabled and then updated.
+	if got := w.calls(); !reflect.DeepEqual(got, []string{"create key gen", "create key off"}) {
+		t.Errorf("calls = %v", got)
+	}
 	// A plan never generates.
 	if cs, _ := w.service().Plan(context.Background(), mustParse(t, "keys:\n  - {name: other, allow: []}\n"), nil, false); len(cs) != 1 || cs[0].Value != "" {
 		t.Errorf("plan = %+v", cs)

@@ -113,10 +113,12 @@ func (s *Server) ApplyConfig(ctx context.Context, req gen.ApplyConfigRequestObje
 	} else {
 		msg += " Nothing was changed."
 	}
-	return gen.ApplyConfigdefaultJSONResponse{
-		StatusCode: e.status,
-		Body:       gen.Error{Error: gen.ErrorDetail{Type: e.typ, Code: e.code, Message: msg}},
-	}, nil
+	detail := gen.ErrorDetail{Type: e.typ, Code: e.code, Message: msg}
+	if len(applied) > 0 {
+		done := toChanges(applied)
+		detail.Applied = &done
+	}
+	return gen.ApplyConfigdefaultJSONResponse{StatusCode: e.status, Body: gen.Error{Error: detail}}, nil
 }
 
 // changeLine is "+ provider p", "~ alias fast (members)" or "- key old".

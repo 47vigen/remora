@@ -13,6 +13,7 @@ import (
 
 	"github.com/47vigen/remora/internal/accounts"
 	"github.com/47vigen/remora/internal/alias"
+	"github.com/47vigen/remora/internal/cooling"
 	"github.com/47vigen/remora/internal/engine/bifrost"
 	"github.com/47vigen/remora/internal/engine/cliproxyapi"
 	"github.com/47vigen/remora/internal/reconcile"
@@ -188,14 +189,16 @@ func (a providersAdapter) Test(context.Context, string) (ProviderTest, error) {
 	return ProviderTest{}, errNotImplemented
 }
 
-// NewAliases manages aliases in st through rec.
-func NewAliases(st *store.Store, rec *reconcile.Reconciler) Aliases {
-	return aliasesAdapter{st: st, rec: rec}
+// NewAliases manages aliases in st through rec. cooling reports the members cooling now (the cooler's Snapshot);
+// nil reports none.
+func NewAliases(st *store.Store, rec *reconcile.Reconciler, cooling func() []cooling.Cooling) Aliases {
+	return aliasesAdapter{st: st, rec: rec, cooling: cooling}
 }
 
 type aliasesAdapter struct {
-	st  *store.Store
-	rec *reconcile.Reconciler
+	st      *store.Store
+	rec     *reconcile.Reconciler
+	cooling func() []cooling.Cooling
 }
 
 func (a aliasesAdapter) maxDepth() int { return a.rec.MaxDepth } // 0 = alias.DefaultMaxDepth
@@ -278,8 +281,18 @@ func (a aliasesAdapter) Compile(ctx context.Context, al alias.Alias) ([]alias.Ta
 	return alias.Compile(all, al.Name, a.maxDepth())
 }
 
-// Cooling reports no cooling targets until plan 03's cooler is wired.
-func (a aliasesAdapter) Cooling(context.Context) ([]Cooling, error) { return nil, nil }
+// Cooling reports the members cooling now.
+func (a aliasesAdapter) Cooling(context.Context) ([]Cooling, error) {
+	if a.cooling == nil {
+		return nil, nil
+	}
+	snap := a.cooling()
+	out := make([]Cooling, len(snap))
+	for i, c := range snap {
+		out[i] = Cooling{Target: c.Target, Until: c.Until, Reason: c.Reason}
+	}
+	return out, nil
+}
 
 // NewKeys manages client keys in st through rec.
 func NewKeys(st *store.Store, rec *reconcile.Reconciler) Keys { return keysAdapter{st: st, rec: rec} }
@@ -329,14 +342,14 @@ func (a keysAdapter) Get(ctx context.Context, id string) (Key, error) {
 	return out, err
 }
 
-func (a keysAdapter) Create(ctx context.Context, name string, allow []string, value string) (Key, string, error) {
+func (a keysAdapter) Create(ctx context.Context, name string, allow []string, value string, enabled bool) (Key, string, error) {
 	if value == "" {
 		value = store.GenerateKeyValue()
 	}
 	var out store.ClientKey
 	err := a.rec.Change(ctx, func(ctx context.Context, tx *store.Tx) error {
 		var err error
-		out, err = tx.PutClientKey(ctx, store.ClientKey{Name: name, Allow: allow, Enabled: true}, value)
+		out, err = tx.PutClientKey(ctx, store.ClientKey{Name: name, Allow: allow, Enabled: enabled}, value)
 		return err
 	})
 	if err != nil {
