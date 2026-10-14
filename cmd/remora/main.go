@@ -20,14 +20,18 @@ func main() {
 }
 
 // run dispatches a subcommand and returns the process exit code.
-func run(_ context.Context, args []string, _ func(string) string, stdout, stderr io.Writer) int {
+func run(ctx context.Context, args []string, getenv func(string) string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		_, _ = fmt.Fprintln(stderr, usage)
 		return 2
 	}
 	switch args[0] {
+	case "serve":
+		return runServe(ctx, getenv, stderr)
 	case "version":
 		return runVersion(stdout)
+	case "healthcheck":
+		return runHealthcheck(ctx, args[1:], getenv, stdout, stderr)
 	default:
 		_, _ = fmt.Fprintf(stderr, "unknown command %q\n%s\n", args[0], usage)
 		return 2
