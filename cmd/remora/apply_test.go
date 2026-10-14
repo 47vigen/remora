@@ -345,11 +345,6 @@ func TestClientURL(t *testing.T) {
 	}
 }
 
-// failWriter fails every write, like a closed pipe or a full disk.
-type failWriter struct{}
-
-func (failWriter) Write([]byte) (int, error) { return 0, errors.New("broken pipe") }
-
 func TestScrubWriter(t *testing.T) {
 	var b bytes.Buffer
 	msg := "reconcile: bifrost: POST /api/providers: status 500 (key sk-bf-abc)\n"
