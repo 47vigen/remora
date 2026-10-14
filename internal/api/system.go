@@ -1,12 +1,13 @@
-// Package api serves remora's HTTP endpoints.
+// Package api serves remora's management API under /api/* and the public /healthz probe.
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
+	"github.com/47vigen/remora/internal/api/gen"
 	"github.com/47vigen/remora/internal/supervise"
-	"github.com/47vigen/remora/internal/version"
 )
 
 // StatusSource reports the supervised engines. *supervise.Supervisor implements it.
@@ -32,21 +33,9 @@ func componentName(engine string) string {
 	return "engine"
 }
 
-// EngineVersionInfo names one engine and its release tag.
-type EngineVersionInfo struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
-}
-
-// VersionResponse is the body of GET /api/system/version.
-type VersionResponse struct {
-	Remora  string              `json:"remora"` // version.Version
-	Engines []EngineVersionInfo `json:"engines"`
-}
-
-// RegisterSystem mounts GET /healthz (200 ok, 503 degraded) and GET /api/system/version on mux. Neither route needs
-// admin auth until the management API takes them over.
-func RegisterSystem(mux *http.ServeMux, src StatusSource) {
+// RegisterHealthz mounts GET /healthz (200 ok, 503 degraded) on mux. It needs no auth: the image's health check
+// and orchestrators call it.
+func RegisterHealthz(mux *http.ServeMux, src StatusSource) {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		resp := HealthResponse{Status: "ok"}
 		for _, e := range src.Status() {
@@ -59,22 +48,43 @@ func RegisterSystem(mux *http.ServeMux, src StatusSource) {
 			resp.Status = "degraded"
 			code = http.StatusServiceUnavailable
 		}
-		writeJSON(w, code, resp)
-	})
-
-	mux.HandleFunc("GET /api/system/version", func(w http.ResponseWriter, _ *http.Request) {
-		status := src.Status()
-		resp := VersionResponse{Remora: version.Version, Engines: make([]EngineVersionInfo, 0, len(status))}
-		for _, e := range status {
-			resp.Engines = append(resp.Engines, EngineVersionInfo{Name: e.Name, Version: e.Version})
-		}
-		writeJSON(w, http.StatusOK, resp)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(code)
+		_ = json.NewEncoder(w).Encode(resp)
 	})
 }
 
-func writeJSON(w http.ResponseWriter, code int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(v)
+// GetHealth reports remora's components by neutral name. It always answers 200; status says "degraded" when a
+// component is down.
+func (s *Server) GetHealth(ctx context.Context, _ gen.GetHealthRequestObject) (gen.GetHealthResponseObject, error) {
+	if s.d.System == nil {
+		return nil, errNotImplemented
+	}
+	ok, engines := s.d.System.Health(ctx)
+	resp := gen.GetHealth200JSONResponse{Status: gen.HealthStatusOk, Engines: map[string]gen.HealthEngines{}}
+	for name, err := range engines {
+		state := gen.HealthEngines("ok")
+		if err != nil {
+			state, ok = "error", false
+		}
+		resp.Engines[name] = state
+	}
+	if !ok {
+		resp.Status = gen.HealthStatusDegraded
+	}
+	return resp, nil
+}
+
+// GetVersion reports remora's version and each engine's, in start order.
+func (s *Server) GetVersion(_ context.Context, _ gen.GetVersionRequestObject) (gen.GetVersionResponseObject, error) {
+	if s.d.System == nil {
+		return nil, errNotImplemented
+	}
+	remora, engines := s.d.System.Version()
+	resp := gen.GetVersion200JSONResponse{Remora: remora, Engines: make([]gen.EngineVersion, 0, len(engines))}
+	for _, e := range engines {
+		resp.Engines = append(resp.Engines, gen.EngineVersion{Name: e.Name, Version: e.Version})
+	}
+	return resp, nil
 }

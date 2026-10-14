@@ -154,7 +154,17 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		return fmt.Errorf("front door url: %w", err)
 	}
 	mux := http.NewServeMux()
-	api.RegisterSystem(mux, sup)
+	api.RegisterHealthz(mux, sup)
+	mgmt := api.New(api.Deps{
+		Providers: api.NewProviders(st, rec),
+		Aliases:   api.NewAliases(st, rec),
+		Keys:      api.NewKeys(st, rec),
+		System:    api.NewSystem(sup),
+		Names:     api.NewNames(st),
+		Auth:      auth.NewService(st, nil),
+		Log:       logger,
+	})
+	mux.Handle("/api/", mgmt.Handler())
 	// /v1 answers 503 until a Sync has completed, so a failed first pass never serves a stale front door; the
 	// management API and health stay reachable meanwhile.
 	px := proxy.New(upstream, st, logger)
