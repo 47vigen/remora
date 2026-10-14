@@ -1,0 +1,18 @@
+name: Feature request
+description: Propose a change to remora's behaviour.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do and what gets in the way.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: How remora should behave instead.
+    validations:
+      required: true
