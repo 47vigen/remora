@@ -82,7 +82,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=fakes
       - name: Save images
         run: docker save remora:dev remora-fakes:dev -o images.tar
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: images
           path: images.tar
@@ -100,7 +100,7 @@ jobs:
       REMORA_E2E_KEEP: "1"
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: images
       - name: Load images
@@ -113,7 +113,7 @@ jobs:
       - name: Collect compose logs
         if: failure()
         run: docker compose -f test/e2e/compose.yaml -p remora-e2e logs --no-color > e2e-compose.log 2>&1 || true
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: e2e-compose-logs
