@@ -811,3 +811,36 @@ func TestSynced_ClearedByAFailedPassThatChangedTheEngine(t *testing.T) {
 		t.Fatal("not Synced after a successful Sync")
 	}
 }
+
+// TestSynced_WaitsForEveryAlsoStep: /v1 opens only once a SyncAll has run every Also step without an error, so a
+// subscription account the store disables is never served by an OAuth engine that has not heard of it yet.
+func TestSynced_WaitsForEveryAlsoStep(t *testing.T) {
+	h := newHarness(t)
+	h.base(t)
+	fail := true
+	h.rec.Also = []func(context.Context) error{func(context.Context) error {
+		if fail {
+			return errors.New("oauth engine unreachable")
+		}
+		return nil
+	}}
+	if err := h.rec.SyncAll(context.Background()); err == nil {
+		t.Fatal("SyncAll with a failing Also step: want an error")
+	}
+	if h.rec.Synced() {
+		t.Fatal("Synced although the Also step failed")
+	}
+	fail = false
+	if err := h.rec.SyncAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !h.rec.Synced() {
+		t.Fatal("not Synced after a full SyncAll")
+	}
+	// Once open, a later Also failure alone does not close /v1: the front door still holds the store's state.
+	fail = true
+	_ = h.rec.SyncAll(context.Background())
+	if !h.rec.Synced() {
+		t.Fatal("a later Also failure closed /v1")
+	}
+}

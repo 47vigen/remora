@@ -27,7 +27,7 @@ const (
 // ResponseHook sees every proxied response in ModifyResponse, after remora's own x-remora-* headers are set and
 // before the first byte is written, so it may rewrite those headers. r is the client's request; reqBody is the
 // exact body ExtractModel held (nil on the WebSocket route). Plan 03 uses it for served-by names of internal
-// providers and dropped parameters.
+// providers; x-remora-dropped-params is set after every hook has run, from the served-by they leave.
 type ResponseHook func(r *http.Request, reqBody []byte, resp *http.Response)
 
 // Proxy serves remora's /v1 surface: it authenticates the remora key, checks the model against the key's
@@ -325,6 +325,7 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 	for _, h := range hooks {
 		h(info.in, info.body, resp)
 	}
+	setDroppedParams(resp.Header, info)
 	return nil
 }
 

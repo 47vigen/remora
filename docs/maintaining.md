@@ -23,7 +23,8 @@ bump pull request, and a release-please tag would never start `release.yml`. A G
   read and write. No webhook.
 - Install it on this repository only.
 - Generate a private key for it.
-- Store the App id as the repository secret `REMORA_BOT_APP_ID` and the private key as `REMORA_BOT_PRIVATE_KEY`.
+- Store the App's Client ID (from its settings page, not the numeric App ID) as the repository secret
+  `REMORA_BOT_CLIENT_ID` and the private key as `REMORA_BOT_PRIVATE_KEY`.
 
 `release-please.yml` and `engine-bump.yml` use these secrets. Without them, both fail at their first step; a
 release can still be started by hand with the `release.yml` "Run workflow" button and a `tag` input.

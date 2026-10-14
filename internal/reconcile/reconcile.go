@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/engine/bifrost"
 	"github.com/47vigen/remora/internal/store"
 )
@@ -56,9 +57,10 @@ var ErrInvalid = errors.New("reconcile: invalid configuration")
 // its own. A rule keeps the priority it already has in the engine when that is at or above the base; a new rule,
 // or one below the base, takes the lowest priority at or above the base that no rule in the engine holds. Adding,
 // changing or removing one alias therefore never renumbers another, and no update can collide. Priorities below the
-// base are left to rules remora does not push (plan 03's "remora-oauth-<name>" rules made before it fills
-// InternalRules, or anything else); the Priority of an InternalRules entry is ignored. The order between rules does
-// not matter: an alias rule matches one exact model name, and an alias's name never starts with a provider name.
+// base belong to InternalRules: an entry whose Priority is in 1..RulePriorityBase-1 takes exactly that priority (each
+// entry its own); while another engine rule still holds it, the entry takes a free one at or above the base and moves
+// back on a later pass, once the holder is gone. The order between rules does not matter: an alias rule matches one
+// exact model name, and an alias's name never starts with a provider name.
 const RulePriorityBase = 1000
 
 const defaultInterval = 60 * time.Second
@@ -68,13 +70,20 @@ type Reconciler struct {
 	Store         *store.Store
 	Engine        Engine
 	Internal      []InternalProvider    // pushed like store providers, never deleted, valid as alias member providers
-	InternalRules []bifrost.RoutingRule // pushed by name like alias rules, never deleted (plan 03: one "remora-oauth-<name>" per OAuth provider)
-	Reserved      []string              // user-facing OAuth provider names: no store provider may take one; valid as alias member providers
-	Interval      time.Duration         // 0 = 60s
-	MaxDepth      int                   // 0 = alias.DefaultMaxDepth
-	Log           *slog.Logger
+	InternalRules []bifrost.RoutingRule // pushed by name like alias rules, never deleted (plan 03: one "remora-oauth-<name>" per OAuth provider); Priority as RulePriorityBase says
+	Reserved      []string              // user-facing OAuth provider names: no store provider may take one; valid as alias member providers, mapped by ToEngineTarget
+	// Filter, when set, drops members from a compiled alias chain before it becomes a routing rule (cooling). It sees
+	// user-facing targets, after the chain is validated, and an empty result leaves the chain whole.
+	Filter func(chain []alias.Target) []alias.Target
+	// Also runs in every SyncAll (so in every Run pass) before the front-door pass: work that belongs to the same
+	// reconcile cycle, such as the OAuth engine's own reconciliation. Errors are joined with the pass's.
+	Also     []func(ctx context.Context) error
+	Interval time.Duration // 0 = 60s
+	MaxDepth int           // 0 = alias.DefaultMaxDepth
+	Log      *slog.Logger
 
-	synced atomic.Bool // a Sync has completed
+	synced     atomic.Bool // a Sync has completed
+	alsoSynced atomic.Bool // a SyncAll has run every Also step without an error
 }
 
 func (r *Reconciler) log() *slog.Logger {
@@ -95,8 +104,11 @@ func (r *Reconciler) Sync(ctx context.Context) error {
 }
 
 // Synced reports whether the front door holds the store's state: false until a Sync completes, and again after a
-// pass that changed the engine fails, until a later pass succeeds.
-func (r *Reconciler) Synced() bool { return r.synced.Load() }
+// pass that changed the engine fails, until a later pass succeeds. With Also steps, it also stays false until one
+// SyncAll has run all of them without an error, so the engines behind the front door start from the store too.
+func (r *Reconciler) Synced() bool {
+	return r.synced.Load() && (len(r.Also) == 0 || r.alsoSynced.Load())
+}
 
 // sync runs one non-strict pass; objects in force are pushed even when their MAC matches. A pass that fails after
 // it changed the engine leaves it partly reconciled, so Synced reports false until a pass succeeds again.
@@ -139,7 +151,24 @@ func (r *Reconciler) Change(ctx context.Context, fn func(ctx context.Context, tx
 	return fmt.Errorf("reconcile: change: %w", err)
 }
 
-// Run syncs now and then every Interval until ctx is done. Errors are logged.
+// SyncAll runs every Also function and then one Sync pass. Every step runs; the errors are joined.
+func (r *Reconciler) SyncAll(ctx context.Context) error {
+	var errs []error
+	for _, fn := range r.Also {
+		if err := fn(ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) == 0 {
+		r.alsoSynced.Store(true)
+	}
+	if err := r.Sync(ctx); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
+// Run runs SyncAll now and then every Interval until ctx is done. Errors are logged.
 func (r *Reconciler) Run(ctx context.Context) {
 	interval := r.Interval
 	if interval <= 0 {
@@ -148,7 +177,7 @@ func (r *Reconciler) Run(ctx context.Context) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
-		if err := r.Sync(ctx); err != nil && ctx.Err() == nil {
+		if err := r.SyncAll(ctx); err != nil && ctx.Err() == nil {
 			r.log().Error("reconcile: sync", "err", err)
 		}
 		select {
@@ -457,9 +486,11 @@ func (p *pass) pushRules(ctx context.Context, d *desiredState, eng []bifrost.Rou
 		return nil, err
 	}
 	used := map[int]bool{}
+	holder := map[int]string{} // priority → id of an engine rule holding it
 	byName := map[string][]bifrost.RoutingRule{}
 	for _, er := range eng {
 		used[er.Priority] = true
+		holder[er.Priority] = er.ID
 		byName[er.Name] = append(byName[er.Name], er)
 	}
 	nextFree := RulePriorityBase
@@ -482,9 +513,17 @@ func (p *pass) pushRules(ctx context.Context, d *desiredState, eng []bifrost.Rou
 			}
 		}
 		rule := dr.Rule
-		if cur != nil && cur.Priority >= RulePriorityBase {
+		fixed := dr.Alias == "" && rule.Priority > 0 && rule.Priority < RulePriorityBase
+		switch {
+		case fixed && (holder[rule.Priority] == "" || (cur != nil && holder[rule.Priority] == cur.ID)):
+			used[rule.Priority] = true
+		case cur != nil && cur.Priority >= RulePriorityBase:
 			rule.Priority = cur.Priority
-		} else {
+		default:
+			if fixed {
+				p.r.log().Warn("reconcile: routing rule priority held by another rule; using a free one until it is gone",
+					"rule", name, "priority", rule.Priority)
+			}
 			rule.Priority = allocate()
 		}
 		mac, err := p.mac(rule)
