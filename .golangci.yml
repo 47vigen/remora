@@ -3,6 +3,8 @@ run:
   timeout: 5m
   build-tags: [e2e]
 linters:
+  exclusions:
+    paths: [engines/]
   default: standard
   enable: [bodyclose, contextcheck, errorlint, gocritic, gosec, misspell, noctx, revive, sloglint, unconvert, usestdlibvars]
 formatters:
@@ -10,3 +12,5 @@ formatters:
   settings:
     goimports:
       local-prefixes: [github.com/47vigen/remora]
+  exclusions:
+    paths: [engines/]
