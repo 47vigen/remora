@@ -2,9 +2,7 @@ package accounts
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
@@ -13,11 +11,6 @@ import (
 	"github.com/47vigen/remora/internal/engine/cliproxyapi"
 	"github.com/47vigen/remora/internal/store"
 )
-
-// Account is a subscription account as users see it: the store row merged with the engine's view of its credential.
-type Account struct {
-	store.Account
-}
 
 // Login is a started login. Mode "paste": the user opens URL and pastes the address the browser ends on into
 // CompleteLogin. Mode "device": the user opens URL and enters UserCode; the login completes on its own.
@@ -82,8 +75,7 @@ func (s *Service) CompleteLogin(ctx context.Context, state, redirectURL string) 
 		return ErrBadRedirect
 	}
 	if err := s.engine.SubmitOAuthCallback(ctx, state, redirectURL); err != nil {
-		var ee *cliproxyapi.Error
-		if errors.As(err, &ee) && ee.StatusCode == http.StatusNotFound {
+		if isNotFound(err) {
 			s.drop(state)
 			return ErrLoginExpired
 		}
@@ -290,10 +282,4 @@ var engineName = regexp.MustCompile(`(?i)cli[-_ ]?proxy(?:[-_ ]?api)?`)
 
 func scrub(msg string) string {
 	return strings.TrimSpace(engineName.ReplaceAllString(msg, "engine"))
-}
-
-// accountFrom builds an account from its row and, when the engine has it, its credential. models are model ids as
-// the engine lists them.
-func accountFrom(row store.Account, _ *cliproxyapi.Credential, _ []string) Account {
-	return Account{Account: row}
 }
