@@ -1,0 +1,1632 @@
+openapi: 3.1.0
+info:
+  title: remora management API
+  version: 0.1.0
+  description: |
+    The management surface of remora, served under `/api/*` on the same listener as `/v1/*`.
+
+    Every list is paged with `limit` and `offset`, searchable with `q`, and returns `{items, total}`. Every error
+    has the shape `{error: {message, type, code}}`, the same as `/v1`. The UI authenticates with the session
+    cookie set by `login`; scripts send an API token (created in Settings) as a bearer token. Client keys work only
+    on `/v1/*` and are rejected here.
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+
+tags:
+  - name: system
+    description: Health and versions.
+  - name: auth
+    description: The admin session.
+  - name: providers
+    description: Upstream providers reached with API keys.
+  - name: accounts
+    description: Subscription accounts signed in with OAuth.
+  - name: aliases
+    description: Model aliases, their compiled chains and cooling members.
+  - name: keys
+    description: Client keys for `/v1/*`.
+  - name: logs
+    description: Request logs, their fallback paths and the live stream.
+  - name: stats
+    description: Volume, errors, latency, tokens and cost over a time range.
+  - name: settings
+    description: The admin password and API tokens.
+  - name: config
+    description: Export and apply `remora.yaml`.
+
+security:
+  - session: []
+  - token: []
+
+paths:
+  /api/health:
+    get:
+      tags: [system]
+      operationId: getHealth
+      summary: Report whether remora and its components are healthy.
+      security: []
+      responses:
+        "200":
+          description: Health of remora and each component.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/system/version:
+    get:
+      tags: [system]
+      operationId: getVersion
+      summary: Report the version of remora and of each engine it runs.
+      security: []
+      responses:
+        "200":
+          description: Versions.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VersionResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      summary: Sign in as the admin and receive a session cookie.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "204":
+          description: Signed in; the session cookie is set.
+          headers:
+            Set-Cookie:
+              description: The `remora_session` cookie (HTTP-only, Secure, SameSite=Strict).
+              schema:
+                type: string
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      summary: End the current session.
+      responses:
+        "204":
+          description: Signed out; the session cookie is cleared.
+          headers:
+            Set-Cookie:
+              description: Clears the `remora_session` cookie.
+              schema:
+                type: string
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/auth/session:
+    get:
+      tags: [auth]
+      operationId: getSession
+      summary: Report how the caller is authenticated; 401 when it is not.
+      responses:
+        "200":
+          description: The caller is authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/providers:
+    get:
+      tags: [providers]
+      operationId: listProviders
+      summary: List providers.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/Query"
+        - name: kind
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ProviderKind"
+        - name: type
+          in: query
+          required: false
+          description: The front door's provider type of a `builtin` provider, e.g. `openrouter`.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: A page of providers.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderList"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [providers]
+      operationId: createProvider
+      summary: Create a provider.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Provider"
+      responses:
+        "201":
+          description: The created provider.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Provider"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/providers/{name}:
+    parameters:
+      - $ref: "#/components/parameters/ProviderName"
+    get:
+      tags: [providers]
+      operationId: getProvider
+      summary: Get a provider.
+      responses:
+        "200":
+          description: The provider.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Provider"
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      tags: [providers]
+      operationId: updateProvider
+      summary: Replace a provider. Keys sent without a value keep their stored secret.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Provider"
+      responses:
+        "200":
+          description: The updated provider.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Provider"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      tags: [providers]
+      operationId: deleteProvider
+      summary: Delete a provider.
+      responses:
+        "204":
+          description: Deleted.
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/providers/{name}/test:
+    parameters:
+      - $ref: "#/components/parameters/ProviderName"
+    post:
+      tags: [providers]
+      operationId: testProvider
+      summary: Send a small request to the provider and report the result.
+      responses:
+        "200":
+          description: The test result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderTestResult"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/accounts:
+    get:
+      tags: [accounts]
+      operationId: listAccounts
+      summary: List subscription accounts with quota, cooldown and models.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/Query"
+        - name: provider
+          in: query
+          required: false
+          description: A subscription provider, e.g. `codex`.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: A page of accounts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountList"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/accounts/logins:
+    post:
+      tags: [accounts]
+      operationId: startAccountLogin
+      summary: Start an OAuth login for a subscription provider.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountLoginStart"
+      responses:
+        "201":
+          description: The login was started.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountLogin"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/accounts/logins/{state}:
+    parameters:
+      - $ref: "#/components/parameters/LoginState"
+    get:
+      tags: [accounts]
+      operationId: getAccountLogin
+      summary: Poll the status of a login.
+      responses:
+        "200":
+          description: The login status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountLoginStatus"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      tags: [accounts]
+      operationId: cancelAccountLogin
+      summary: Cancel a login that has not finished.
+      responses:
+        "204":
+          description: Cancelled.
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/accounts/logins/{state}/complete:
+    parameters:
+      - $ref: "#/components/parameters/LoginState"
+    post:
+      tags: [accounts]
+      operationId: completeAccountLogin
+      summary: Complete a login with the redirect URL the user pasted from the browser.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountLoginComplete"
+      responses:
+        "202":
+          description: Accepted; poll `getAccountLogin` for the outcome.
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/accounts/import:
+    post:
+      tags: [accounts]
+      operationId: importAccount
+      summary: Import an account from an existing OAuth credential.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountImport"
+      responses:
+        "201":
+          description: The imported account.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/accounts/{id}:
+    parameters:
+      - $ref: "#/components/parameters/AccountId"
+    patch:
+      tags: [accounts]
+      operationId: updateAccount
+      summary: Enable or disable an account.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountUpdate"
+      responses:
+        "200":
+          description: The updated account.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      tags: [accounts]
+      operationId: deleteAccount
+      summary: Delete an account.
+      responses:
+        "204":
+          description: Deleted.
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/accounts/{id}/reset-cooldown:
+    parameters:
+      - $ref: "#/components/parameters/AccountId"
+    post:
+      tags: [accounts]
+      operationId: resetAccountCooldown
+      summary: Clear an account's cooldown so it serves requests again.
+      responses:
+        "204":
+          description: The cooldown was cleared.
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/aliases:
+    get:
+      tags: [aliases]
+      operationId: listAliases
+      summary: List aliases.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/Query"
+        - name: kind
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/AliasKind"
+      responses:
+        "200":
+          description: A page of aliases.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AliasList"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [aliases]
+      operationId: createAlias
+      summary: Create an alias.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Alias"
+      responses:
+        "201":
+          description: The created alias.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Alias"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/aliases/compile:
+    post:
+      tags: [aliases]
+      operationId: compileAlias
+      summary: Compile an unsaved alias into its chain of targets; nothing is stored.
+      description: Returns 400 `invalid_request` on a cycle, a nesting depth over the limit, or an unknown member.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Alias"
+      responses:
+        "200":
+          description: The compiled chain.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AliasChain"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/aliases/{name}:
+    parameters:
+      - $ref: "#/components/parameters/AliasName"
+    get:
+      tags: [aliases]
+      operationId: getAlias
+      summary: Get an alias.
+      responses:
+        "200":
+          description: The alias.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Alias"
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      tags: [aliases]
+      operationId: updateAlias
+      summary: Replace an alias.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Alias"
+      responses:
+        "200":
+          description: The updated alias.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Alias"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      tags: [aliases]
+      operationId: deleteAlias
+      summary: Delete an alias.
+      responses:
+        "204":
+          description: Deleted.
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/aliases/{name}/chain:
+    parameters:
+      - $ref: "#/components/parameters/AliasName"
+    get:
+      tags: [aliases]
+      operationId: getAliasChain
+      summary: Get the compiled chain of a stored alias, with cooling members marked.
+      responses:
+        "200":
+          description: The compiled chain.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AliasChain"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/cooling:
+    get:
+      tags: [aliases]
+      operationId: listCooling
+      summary: List the alias members that are cooling down.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/Query"
+      responses:
+        "200":
+          description: A page of cooling members.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CoolingList"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/keys:
+    get:
+      tags: [keys]
+      operationId: listKeys
+      summary: List client keys.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/Query"
+      responses:
+        "200":
+          description: A page of keys.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeyList"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [keys]
+      operationId: createKey
+      summary: Create a client key. The value is returned only here.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KeyCreate"
+      responses:
+        "201":
+          description: The created key, with its value.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeyCreated"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/keys/{id}:
+    parameters:
+      - $ref: "#/components/parameters/KeyId"
+    get:
+      tags: [keys]
+      operationId: getKey
+      summary: Get a client key.
+      responses:
+        "200":
+          description: The key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Key"
+        default:
+          $ref: "#/components/responses/Error"
+    patch:
+      tags: [keys]
+      operationId: updateKey
+      summary: Rename a key, change its allowlist, or enable or disable it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KeyUpdate"
+      responses:
+        "200":
+          description: The updated key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Key"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      tags: [keys]
+      operationId: deleteKey
+      summary: Delete a client key.
+      responses:
+        "204":
+          description: Deleted.
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/keys/{id}/usage:
+    parameters:
+      - $ref: "#/components/parameters/KeyId"
+    get:
+      tags: [keys]
+      operationId: getKeyUsage
+      summary: Get the usage of one key over a time range.
+      parameters:
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+      responses:
+        "200":
+          description: The key's stats.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Stats"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/logs:
+    get:
+      tags: [logs]
+      operationId: listLogs
+      summary: List request logs, newest first.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/Query"
+        - $ref: "#/components/parameters/KeyFilter"
+        - $ref: "#/components/parameters/AliasFilter"
+        - $ref: "#/components/parameters/ProviderFilter"
+        - name: model
+          in: query
+          required: false
+          description: The served model as `<provider>/<model>`.
+          schema:
+            type: string
+        - $ref: "#/components/parameters/StatusFilter"
+      responses:
+        "200":
+          description: A page of log entries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogList"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/logs/live:
+    get:
+      tags: [logs]
+      operationId: streamLogs
+      summary: Stream new log entries over a WebSocket.
+      description: |
+        A WebSocket, authenticated by the session cookie or an API token. Each text frame the server sends is one
+        JSON `LogEntry`. The client may send `"ping"`, which the server ignores. A client that cannot keep up is
+        disconnected. This operation is not generated; the server implements it by hand.
+      x-websocket: true
+      parameters:
+        - $ref: "#/components/parameters/KeyFilter"
+        - $ref: "#/components/parameters/AliasFilter"
+        - $ref: "#/components/parameters/ProviderFilter"
+        - $ref: "#/components/parameters/StatusFilter"
+      responses:
+        "101":
+          description: Switching to the WebSocket protocol.
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/logs/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The log entry id.
+        schema:
+          type: string
+    get:
+      tags: [logs]
+      operationId: getLog
+      summary: Get one log entry with its bodies and fallback path.
+      responses:
+        "200":
+          description: The log entry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogDetail"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/stats:
+    get:
+      tags: [stats]
+      operationId: getStats
+      summary: Get volume, errors, latency, tokens and cost over a time range.
+      parameters:
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - name: group_by
+          in: query
+          required: false
+          description: With a value other than `none`, `groups` holds one summary per key, alias or provider.
+          schema:
+            type: string
+            enum: [none, key, alias, provider]
+            default: none
+        - $ref: "#/components/parameters/KeyFilter"
+        - $ref: "#/components/parameters/AliasFilter"
+        - $ref: "#/components/parameters/ProviderFilter"
+      responses:
+        "200":
+          description: The stats.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Stats"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/settings/password:
+    put:
+      tags: [settings]
+      operationId: changePassword
+      summary: Change the admin password.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordChange"
+      responses:
+        "204":
+          description: Changed.
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/settings/tokens:
+    get:
+      tags: [settings]
+      operationId: listApiTokens
+      summary: List API tokens.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/Query"
+      responses:
+        "200":
+          description: A page of API tokens.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiTokenList"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [settings]
+      operationId: createApiToken
+      summary: Create an API token. The value is returned only here.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApiTokenCreate"
+      responses:
+        "201":
+          description: The created token, with its value.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiTokenCreated"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/settings/tokens/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The API token id.
+        schema:
+          type: string
+    delete:
+      tags: [settings]
+      operationId: deleteApiToken
+      summary: Delete an API token.
+      responses:
+        "204":
+          description: Deleted.
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/config/export:
+    get:
+      tags: [config]
+      operationId: exportConfig
+      summary: Export the whole configuration as `remora.yaml`, with secrets as `env:NAME` references.
+      responses:
+        "200":
+          description: The `remora.yaml` document.
+          headers:
+            Content-Disposition:
+              description: "`attachment; filename=remora.yaml`"
+              schema:
+                type: string
+          content:
+            application/yaml:
+              schema:
+                type: string
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/config/plan:
+    post:
+      tags: [config]
+      operationId: planConfig
+      summary: Show the changes a `remora.yaml` document would make; nothing is changed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfigRequest"
+      responses:
+        "200":
+          description: The changes the document would make.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfigChanges"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/config/apply:
+    post:
+      tags: [config]
+      operationId: applyConfig
+      summary: Make the store match a `remora.yaml` document.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfigRequest"
+      responses:
+        "200":
+          description: The changes that were made.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfigChanges"
+        default:
+          $ref: "#/components/responses/Error"
+
+components:
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: remora_session
+      description: The admin session cookie set by `login`.
+    token:
+      type: http
+      scheme: bearer
+      description: An API token created in Settings.
+
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: The page size.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    Offset:
+      name: offset
+      in: query
+      required: false
+      description: The number of items to skip.
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    Query:
+      name: q
+      in: query
+      required: false
+      description: Free-text search over name-like fields.
+      schema:
+        type: string
+    From:
+      name: from
+      in: query
+      required: false
+      description: Start of the time range (RFC 3339). Defaults to 24 hours before `to`.
+      schema:
+        type: string
+        format: date-time
+    To:
+      name: to
+      in: query
+      required: false
+      description: End of the time range (RFC 3339). Defaults to now.
+      schema:
+        type: string
+        format: date-time
+    KeyFilter:
+      name: key
+      in: query
+      required: false
+      description: A client key id.
+      schema:
+        type: string
+    AliasFilter:
+      name: alias
+      in: query
+      required: false
+      description: An alias name.
+      schema:
+        type: string
+    ProviderFilter:
+      name: provider
+      in: query
+      required: false
+      description: A provider name.
+      schema:
+        type: string
+    StatusFilter:
+      name: status
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [success, error]
+    ProviderName:
+      name: name
+      in: path
+      required: true
+      description: The provider name.
+      schema:
+        type: string
+    AliasName:
+      name: name
+      in: path
+      required: true
+      description: The alias name.
+      schema:
+        type: string
+    AccountId:
+      name: id
+      in: path
+      required: true
+      description: The account id.
+      schema:
+        type: string
+    KeyId:
+      name: id
+      in: path
+      required: true
+      description: The client key id.
+      schema:
+        type: string
+    LoginState:
+      name: state
+      in: path
+      required: true
+      description: The login's OAuth state, as returned by `startAccountLogin`.
+      schema:
+        type: string
+
+  responses:
+    Error:
+      description: |
+        An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
+        (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+    ErrorDetail:
+      type: object
+      required: [message, type, code]
+      properties:
+        message:
+          type: string
+        type:
+          type: string
+        code:
+          type: string
+        applied:
+          type: array
+          description: |
+            Only on a failed `applyConfig`: the changes made before the failure, each generated client key value
+            included once, so a committed key is never left without its value.
+          items:
+            $ref: "#/components/schemas/Change"
+
+    Health:
+      type: object
+      required: [status, engines]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        engines:
+          type: object
+          description: The state of each component, by neutral component name.
+          additionalProperties:
+            type: string
+            enum: [ok, error]
+    VersionResponse:
+      type: object
+      required: [remora, engines]
+      properties:
+        remora:
+          type: string
+        engines:
+          type: array
+          items:
+            $ref: "#/components/schemas/EngineVersion"
+    EngineVersion:
+      type: object
+      required: [name, version]
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+
+    LoginRequest:
+      type: object
+      required: [password]
+      properties:
+        password:
+          type: string
+    Session:
+      type: object
+      required: [authenticated, via]
+      properties:
+        authenticated:
+          type: boolean
+        via:
+          type: string
+          enum: [session, token]
+
+    ProviderKind:
+      type: string
+      enum: [builtin, openai-compatible, typesafe-compatible, soniox]
+    ProviderKey:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        value:
+          type: string
+          writeOnly: true
+          description: The secret. Write-only; responses list key names only.
+    Provider:
+      type: object
+      required: [name, kind, key_count, status]
+      properties:
+        name:
+          type: string
+        kind:
+          $ref: "#/components/schemas/ProviderKind"
+        type:
+          type: string
+          description: Only for `builtin`; the front door's provider, e.g. `openrouter`.
+        base_url:
+          type: string
+        allow_private_network:
+          type: boolean
+        key_count:
+          type: integer
+          readOnly: true
+        status:
+          type: string
+          readOnly: true
+          enum: [ok, degraded, down, unknown]
+          description: |
+            `down` when the last test failed or every model of the provider is cooling, `degraded` when some are
+            cooling, `unknown` before the first test.
+        keys:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProviderKey"
+    ProviderList:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Provider"
+        total:
+          type: integer
+    ProviderTestResult:
+      type: object
+      required: [ok, latency_ms, message]
+      properties:
+        ok:
+          type: boolean
+        latency_ms:
+          type: integer
+        message:
+          type: string
+
+    AccountQuota:
+      type: object
+      properties:
+        model:
+          type: string
+        remaining_fraction:
+          type: number
+          format: double
+        reset_at:
+          type: string
+          format: date-time
+    Account:
+      type: object
+      required: [id, provider, enabled, status, quota, models]
+      properties:
+        id:
+          type: string
+        provider:
+          type: string
+        email:
+          type: string
+        enabled:
+          type: boolean
+        status:
+          type: string
+        message:
+          type: string
+        cooldown_until:
+          type: string
+          format: date-time
+        quota:
+          type: array
+          items:
+            $ref: "#/components/schemas/AccountQuota"
+        models:
+          type: array
+          items:
+            type: string
+    AccountList:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Account"
+        total:
+          type: integer
+    AccountUpdate:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+    AccountImport:
+      type: object
+      required: [provider, credential]
+      properties:
+        provider:
+          type: string
+        credential:
+          type: object
+          additionalProperties: true
+          description: The provider's OAuth credential file, as JSON.
+    AccountLoginStart:
+      type: object
+      required: [provider]
+      properties:
+        provider:
+          type: string
+    AccountLogin:
+      type: object
+      required: [state, url]
+      properties:
+        state:
+          type: string
+        url:
+          type: string
+          description: The sign-in page, or with `user_code` the device flow's verification page.
+        user_code:
+          type: string
+    AccountLoginStatus:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [wait, ok, error]
+        message:
+          type: string
+    AccountLoginComplete:
+      type: object
+      required: [redirect_url]
+      properties:
+        redirect_url:
+          type: string
+
+    AliasKind:
+      type: string
+      enum: [chat, embeddings, transcription, decisions]
+    Alias:
+      type: object
+      required: [name, kind, members, capabilities]
+      properties:
+        name:
+          type: string
+        kind:
+          $ref: "#/components/schemas/AliasKind"
+        members:
+          type: array
+          description: Alias names or `<provider>/<model>` references, in fallback order.
+          items:
+            type: string
+        capabilities:
+          type: array
+          description: Advertised supported parameters, e.g. `tools`, `structured_outputs`.
+          items:
+            type: string
+        context_window:
+          type: integer
+          minimum: 0
+    AliasList:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Alias"
+        total:
+          type: integer
+    ChainTarget:
+      type: object
+      required: [provider, model]
+      properties:
+        provider:
+          type: string
+        model:
+          type: string
+        cooling_until:
+          type: string
+          format: date-time
+    AliasChain:
+      type: object
+      required: [targets]
+      properties:
+        targets:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChainTarget"
+    Cooling:
+      type: object
+      required: [provider, model, until, reason, aliases]
+      properties:
+        provider:
+          type: string
+        model:
+          type: string
+        until:
+          type: string
+          format: date-time
+        reason:
+          type: string
+        aliases:
+          type: array
+          items:
+            type: string
+    CoolingList:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Cooling"
+        total:
+          type: integer
+
+    Key:
+      type: object
+      required: [id, name, allow, enabled, prefix, created_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        allow:
+          type: array
+          description: Alias names or `<provider>/<model>` patterns this key may call.
+          items:
+            type: string
+        enabled:
+          type: boolean
+        prefix:
+          type: string
+          description: The first characters of the value, for recognising a key.
+        created_at:
+          type: string
+          format: date-time
+    KeyCreated:
+      allOf:
+        - $ref: "#/components/schemas/Key"
+        - type: object
+          required: [value]
+          properties:
+            value:
+              type: string
+              description: The key's value, returned only when it is created.
+    KeyCreate:
+      type: object
+      required: [name, allow]
+      properties:
+        name:
+          type: string
+        allow:
+          type: array
+          items:
+            type: string
+        value:
+          type: string
+          description: A caller-chosen value; generated when absent.
+    KeyUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        allow:
+          type: array
+          items:
+            type: string
+        enabled:
+          type: boolean
+    KeyList:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Key"
+        total:
+          type: integer
+
+    TokenUsage:
+      type: object
+      required: [prompt, completion, total]
+      properties:
+        prompt:
+          type: integer
+        completion:
+          type: integer
+        total:
+          type: integer
+    LogEntry:
+      type: object
+      required: [id, attempt, time, provider, model, status, tokens, stream]
+      properties:
+        id:
+          type: string
+        parent_id:
+          type: string
+          description: The id of the first attempt when this entry is a fallback.
+        attempt:
+          type: integer
+        time:
+          type: string
+          format: date-time
+        key:
+          type: string
+          description: The client key id.
+        alias:
+          type: string
+        provider:
+          type: string
+        model:
+          type: string
+        status:
+          type: string
+          enum: [success, error, processing, cancelled]
+        latency_ms:
+          type: integer
+        tokens:
+          $ref: "#/components/schemas/TokenUsage"
+        cost_usd:
+          type: number
+          format: double
+        stream:
+          type: boolean
+        error:
+          type: string
+    LogDetail:
+      allOf:
+        - $ref: "#/components/schemas/LogEntry"
+        - type: object
+          required: [fallback_path]
+          properties:
+            request:
+              type: object
+              additionalProperties: true
+            response:
+              type: object
+              additionalProperties: true
+            fallback_path:
+              type: array
+              description: Every attempt of the request, root first, by attempt.
+              items:
+                $ref: "#/components/schemas/LogEntry"
+    LogList:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/LogEntry"
+        total:
+          type: integer
+
+    StatsSummary:
+      type: object
+      required: [requests, errors, error_rate, prompt_tokens, completion_tokens, total_tokens, cost_usd]
+      properties:
+        requests:
+          type: integer
+        errors:
+          type: integer
+        error_rate:
+          type: number
+          format: double
+        latency_p50_ms:
+          type: [number, "null"]
+          format: double
+          description: Null when there are no requests in the range.
+        latency_p95_ms:
+          type: [number, "null"]
+          format: double
+          description: Null when there are no requests in the range.
+        prompt_tokens:
+          type: integer
+        completion_tokens:
+          type: integer
+        total_tokens:
+          type: integer
+        cost_usd:
+          type: number
+          format: double
+    StatsPoint:
+      type: object
+      required: [time, requests, errors]
+      properties:
+        time:
+          type: string
+          format: date-time
+        requests:
+          type: integer
+        errors:
+          type: integer
+    StatsGroup:
+      type: object
+      required: [name, summary]
+      properties:
+        name:
+          type: string
+        summary:
+          $ref: "#/components/schemas/StatsSummary"
+    Stats:
+      type: object
+      required: [from, to, summary, series, groups]
+      properties:
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        summary:
+          $ref: "#/components/schemas/StatsSummary"
+        series:
+          type: array
+          items:
+            $ref: "#/components/schemas/StatsPoint"
+        groups:
+          type: array
+          description: Empty unless `group_by` is set.
+          items:
+            $ref: "#/components/schemas/StatsGroup"
+
+    PasswordChange:
+      type: object
+      required: [current, new]
+      properties:
+        current:
+          type: string
+        new:
+          type: string
+          minLength: 12
+    ApiToken:
+      type: object
+      required: [id, name, prefix, created_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        prefix:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+    ApiTokenCreated:
+      allOf:
+        - $ref: "#/components/schemas/ApiToken"
+        - type: object
+          required: [value]
+          properties:
+            value:
+              type: string
+              description: The token's value, returned only when it is created.
+    ApiTokenCreate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+    ApiTokenList:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApiToken"
+        total:
+          type: integer
+
+    ConfigRequest:
+      type: object
+      required: [document]
+      properties:
+        document:
+          type: string
+          description: The `remora.yaml` text.
+        secrets:
+          type: object
+          description: Values for the document's `env:NAME` references, by name.
+          additionalProperties:
+            type: string
+        prune:
+          type: boolean
+          default: true
+          description: Delete what the store has and the document does not.
+    Change:
+      type: object
+      required: [op, kind, name, fields]
+      properties:
+        op:
+          type: string
+          enum: [create, update, delete]
+        kind:
+          type: string
+          enum: [provider, alias, key]
+        name:
+          type: string
+        fields:
+          type: array
+          description: The fields an update changes; empty for create and delete.
+          items:
+            type: string
+        value:
+          type: string
+          description: >-
+            A client key value apply generated for a new key whose document gives none. Shown once, only in the
+            answer of apply.
+    ConfigChanges:
+      type: object
+      required: [changes]
+      properties:
+        changes:
+          type: array
+          items:
+            $ref: "#/components/schemas/Change"

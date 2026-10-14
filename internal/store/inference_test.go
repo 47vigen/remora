@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/47vigen/remora/internal/alias"
 )
@@ -65,6 +66,47 @@ func rawContains(t *testing.T, s *Store, table, needle string) bool {
 	return found
 }
 
+func TestClientKeyPrefix(t *testing.T) {
+	s := openSealed(t)
+	var k ClientKey
+	write(t, s, func(ctx context.Context, tx *Tx) error {
+		var err error
+		k, err = tx.PutClientKey(ctx, ClientKey{Name: "svc", Enabled: true}, "sk-imported-123")
+		return err
+	})
+	if k.Prefix != "sk-impo" || k.CreatedAt.IsZero() {
+		t.Errorf("new key prefix, created_at = %q, %v; want sk-impo, set", k.Prefix, k.CreatedAt)
+	}
+	created := k.CreatedAt
+
+	// A save without a value keeps the prefix; a new value replaces it. created_at never changes.
+	write(t, s, func(ctx context.Context, tx *Tx) error {
+		var err error
+		k.Name = "renamed"
+		k, err = tx.PutClientKey(ctx, k, "")
+		return err
+	})
+	if k.Prefix != "sk-impo" || !k.CreatedAt.Equal(created) {
+		t.Errorf("after rename prefix, created_at = %q, %v; want sk-impo, %v", k.Prefix, k.CreatedAt, created)
+	}
+	long := GenerateKeyValue()
+	write(t, s, func(ctx context.Context, tx *Tx) error {
+		var err error
+		k, err = tx.PutClientKey(ctx, k, long)
+		return err
+	})
+	if k.Prefix != long[:8] || !k.CreatedAt.Equal(created) {
+		t.Errorf("after new value prefix, created_at = %q, %v; want %q, %v", k.Prefix, k.CreatedAt, long[:8], created)
+	}
+	write(t, s, func(ctx context.Context, tx *Tx) error {
+		keys, err := tx.ClientKeys(ctx)
+		if err != nil || len(keys) != 1 || keys[0].Prefix != long[:8] || !keys[0].CreatedAt.Equal(created) {
+			t.Errorf("ClientKeys = %+v, %v", keys, err)
+		}
+		return nil
+	})
+}
+
 func TestClientKeys(t *testing.T) {
 	ctx := context.Background()
 	s := openSealed(t)
@@ -82,7 +124,11 @@ func TestClientKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ClientKeyByValue: %v", err)
 	}
-	want := ClientKey{ID: full.ID, Name: "full", Allow: []string{"*"}, Enabled: true}
+	if got.Prefix != "sk-e2" || time.Since(got.CreatedAt) > time.Minute || time.Until(got.CreatedAt) > time.Minute {
+		t.Errorf("ClientKeyByValue prefix, created_at = %q, %v; want sk-e2, about now", got.Prefix, got.CreatedAt)
+	}
+	got.CreatedAt = time.Time{}
+	want := ClientKey{ID: full.ID, Name: "full", Prefix: "sk-e2", Allow: []string{"*"}, Enabled: true}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ClientKeyByValue = %+v, want %+v", got, want)
 	}

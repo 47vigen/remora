@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/oapi-codegen/oapi-codegen/HEAD/configuration-schema.json
+# Generates internal/api/gen/api.gen.go from api/openapi.yaml. Run: go generate ./internal/api/gen
+package: gen
+# Relative to internal/api/gen, where go generate runs.
+output: api.gen.go
+generate:
+  std-http-server: true
+  strict-server: true
+  models: true
+  client: true
+output-options:
+  # The live-log WebSocket is implemented by hand.
+  exclude-operation-ids:
+    - streamLogs

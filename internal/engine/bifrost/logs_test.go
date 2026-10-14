@@ -105,3 +105,141 @@ func TestGetLogFailure(t *testing.T) {
 		t.Fatalf("GetLog(\"\") = %v, want a plain error", err)
 	}
 }
+
+func TestSearchLogsQueryAllFilters(t *testing.T) {
+	t0 := time.Date(2026, 10, 14, 9, 30, 0, 123456789, time.UTC)
+	t1 := t0.Add(time.Hour)
+	const search = "سلام\u200cدنیا"
+	var got url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"logs":[{"id":"c1","parent_request_id":"r","timestamp":"2026-10-14T09:30:01Z",` +
+			`"provider":"p","model":"m","status":"success","fallback_index":2,"virtual_key_id":"vk1",` +
+			`"routing_rule_id":"r1","latency":123.5,"cost":0.25,"stream":true,` +
+			`"token_usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}],` +
+			`"pagination":{"total_count":41}}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL, "admin", "secret", srv.Client())
+
+	page, err := c.SearchLogs(context.Background(), LogFilter{
+		VirtualKeyIDs: []string{"vk1", "vk2"}, RoutingRuleIDs: []string{"r1"}, Providers: []string{"p1", "p2"},
+		Models: []string{"m1"}, Status: []string{"error"}, Start: &t0, End: &t1, ContentSearch: search,
+		ParentRequestID: "root", Limit: 20, Offset: 40, SortBy: "latency", Order: "asc",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"virtual_key_ids": "vk1,vk2", "routing_rule_ids": "r1", "providers": "p1,p2", "models": "m1",
+		"status": "error", "start_time": t0.Format(time.RFC3339Nano), "end_time": t1.Format(time.RFC3339Nano),
+		"content_search": search, "parent_request_id": "root", "limit": "20", "offset": "40", "sort_by": "latency",
+		"order": "asc",
+	}
+	for k, v := range want {
+		if got.Get(k) != v {
+			t.Errorf("%s = %q, want %q", k, got.Get(k), v)
+		}
+	}
+	if got.Get("content_search") != search {
+		t.Errorf("content_search bytes = % x, want % x", got.Get("content_search"), search)
+	}
+	if page.Total != 41 || len(page.Logs) != 1 {
+		t.Fatalf("page = %+v", page)
+	}
+	l := page.Logs[0]
+	if l.FallbackIndex != 2 || l.VirtualKeyID == nil || *l.VirtualKeyID != "vk1" || l.RoutingRuleID == nil ||
+		*l.RoutingRuleID != "r1" || l.Latency == nil || *l.Latency != 123.5 || l.Cost == nil || *l.Cost != 0.25 ||
+		!l.Stream || l.TokenUsage == nil || *l.TokenUsage != (TokenUsage{PromptTokens: 3, CompletionTokens: 4, TotalTokens: 7}) {
+		t.Fatalf("log = %+v", l)
+	}
+
+	// Zero filters stay out of the query.
+	if _, err := c.SearchLogs(context.Background(), LogFilter{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("empty filter query = %v", got)
+	}
+}
+
+func TestGetLogBodies(t *testing.T) {
+	_, c := newFakeEngine(t, map[string]answer{
+		"GET /api/logs/r1": {http.StatusOK, `{"id":"r1","status":"success","input_history":[{"role":"user","content":"hi"}],` +
+			`"output_message":{"role":"assistant","content":"yo"},"params":{"temperature":0.5}}`},
+	})
+	l, err := c.GetLog(context.Background(), "r1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(l.InputHistory) != `[{"role":"user","content":"hi"}]` || string(l.OutputMessage) != `{"role":"assistant","content":"yo"}` ||
+		string(l.Params) != `{"temperature":0.5}` {
+		t.Fatalf("bodies = %s %s %s", l.InputHistory, l.OutputMessage, l.Params)
+	}
+}
+
+func TestLogStatsDecode(t *testing.T) {
+	t0 := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
+	var got url.Values
+	var path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path, got = r.URL.Path, r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"total_requests":210,"success_rate":95,"user_facing_success_rate":97.5,` +
+			`"user_facing_total_requests":200,"average_latency":12.5,"total_tokens":900,"prompt_tokens":600,` +
+			`"completion_tokens":300,"total_cost":1.75}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL, "admin", "secret", srv.Client())
+
+	st, err := c.LogStats(context.Background(), LogFilter{RoutingRuleIDs: []string{"r1"}, Start: &t0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "/api/logs/stats" || got.Get("routing_rule_ids") != "r1" || got.Get("start_time") != t0.Format(time.RFC3339Nano) {
+		t.Fatalf("request = %s %v", path, got)
+	}
+	want := LogStats{
+		UserFacingTotalRequests: 200, UserFacingSuccessRate: 97.5, PromptTokens: 600, CompletionTokens: 300,
+		TotalTokens: 900, TotalCost: 1.75,
+	}
+	if st != want {
+		t.Fatalf("stats = %+v, want %+v", st, want)
+	}
+}
+
+func TestHistogramDecode(t *testing.T) {
+	t0 := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
+	var got url.Values
+	var path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path, got = r.URL.Path, r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"buckets":[{"timestamp":"2026-10-14T00:00:00Z","count":5,"success":4,"error":1,"cancelled":0},` +
+			`{"timestamp":"2026-10-14T01:00:00Z","count":2,"success":2,"error":0,"cancelled":0}],"bucket_size_seconds":3600}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL, "admin", "secret", srv.Client())
+
+	b, err := c.Histogram(context.Background(), LogFilter{VirtualKeyIDs: []string{"vk1"}, Start: &t0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "/api/logs/histogram" || got.Get("virtual_key_ids") != "vk1" {
+		t.Fatalf("request = %s %v", path, got)
+	}
+	want := []HistogramBucket{
+		{Timestamp: t0, Count: 5, Success: 4, Error: 1},
+		{Timestamp: t0.Add(time.Hour), Count: 2, Success: 2},
+	}
+	if len(b) != len(want) {
+		t.Fatalf("buckets = %+v", b)
+	}
+	for i := range want {
+		if !b[i].Timestamp.Equal(want[i].Timestamp) || b[i].Count != want[i].Count || b[i].Success != want[i].Success ||
+			b[i].Error != want[i].Error {
+			t.Errorf("bucket %d = %+v, want %+v", i, b[i], want[i])
+		}
+	}
+}

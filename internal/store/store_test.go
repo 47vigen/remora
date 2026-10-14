@@ -33,12 +33,14 @@ func TestOpenAppliesMigrations(t *testing.T) {
 	if err := s.DB().QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatalf("user_version: %v", err)
 	}
-	if version != len(files) || version != 3 {
-		t.Errorf("user_version = %d, want %d (files) == 3", version, len(files))
+	// user_version counts the applied files, so a gap in the file numbers (0005 before 0004) is harmless.
+	if version != len(files) || version != 4 {
+		t.Errorf("user_version = %d, want %d (files) == 4", version, len(files))
 	}
 
 	for _, table := range []string{
-		"settings", "engine_state", "providers", "provider_keys", "client_keys", "aliases", "alias_members", "engine_sync", "accounts",
+		"settings", "engine_state", "providers", "provider_keys", "client_keys", "aliases", "alias_members", "engine_sync",
+		"accounts", "sessions", "api_tokens",
 	} {
 		var n int
 		err := s.DB().QueryRowContext(ctx,

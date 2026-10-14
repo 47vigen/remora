@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -165,7 +166,20 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		return fmt.Errorf("front door url: %w", err)
 	}
 	mux := http.NewServeMux()
-	api.RegisterSystem(mux, sup)
+	api.RegisterHealthz(mux, sup)
+	mgmt := api.New(api.Deps{
+		Providers: api.NewProviders(st, rec),
+		Accounts:  api.NewAccounts(accts),
+		Aliases:   api.NewAliases(st, rec, cooler.Snapshot),
+		Keys:      api.NewKeys(st, rec),
+		System:    api.NewSystem(sup),
+		Names:     api.NewNames(st),
+		Logs:      fd,
+		Tail:      tail, // the cooling tail; live log viewers share its one poller
+		Auth:      auth.NewService(st, nil),
+		Log:       logger,
+	})
+	mux.Handle("/api/", mgmt.Handler())
 	// /v1 answers 503 until a Sync has completed, so a failed first pass never serves a stale front door; the
 	// management API and health stay reachable meanwhile.
 	px := proxy.New(upstream, st, logger)
@@ -197,7 +211,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	return nil
 }
 
-// newReconciler is the reconciler of serve and apply, so both push the same front-door state.
+// newReconciler is serve's reconciler: the store, the front door and the speech adapter it registers.
 func newReconciler(cfg config.Config, st *store.Store, engine reconcile.Engine, logger *slog.Logger) *reconcile.Reconciler {
 	return &reconcile.Reconciler{
 		Store:          st,
@@ -294,4 +308,69 @@ func newServer(ctx context.Context, addr string, h http.Handler) *http.Server {
 		ReadHeaderTimeout: readHeaderTimeout,
 		BaseContext:       func(net.Listener) context.Context { return context.WithoutCancel(ctx) },
 	}
+}
+
+// setSealer loads (or creates) the master key and gives the store its sealer.
+func setSealer(st *store.Store, cfg config.Config) error {
+	master, err := store.LoadMasterKey(cfg.DataDir, cfg.MasterKey)
+	if err != nil {
+		return err
+	}
+	sl, err := store.NewSealer(master)
+	if err != nil {
+		return err
+	}
+	st.SetSealer(sl)
+	return nil
+}
+
+// frontDoorURL is the front door's loopback base URL.
+func frontDoorURL(cfg config.Config) string {
+	return "http://127.0.0.1:" + strconv.Itoa(cfg.Ports.Bifrost)
+}
+
+// accountsURL is the OAuth engine's loopback base URL.
+func accountsURL(cfg config.Config) string {
+	return "http://127.0.0.1:" + strconv.Itoa(cfg.Ports.CLIProxyAPI)
+}
+
+// withOAuth registers the OAuth engine behind the front door: its internal provider with clientKey, one routing
+// rule per subscription provider, and the subscription provider names as reserved alias member providers.
+func withOAuth(r *reconcile.Reconciler, cfg config.Config, clientKey string) {
+	r.Internal = append(r.Internal, reconcile.OAuthProvider(clientKey, accountsURL(cfg)))
+	r.InternalRules = reconcile.OAuthRules()
+	r.Reserved = reconcile.OAuthReserved()
+}
+
+// managementTimeout bounds one management call. A reconcile pass holds the store's write lock, so a stuck engine
+// must not hold it for long.
+const managementTimeout = 30 * time.Second
+
+// frontDoor is the front door's management client. Its transport ignores proxy environment variables: the engine is
+// on loopback.
+func frontDoor(cfg config.Config, c supervise.Credentials) *bifrost.Client {
+	return bifrost.New(frontDoorURL(cfg), c.BifrostAdminUser, c.BifrostAdminPassword, loopbackClient())
+}
+
+// accountsEngine is the OAuth engine's management client, on loopback like frontDoor.
+func accountsEngine(cfg config.Config, c supervise.Credentials) *cliproxyapi.Client {
+	return cliproxyapi.New(accountsURL(cfg), c.CLIProxyManagementSecret, loopbackClient())
+}
+
+// loopbackClient is an HTTP client for an engine's management API: it ignores proxy environment variables and
+// bounds each call by managementTimeout.
+func loopbackClient() *http.Client {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.Proxy = nil
+	return &http.Client{Transport: tr, Timeout: managementTimeout}
+}
+
+// scrubWriter replaces engine names and keys in everything written through it.
+type scrubWriter struct{ w io.Writer }
+
+func (s scrubWriter) Write(p []byte) (int, error) {
+	if _, err := s.w.Write(proxy.Scrub(p)); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }
