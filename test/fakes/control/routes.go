@@ -8,6 +8,7 @@ const (
 	RouteOpenAIEmbeddings     = "openai.embeddings"            // POST /v1/embeddings
 	RouteOpenAITranscriptions = "openai.transcriptions"        // POST /v1/audio/transcriptions
 	RouteOpenAIDecisions      = "openai.decisions"             // POST /v1/decisions
+	RouteOpenAIResponses      = "openai.responses"             // POST /v1/responses
 	RouteModels               = "models"                       // GET  /v1/models
 	RouteSonioxFileCreate     = "soniox.files.create"          // POST /v1/files
 	RouteSonioxFileList       = "soniox.files.list"            // GET  /v1/files
@@ -35,6 +36,7 @@ func routeTable() []routeSpec {
 		{RouteOpenAIEmbeddings, http.MethodPost, "/v1/embeddings"},
 		{RouteOpenAITranscriptions, http.MethodPost, "/v1/audio/transcriptions"},
 		{RouteOpenAIDecisions, http.MethodPost, "/v1/decisions"},
+		{RouteOpenAIResponses, http.MethodPost, "/v1/responses"},
 		{RouteModels, http.MethodGet, "/v1/models"},
 		{RouteSonioxFileCreate, http.MethodPost, "/v1/files"},
 		{RouteSonioxFileList, http.MethodGet, "/v1/files"},

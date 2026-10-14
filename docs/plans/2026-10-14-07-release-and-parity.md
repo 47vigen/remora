@@ -867,3 +867,10 @@ Expected: the engine table (`bifrost`, `cliproxyapi` versions), the pull-by-dige
 - Task 7: the format says a proof item is `migration` or `exception: <reason>`, but the row table writes both inside
   backticks. `parseProof` accepts either form, and an exception takes the rest of the cell as its reason, so a
   reason may contain commas.
+- Task 7 (gap tests, request shapes and providers): the front door appends `/v1/<endpoint>` to a provider's base
+  URL, but providers publish base URLs ending in `/v1` (and the OmniRoute importer copies them verbatim), so such a
+  provider was called at `/v1/v1/...`. Reconcile now drops a trailing `/v1` (and `/`) from every base URL it hands
+  the front door (`internal/reconcile.TestEngineProviderBaseURLDropsV1`; proven end to end by
+  `test/e2e.TestProviderOpenAICompatible`).
+- Task 7: the fakes had no `/v1/responses` route; `openai.responses` (POST `/v1/responses`) was added with a default
+  answer, for `TestResponsesAgentMessage` and the Responses half of `TestMaxTokensAndReasoningEffort`.

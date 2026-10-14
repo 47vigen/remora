@@ -152,7 +152,7 @@ func TestSync_CreatesEverything(t *testing.T) {
 		if !ok {
 			t.Fatalf("provider %s missing", name)
 		}
-		if p.BaseType != "openai" || p.BaseURL != "http://"+name+".test/v1" {
+		if p.BaseType != "openai" || p.BaseURL != "http://"+name+".test" {
 			t.Errorf("provider %s = %+v", name, p)
 		}
 	}
@@ -249,7 +249,7 @@ func TestSync_StoreWins(t *testing.T) {
 		t.Errorf("internal key = %+v, %v", k, ok)
 	}
 	// up-a existed in the engine and was not created again; it was updated to the store's state.
-	if p, _ := h.eng.Provider("up-a"); p.BaseURL != "http://up-a.test/v1" {
+	if p, _ := h.eng.Provider("up-a"); p.BaseURL != "http://up-a.test" {
 		t.Errorf("up-a = %+v", p)
 	}
 }
@@ -553,10 +553,10 @@ func TestChange_RecoveryRepushesTouched(t *testing.T) {
 			updates = append(updates, c.Arg.(bifrost.Provider))
 		}
 	}
-	if len(updates) != 2 || updates[0].BaseURL != "http://up-a.test/v2" || updates[1].BaseURL != "http://up-a.test/v1" {
+	if len(updates) != 2 || updates[0].BaseURL != "http://up-a.test/v2" || updates[1].BaseURL != "http://up-a.test" {
 		t.Fatalf("up-a updates = %+v, want the change then the committed state", updates)
 	}
-	if p, _ := h.eng.Provider("up-a"); p.BaseURL != "http://up-a.test/v1" {
+	if p, _ := h.eng.Provider("up-a"); p.BaseURL != "http://up-a.test" {
 		t.Errorf("engine up-a = %+v", p)
 	}
 	h.sync(t)
@@ -842,5 +842,38 @@ func TestSynced_WaitsForEveryAlsoStep(t *testing.T) {
 	_ = h.rec.SyncAll(context.Background())
 	if !h.rec.Synced() {
 		t.Fatal("a later Also failure closed /v1")
+	}
+}
+
+// The front door appends /v1/<endpoint> to a provider's base URL, while providers publish their base URL with the
+// /v1 the OpenAI SDKs expect. Either form must reach the same endpoint.
+func TestEngineProviderBaseURLDropsV1(t *testing.T) {
+	r := &Reconciler{}
+	cases := []struct {
+		kind store.ProviderKind
+		typ  string
+		name string
+		in   string
+		want string
+	}{
+		{store.KindOpenAICompatible, "", "oc", "https://llm.example.com/v1", "https://llm.example.com"},
+		{store.KindOpenAICompatible, "", "oc", "https://llm.example.com/v1/", "https://llm.example.com"},
+		{store.KindOpenAICompatible, "", "oc", "https://llm.example.com/api/v1", "https://llm.example.com/api"},
+		{store.KindOpenAICompatible, "", "oc", "https://llm.example.com/api", "https://llm.example.com/api"},
+		{store.KindOpenAICompatible, "", "oc", "https://llm.example.com/", "https://llm.example.com"},
+		{store.KindOpenAICompatible, "", "oc", "https://llm.example.com/v1beta", "https://llm.example.com/v1beta"},
+		{store.KindTypeSafeCompatible, "", "ts", "https://ts.example.com/v1", "https://ts.example.com"},
+		{store.KindBuiltin, "openrouter", "openrouter", "https://router.example.com/api/v1", "https://router.example.com/api"},
+		{store.KindBuiltin, "openrouter", "openrouter", "", ""},
+	}
+	for _, c := range cases {
+		p := store.Provider{Name: c.name, Kind: c.kind, Type: c.typ, BaseURL: c.in}
+		got, err := r.engineProvider(p, nil, nil)
+		if err != nil {
+			t.Fatalf("engineProvider(%+v): %v", p, err)
+		}
+		if got.BaseURL != c.want {
+			t.Errorf("%s base URL %q: engine gets %q, want %q", c.kind, c.in, got.BaseURL, c.want)
+		}
 	}
 }
