@@ -35,10 +35,20 @@ const (
 // top-level JSON object. A top-level "fallbacks" key is rejected: the engine would honour it and route past the
 // allowlist. The request itself, its headers included, is not changed; on error the returned body is nil.
 func ExtractModel(r *http.Request) (model string, body io.ReadCloser, err error) {
+	model, raw, err := extractModel(r)
+	if err != nil {
+		return "", nil, err
+	}
+	return model, io.NopCloser(bytes.NewReader(raw)), nil
+}
+
+// extractModel is ExtractModel returning the held bytes themselves, so the proxy can hand them to response hooks
+// without a second copy.
+func extractModel(r *http.Request) (model string, raw []byte, err error) {
 	if r.Body == nil || r.Body == http.NoBody {
 		return "", nil, fmt.Errorf("%w: empty body", ErrNoModel)
 	}
-	raw, err := io.ReadAll(io.LimitReader(r.Body, MaxBodyBytes+1))
+	raw, err = io.ReadAll(io.LimitReader(r.Body, MaxBodyBytes+1))
 	if err != nil {
 		if mbe := (*http.MaxBytesError)(nil); errors.As(err, &mbe) {
 			return "", nil, ErrBodyTooLarge
@@ -58,7 +68,7 @@ func ExtractModel(r *http.Request) (model string, body io.ReadCloser, err error)
 	if err != nil {
 		return "", nil, err
 	}
-	return model, io.NopCloser(bytes.NewReader(raw)), nil
+	return model, raw, nil
 }
 
 // jsonModel walks the top-level object key by key, so duplicate keys and case variants are seen: the engine's JSON

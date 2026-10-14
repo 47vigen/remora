@@ -1,0 +1,255 @@
+package proxy
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"mime"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+// Headers remora adds to /v1 responses.
+const (
+	headerAlias    = "X-Remora-Alias"
+	headerServedBy = "X-Remora-Served-By"
+	headerFallback = "X-Remora-Fallback"
+)
+
+// The front door's routing-info response headers (lib/responseheaders.go), read before they are removed.
+const (
+	headerRoutingProvider   = "X-Bifrost-Routing-Info-Provider"
+	headerRoutingModel      = "X-Bifrost-Routing-Info-Model"
+	headerRoutingIsFallback = "X-Bifrost-Routing-Info-Is-Fallback"
+)
+
+// nativeErrorKey marks the front door's own error envelope.
+const nativeErrorKey = "is_bifrost_error"
+
+// maxErrorBody is how much of an upstream error body remora reads to map and scrub it. A larger body is replaced.
+const maxErrorBody = 1 << 20
+
+// maxSSELine is the longest SSE line remora holds to inspect; a longer line is forwarded as it arrives, unread.
+const maxSSELine = 1 << 20
+
+var (
+	engineWords = regexp.MustCompile(`(?i)bifrost|cliproxyapi`)
+	engineKeys  = regexp.MustCompile(`sk-bf-[A-Za-z0-9_-]+`)
+)
+
+// scrub replaces engine names with "remora" and engine key values with "[redacted]". The replacements are plain
+// ASCII without quotes or backslashes, so a JSON document stays valid.
+func scrub(b []byte) []byte {
+	b = engineKeys.ReplaceAll(b, []byte("[redacted]"))
+	return engineWords.ReplaceAll(b, []byte("remora"))
+}
+
+func scrubString(s string) string { return string(scrub([]byte(s))) }
+
+// isEngineHeader reports whether a header name belongs to an engine.
+func isEngineHeader(name string) bool {
+	l := strings.ToLower(name)
+	return strings.HasPrefix(l, "x-bf-") || strings.Contains(l, "bifrost") || strings.Contains(l, "cliproxyapi")
+}
+
+// cleanResponseHeaders removes engine headers and the Server header, and scrubs every remaining value.
+func cleanResponseHeaders(h http.Header) {
+	for name, vals := range h {
+		if isEngineHeader(name) || strings.EqualFold(name, "Server") {
+			delete(h, name)
+			continue
+		}
+		for i, v := range vals {
+			vals[i] = scrubString(v)
+		}
+	}
+}
+
+// setRemoraHeaders maps the front door's routing info to remora's headers. Call it before cleanResponseHeaders.
+func setRemoraHeaders(h http.Header, info *reqInfo) {
+	provider, model := h.Get(headerRoutingProvider), h.Get(headerRoutingModel)
+	fallback := strings.EqualFold(strings.TrimSpace(h.Get(headerRoutingIsFallback)), "true")
+	cleanResponseHeaders(h)
+	if info.isAlias {
+		h.Set(headerAlias, info.model)
+	}
+	if provider != "" && model != "" {
+		h.Set(headerServedBy, provider+"/"+model)
+	}
+	h.Set(headerFallback, strconv.FormatBool(fallback))
+}
+
+func isEventStream(h http.Header) bool {
+	mt, _, _ := mime.ParseMediaType(h.Get("Content-Type"))
+	return mt == "text/event-stream"
+}
+
+// rewriteErrorBody reads an error body (at most maxErrorBody), maps the front door's native envelope to OpenAI's
+// shape, scrubs engine words from any other body, and replaces a larger body with remora's own error.
+func rewriteErrorBody(resp *http.Response, s shape) error {
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody+1))
+	_ = resp.Body.Close()
+	if err != nil {
+		return fmt.Errorf("proxy: read upstream error body: %w", err)
+	}
+	var out []byte
+	if len(raw) > maxErrorBody {
+		out = errUpstreamBody(resp.StatusCode).body(s)
+		resp.Header.Set("Content-Type", "application/json")
+	} else if mapped, ok := mapNativeError(raw); ok {
+		out = mapped
+		resp.Header.Set("Content-Type", "application/json")
+	} else {
+		out = scrub(raw)
+	}
+	resp.Header.Del("Content-Encoding")
+	resp.Header.Set("Content-Length", strconv.Itoa(len(out)))
+	resp.ContentLength = int64(len(out))
+	resp.Body = io.NopCloser(bytes.NewReader(out))
+	return nil
+}
+
+// mapNativeError turns the front door's error envelope into {"error":{"message","type","code","param"}}, scrubbed.
+// The envelope is either the whole document or, as in the front door's SSE error events, the value of "error".
+func mapNativeError(raw []byte) ([]byte, bool) {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		return nil, false
+	}
+	if _, ok := top[nativeErrorKey]; ok {
+		return openAIFromNative(top)
+	}
+	if e, ok := top["error"]; ok {
+		var inner map[string]json.RawMessage
+		if err := json.Unmarshal(e, &inner); err == nil {
+			if _, ok := inner[nativeErrorKey]; ok {
+				return openAIFromNative(inner)
+			}
+		}
+	}
+	return nil, false
+}
+
+func openAIFromNative(env map[string]json.RawMessage) ([]byte, bool) {
+	var e struct {
+		Type    json.RawMessage `json:"type"`
+		Code    json.RawMessage `json:"code"`
+		Message json.RawMessage `json:"message"`
+		Param   json.RawMessage `json:"param"`
+	}
+	if raw, ok := env["error"]; ok {
+		_ = json.Unmarshal(raw, &e) // a non-object error leaves the fields empty
+	}
+	var msg string
+	if err := json.Unmarshal(e.Message, &msg); err != nil || msg == "" {
+		msg = errUpstreamBody(0).message
+	}
+	out, err := encodeJSON(openAIError{Error: openAIErrorBody{
+		Message: msg, Type: orNull(e.Type), Code: orNull(e.Code), Param: orNull(e.Param),
+	}})
+	if err != nil {
+		return nil, false
+	}
+	return scrub(out), true
+}
+
+func orNull(r json.RawMessage) json.RawMessage {
+	if len(r) == 0 {
+		return json.RawMessage("null")
+	}
+	return r
+}
+
+// rewriteSSELine returns line (with its line ending) unchanged, unless it is a data line carrying an error: the
+// front door's native envelope becomes OpenAI's error shape, and any other error event (a top-level "error" key or
+// "type":"error") is scrubbed. Content events are never touched.
+func rewriteSSELine(line []byte) []byte {
+	if !bytes.HasPrefix(line, []byte("data:")) ||
+		!bytes.Contains(line, []byte(`"error"`)) && !bytes.Contains(line, []byte(nativeErrorKey)) {
+		return line
+	}
+	payload := line[len("data:"):]
+	prefix := line[:len("data:")]
+	if len(payload) > 0 && payload[0] == ' ' {
+		prefix, payload = line[:len("data: ")], payload[1:]
+	}
+	body := bytes.TrimRight(payload, "\r\n")
+	ending := payload[len(body):]
+
+	var out []byte
+	if mapped, ok := mapNativeError(body); ok {
+		out = mapped
+	} else {
+		var top map[string]json.RawMessage
+		if err := json.Unmarshal(body, &top); err != nil {
+			return line
+		}
+		_, hasError := top["error"]
+		var typ string
+		_ = json.Unmarshal(top["type"], &typ)
+		if !hasError && typ != "error" {
+			return line
+		}
+		out = scrub(body)
+	}
+	res := make([]byte, 0, len(prefix)+len(out)+len(ending))
+	res = append(res, prefix...)
+	res = append(res, out...)
+	return append(res, ending...)
+}
+
+// sseScrubber forwards an SSE body line by line as each line arrives, rewriting only error events
+// (rewriteSSELine). Nothing is held beyond the current line.
+type sseScrubber struct {
+	src         io.ReadCloser
+	br          *bufio.Reader
+	line        []byte // the current line, being assembled
+	pending     []byte // bytes ready for the caller
+	passthrough bool   // inside an over-long line: forward it unread until its newline
+	err         error
+}
+
+func newSSEScrubber(src io.ReadCloser) *sseScrubber {
+	return &sseScrubber{src: src, br: bufio.NewReaderSize(src, 64<<10)}
+}
+
+func (s *sseScrubber) Read(p []byte) (int, error) {
+	for len(s.pending) == 0 {
+		if s.err != nil {
+			return 0, s.err
+		}
+		s.fill()
+	}
+	n := copy(p, s.pending)
+	s.pending = s.pending[n:]
+	return n, nil
+}
+
+// fill reads the next piece of the stream into pending (possibly nothing, while a long line is assembled).
+func (s *sseScrubber) fill() {
+	chunk, err := s.br.ReadSlice('\n')
+	full := errors.Is(err, bufio.ErrBufferFull)
+	if err != nil && !full {
+		s.err = err
+	}
+	s.line = append(s.line, chunk...) // chunk is only valid until the next read
+	switch {
+	case s.passthrough:
+		s.pending, s.line = s.line, nil
+		s.passthrough = full
+	case full && len(s.line) > maxSSELine:
+		s.pending, s.line = s.line, nil
+		s.passthrough = true
+	case full:
+		// keep assembling the line
+	default:
+		s.pending, s.line = rewriteSSELine(s.line), nil
+	}
+}
+
+func (s *sseScrubber) Close() error { return s.src.Close() }

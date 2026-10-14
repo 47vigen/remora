@@ -1,0 +1,293 @@
+package proxy
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"io"
+	"log/slog"
+	"net"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/47vigen/remora/internal/store"
+)
+
+// Request headers remora sets for the front door.
+const (
+	headerVirtualKey  = "X-Bf-Vk"                       // the front door's virtual key (core/utils.go)
+	headerExtraParams = "X-Bf-Passthrough-Extra-Params" // forward unknown JSON params instead of dropping them
+)
+
+// ResponseHook sees every proxied response in ModifyResponse, after remora's own x-remora-* headers are set and
+// before the first byte is written, so it may rewrite those headers. r is the client's request; reqBody is the
+// exact body ExtractModel held (nil on the WebSocket route). Plan 03 uses it for served-by names of internal
+// providers and dropped parameters.
+type ResponseHook func(r *http.Request, reqBody []byte, resp *http.Response)
+
+// Proxy serves remora's /v1 surface: it authenticates the remora key, checks the model against the key's
+// allowlist, swaps in the key's front-door virtual key and streams the front door's answer back unbuffered,
+// rewriting only headers and error envelopes so no engine detail reaches a client.
+type Proxy struct {
+	upstream  *url.URL
+	store     *store.Store
+	log       *slog.Logger
+	transport *http.Transport
+	rp        *httputil.ReverseProxy
+
+	hooksMu sync.RWMutex
+	hooks   []ResponseHook
+}
+
+// New returns a Proxy in front of the front door at upstream (its inference routes), reading keys and aliases from
+// st. Mount it at /v1/. The /v1 server must not set a WriteTimeout: streams and transcriptions run long.
+func New(upstream *url.URL, st *store.Store, log *slog.Logger) *Proxy {
+	p := &Proxy{
+		upstream: upstream,
+		store:    st,
+		log:      log,
+		transport: &http.Transport{
+			Proxy:                 nil, // loopback only; never an environment proxy
+			DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+			MaxIdleConns:          256,
+			MaxIdleConnsPerHost:   256,
+			IdleConnTimeout:       90 * time.Second,
+			ExpectContinueTimeout: time.Second,
+			DisableCompression:    true, // bodies pass byte for byte; the client's Accept-Encoding is not forwarded
+			ResponseHeaderTimeout: 0,    // no limit: the provider's own deadline applies
+		},
+	}
+	p.rp = &httputil.ReverseProxy{
+		Rewrite:        p.rewrite,
+		Transport:      p.transport,
+		FlushInterval:  -1,
+		ModifyResponse: p.modifyResponse,
+		ErrorHandler:   p.errorHandler,
+		ErrorLog:       slog.NewLogLogger(log.Handler(), slog.LevelWarn),
+	}
+	return p
+}
+
+// OnResponse adds a hook that runs on every proxied response, in the order added.
+func (p *Proxy) OnResponse(h ResponseHook) {
+	p.hooksMu.Lock()
+	defer p.hooksMu.Unlock()
+	p.hooks = append(p.hooks, h)
+}
+
+type routeKind int
+
+const (
+	routeForward routeKind = iota // proxied to the front door
+)
+
+// route is one /v1 endpoint.
+type route struct {
+	kind     routeKind
+	upstream string // front-door path, for routeForward
+}
+
+// routes maps "METHOD /path" to its route. GET /v1/responses with a WebSocket upgrade is served separately.
+var routes = map[string]route{
+	"POST /v1/chat/completions":     {kind: routeForward, upstream: "/v1/chat/completions"},
+	"POST /v1/responses":            {kind: routeForward, upstream: "/v1/responses"},
+	"POST /v1/messages":             {kind: routeForward, upstream: "/anthropic/v1/messages"},
+	"POST /v1/embeddings":           {kind: routeForward, upstream: "/v1/embeddings"},
+	"POST /v1/audio/transcriptions": {kind: routeForward, upstream: "/v1/audio/transcriptions"},
+	"POST /v1/decisions":            {kind: routeForward, upstream: "/v1/decisions"},
+	"POST /v1/systemone":            {kind: routeForward, upstream: "/typesafe/v1/systemone"},
+}
+
+// shapeFor is the error shape of a remora path, whatever the method: the SDK that calls it reads that shape.
+func shapeFor(path string) shape {
+	switch path {
+	case "/v1/messages":
+		return shapeAnthropic
+	case "/v1/systemone":
+		return shapeTypeSafe
+	default:
+		return shapeOpenAI
+	}
+}
+
+// reqInfo travels with a forwarded request from ServeHTTP to the ReverseProxy callbacks.
+type reqInfo struct {
+	in       *http.Request // the client's request
+	upstream string
+	shape    shape
+	model    string
+	isAlias  bool
+	vk       string
+	body     []byte
+}
+
+type reqInfoKey struct{}
+
+func infoFrom(ctx context.Context) *reqInfo {
+	info, _ := ctx.Value(reqInfoKey{}).(*reqInfo)
+	return info
+}
+
+// ServeHTTP serves one /v1 request.
+func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	sh := shapeFor(r.URL.Path)
+	rt, ok := routes[r.Method+" "+r.URL.Path]
+	// Task 7 serves GET /v1/responses with a WebSocket upgrade here, after authentication.
+	if !ok {
+		errNotFound.write(w, sh)
+		return
+	}
+	key, ok := p.authenticate(w, r, sh)
+	if !ok {
+		return
+	}
+	if rt.kind == routeForward {
+		p.forward(w, r, rt, sh, key)
+	}
+}
+
+// authenticate finds the enabled client key the request presents (Authorization: Bearer, else x-api-key). On
+// failure it writes the error and returns false.
+func (p *Proxy) authenticate(w http.ResponseWriter, r *http.Request, sh shape) (store.ClientKey, bool) {
+	value := bearer(r.Header.Get("Authorization"))
+	if value == "" {
+		value = strings.TrimSpace(r.Header.Get("X-Api-Key"))
+	}
+	if value == "" {
+		errInvalidKey.write(w, sh)
+		return store.ClientKey{}, false
+	}
+	key, err := p.store.ClientKeyByValue(r.Context(), value)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		errInvalidKey.write(w, sh)
+		return store.ClientKey{}, false
+	case err != nil:
+		p.log.ErrorContext(r.Context(), "proxy: look up client key", slog.Any("err", err))
+		errInternal.write(w, sh)
+		return store.ClientKey{}, false
+	case !key.Enabled:
+		errInvalidKey.write(w, sh)
+		return store.ClientKey{}, false
+	}
+	return key, true
+}
+
+func bearer(h string) string {
+	scheme, token, ok := strings.Cut(strings.TrimSpace(h), " ")
+	if !ok || !strings.EqualFold(scheme, "Bearer") {
+		return ""
+	}
+	return strings.TrimSpace(token)
+}
+
+// forward checks the request's model and hands it to the reverse proxy.
+func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt route, sh shape, key store.ClientKey) {
+	ctx := r.Context()
+	model, raw, err := extractModel(r)
+	switch {
+	case errors.Is(err, ErrBodyTooLarge):
+		errTooLarge.write(w, sh)
+		return
+	case errors.Is(err, ErrClientFallbacks):
+		errClientFallbacks.write(w, sh)
+		return
+	case errors.Is(err, ErrNoModel):
+		errModelRequired.write(w, sh)
+		return
+	case err != nil:
+		// The client went away or sent a broken body.
+		p.log.DebugContext(ctx, "proxy: read request body", slog.Any("err", err))
+		errModelRequired.write(w, sh)
+		return
+	}
+	if !Allowed(key.Allow, model) {
+		errModelNotAllowed(model).write(w, sh)
+		return
+	}
+	if key.VKValue == "" {
+		errKeyNotReady.write(w, sh)
+		return
+	}
+
+	info := &reqInfo{in: r, upstream: rt.upstream, shape: sh, model: model, vk: key.VKValue, body: raw}
+	if aliases, err := p.store.Aliases(ctx); err != nil {
+		p.log.WarnContext(ctx, "proxy: load aliases", slog.Any("err", err))
+	} else {
+		_, info.isAlias = aliases[model]
+	}
+
+	out := r.WithContext(context.WithValue(ctx, reqInfoKey{}, info))
+	out.Body = io.NopCloser(bytes.NewReader(raw))
+	out.ContentLength = int64(len(raw))
+	out.TransferEncoding = nil
+	p.rp.ServeHTTP(w, out)
+}
+
+// rewrite points the outbound request at the front door and replaces every client credential and engine control
+// header with remora's own.
+func (p *Proxy) rewrite(pr *httputil.ProxyRequest) {
+	info := infoFrom(pr.In.Context())
+	u := *p.upstream
+	u.Path = strings.TrimSuffix(u.Path, "/") + info.upstream
+	u.RawPath = ""
+	u.RawQuery = pr.In.URL.RawQuery
+	u.Fragment = ""
+	pr.Out.URL = &u
+	pr.Out.Host = u.Host
+
+	h := pr.Out.Header
+	for name := range h {
+		switch l := strings.ToLower(name); {
+		// Expect: the body is already read, so the front door must not be asked to confirm it.
+		case l == "authorization", l == "x-api-key", l == "cookie", l == "accept-encoding", l == "expect",
+			strings.HasPrefix(l, "x-bf-"), strings.Contains(l, "bifrost"):
+			delete(h, name)
+		}
+	}
+	h.Set(headerVirtualKey, info.vk)
+	h.Set(headerExtraParams, "true")
+}
+
+// modifyResponse rewrites the front door's answer: engine headers out, remora headers in, error bodies mapped and
+// scrubbed, SSE error events rewritten as they pass. The body itself is never buffered on success.
+func (p *Proxy) modifyResponse(resp *http.Response) error {
+	info := infoFrom(resp.Request.Context())
+	setRemoraHeaders(resp.Header, info)
+	switch {
+	case isEventStream(resp.Header):
+		resp.Body = newSSEScrubber(resp.Body)
+		resp.Header.Del("Content-Length")
+		resp.ContentLength = -1
+	case resp.StatusCode >= http.StatusBadRequest:
+		if err := rewriteErrorBody(resp, info.shape); err != nil {
+			return err
+		}
+	}
+	p.hooksMu.RLock()
+	hooks := p.hooks
+	p.hooksMu.RUnlock()
+	for _, h := range hooks {
+		h(info.in, info.body, resp)
+	}
+	return nil
+}
+
+// errorHandler answers when the front door cannot be reached or its answer cannot be read. The cause, which names
+// the engine's address, is logged and never sent.
+func (p *Proxy) errorHandler(w http.ResponseWriter, r *http.Request, err error) {
+	sh := shapeOpenAI
+	if info := infoFrom(r.Context()); info != nil {
+		sh = info.shape
+	}
+	if errors.Is(err, context.Canceled) && r.Context().Err() != nil {
+		p.log.DebugContext(r.Context(), "proxy: client went away", slog.Any("err", err))
+	} else {
+		p.log.WarnContext(r.Context(), "proxy: upstream request failed", slog.Any("err", err))
+	}
+	errUpstream.write(w, sh)
+}
