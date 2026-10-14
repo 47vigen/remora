@@ -59,6 +59,32 @@ jobs:
       - name: Engine contract tests
         run: REMORA_CLIPROXYAPI_BIN="$RUNNER_TEMP/cliproxyapi" go test -race -tags engine ./internal/engine/cliproxyapi/
 
+  web:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: bun install --frozen-lockfile
+      - name: OpenAPI client drift
+        run: bun run gen && git diff --exit-code -- src/client
+      - run: bun run lint && bun run format:check
+      - name: Build and route tree drift
+        run: bun run build && git diff --exit-code -- src/routeTree.gen.ts
+      - run: bun run typecheck && bun run test
+      - name: Embedded console
+        working-directory: .
+        run: go test -tags webdist ./internal/web/
+
   image:
     permissions:
       contents: read
@@ -133,6 +159,21 @@ jobs:
           go-version-file: go.mod
       - name: Run e2e suite
         run: make e2e
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - name: Console smoke tests
+        working-directory: web
+        env:
+          # A fixed test value that compose.yaml sets; never a real secret.
+          REMORA_ADMIN_PASSWORD: e2e-admin-password
+        run: |
+          bun install --frozen-lockfile
+          bunx playwright install --with-deps chromium
+          # compose.yaml publishes remora on an ephemeral host port; REMORA_E2E_KEEP left the stack up.
+          REMORA_URL="http://$(docker compose -f ../test/e2e/compose.yaml -p remora-e2e port remora 8080)"
+          export REMORA_URL
+          bun run e2e
       - name: Collect compose logs
         if: failure()
         run: docker compose -f test/e2e/compose.yaml -p remora-e2e logs --no-color > e2e-compose.log 2>&1 || true
@@ -141,6 +182,12 @@ jobs:
         with:
           name: e2e-compose-logs
           path: e2e-compose.log
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: web-test-results
+          path: web/test-results
+          if-no-files-found: ignore
 
   actionlint:
     runs-on: ubuntu-24.04
