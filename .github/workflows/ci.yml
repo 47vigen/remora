@@ -189,6 +189,24 @@ jobs:
           path: web/test-results
           if-no-files-found: ignore
 
+  # The README quick start, run verbatim against the fakes on a fresh runner with only Docker.
+  quickstart:
+    permissions:
+      contents: read
+    needs: image
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: images
+      - name: Load images
+        run: docker load -i images.tar
+      - name: README quick start
+        run: REMORA_IMAGE=remora:dev FAKES_IMAGE=remora-fakes:dev scripts/quickstart-smoke.sh
+      - name: Compose example
+        run: REMORA_ADMIN_PASSWORD=x docker compose -f deploy/compose.yaml config -q
+
   actionlint:
     runs-on: ubuntu-24.04
     permissions:

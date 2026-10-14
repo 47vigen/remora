@@ -881,3 +881,17 @@ Expected: the engine table (`bifrost`, `cliproxyapi` versions), the pull-by-dige
   `interval_ms` (a wait before every SSE event after the first), unit-tested in `TestSSEInterval`, so the fakes
   image must be rebuilt for these tests. The deadline tests outlast the reference deployment's 15 s queue deadline;
   the engines' own configured deadlines (600 s per request, 300 s between stream chunks) are too long for CI.
+- Task 2: a provider named `openrouter` must be of kind `builtin` with `type: openrouter`; the reconciler rejects an
+  `openai-compatible` provider that takes a builtin provider's name. The README creates it that way.
+- Task 2: the routing engine appends `/v1/...` to an OpenRouter base URL (its default is `https://openrouter.ai/api`),
+  so the README literal is `https://openrouter.ai/api` and the smoke replaces it with
+  `http://<host>:9090/u/quickstart`, not the `/api/v1` and `/u/quickstart/v1` pair in Step 5.
+- Task 2: the routing engine refuses private addresses unless a provider allows them, and the fake listens on the
+  bridge gateway, so the smoke adds a fifth literal substitution, `type: "openrouter",` →
+  `type: "openrouter", allow_private_network: true,`. The README stays free of it.
+- Task 2: the engines load a new provider shortly after it is stored (the e2e suite retries for the same reason), so
+  the README's chat call uses `curl --retry 10 --retry-delay 2 --retry-all-errors`.
+- Task 2: substitutions use bash string replacement instead of `sed`, so a literal never needs regex escaping. The
+  bridge host defaults to the gateway of Docker's `bridge` network (falling back to `172.17.0.1`);
+  `QS_UPSTREAM_HOST` overrides it.
+- Task 2: `release.yml` already calls the script with `REMORA_IMAGE` and `FAKES_IMAGE`; no change was needed.
