@@ -758,7 +758,6 @@ These need real subscription accounts. They cannot be e2e-tested. Everything aro
   the renamed served-by. `service_tier` on chat is reported as dropped unless it is a value the engine keeps.
 - **Log reading (Task 8).** `GetLog` on a 404 returns `bifrost.ErrNotFound`, like the rest of the client. `Tail`
   starts its window at now minus the lookback, then at the newest row seen minus the lookback.
-- **Cooling replay.** Replayed 402 and 429 rows from before a restart are not counted twice.
 - **e2e (Task 12).** The cool alias uses `m1`, a model the fake lists (the front door refuses a model its provider
   does not list). compose sets `REMORA_COOLING_429_COUNT=1000` and `REMORA_COOLING_DEFAULT=1s`, so the earlier
   fallback tests' scripted 429s and 402s do not cool `up-a` for later tests; the 402 subtests wait out the cooldown
