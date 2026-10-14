@@ -65,14 +65,16 @@ const defaultInterval = 60 * time.Second
 
 // Reconciler pushes the store's state into the front door.
 type Reconciler struct {
-	Store         *store.Store
-	Engine        Engine
-	Internal      []InternalProvider    // pushed like store providers, never deleted, valid as alias member providers
-	InternalRules []bifrost.RoutingRule // pushed by name like alias rules, never deleted (plan 03: one "remora-oauth-<name>" per OAuth provider)
-	Reserved      []string              // user-facing OAuth provider names: no store provider may take one; valid as alias member providers
-	Interval      time.Duration         // 0 = 60s
-	MaxDepth      int                   // 0 = alias.DefaultMaxDepth
-	Log           *slog.Logger
+	Store          *store.Store
+	Engine         Engine
+	Internal       []InternalProvider    // pushed like store providers, never deleted, valid as alias member providers
+	InternalRules  []bifrost.RoutingRule // pushed by name like alias rules, never deleted (plan 03: one "remora-oauth-<name>" per OAuth provider)
+	Reserved       []string              // user-facing OAuth provider names: no store provider may take one; valid as alias member providers
+	Interval       time.Duration         // 0 = 60s
+	MaxDepth       int                   // 0 = alias.DefaultMaxDepth
+	SonioxURL      string                // the speech adapter's base URL, e.g. "http://127.0.0.1:18090"; "" = a soniox provider is invalid
+	SonioxDeadline time.Duration         // the adapter's deadline; 0 = 30m. The front door waits 60 s longer
+	Log            *slog.Logger
 
 	synced atomic.Bool // a Sync has completed
 }

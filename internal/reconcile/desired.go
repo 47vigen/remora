@@ -129,7 +129,7 @@ func (r *Reconciler) desired(ctx context.Context, tx *store.Tx, strict bool) (*d
 
 	byName := map[string]int{}
 	for _, p := range providers {
-		bp, err := engineProvider(p, reserved, internal)
+		bp, err := r.engineProvider(p, reserved, internal)
 		if err != nil {
 			return nil, err
 		}
@@ -200,7 +200,7 @@ func (r *Reconciler) desired(ctx context.Context, tx *store.Tx, strict bool) (*d
 }
 
 // engineProvider validates a store provider and maps it to the front door's provider.
-func engineProvider(p store.Provider, reserved, internal map[string]bool) (bifrost.Provider, error) {
+func (r *Reconciler) engineProvider(p store.Provider, reserved, internal map[string]bool) (bifrost.Provider, error) {
 	switch {
 	case p.Name == "" || strings.ContainsAny(p.Name, "/ "):
 		return bifrost.Provider{}, invalid("provider name %q must be non-empty without \"/\" or spaces", p.Name)
@@ -233,8 +233,9 @@ func engineProvider(p store.Provider, reserved, internal map[string]bool) (bifro
 		if p.Kind == store.KindTypeSafeCompatible {
 			bp.BaseType = "typesafe"
 		}
+	case store.KindSoniox:
+		return r.engineSonioxProvider(p)
 	default:
-		// Plan 04 adds "soniox".
 		return bifrost.Provider{}, invalid("provider %q: kind %q is not supported", p.Name, p.Kind)
 	}
 	return bp, nil

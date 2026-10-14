@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 )
 
 func envFrom(m map[string]string) func(string) string {
@@ -62,6 +63,12 @@ func TestLoadOverrides(t *testing.T) {
 		EngineDir:     "/opt/e",
 		MasterKey:     "a2V5",
 		Ports:         Ports{Bifrost: 28080, CLIProxyAPI: 18317, Soniox: 18090},
+
+		SonioxAddr:          "127.0.0.1:18090",
+		SonioxBaseURL:       "https://api.soniox.com",
+		SonioxPollInterval:  time.Second,
+		SonioxDeadline:      30 * time.Minute,
+		SonioxSweepInterval: 10 * time.Minute,
 	}
 	if c != want {
 		t.Errorf("Load = %+v, want %+v", c, want)
@@ -83,6 +90,10 @@ func TestLoadRejects(t *testing.T) {
 		{"internal ports collide", map[string]string{"REMORA_PORT_SPEECH": "18080"}, "REMORA_PORT_SPEECH"},
 		{"listen collides with internal", map[string]string{"REMORA_LISTEN": ":18317"}, "REMORA_LISTEN"},
 		{"listen unparsable", map[string]string{"REMORA_LISTEN": "nonsense"}, "REMORA_LISTEN"},
+		{"poll interval unparsable", map[string]string{"REMORA_SONIOX_POLL_INTERVAL": "soon"}, "REMORA_SONIOX_POLL_INTERVAL"},
+		{"deadline not positive", map[string]string{"REMORA_SONIOX_DEADLINE": "0s"}, "REMORA_SONIOX_DEADLINE"},
+		{"sweep interval negative", map[string]string{"REMORA_SONIOX_SWEEP_INTERVAL": "-1m"}, "REMORA_SONIOX_SWEEP_INTERVAL"},
+		{"soniox base URL not http", map[string]string{"REMORA_SONIOX_BASE_URL": "ftp://x.test"}, "REMORA_SONIOX_BASE_URL"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -94,5 +105,55 @@ func TestLoadRejects(t *testing.T) {
 				t.Errorf("err = %q, want it to name %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestConfigSonioxDefaults(t *testing.T) {
+	c, err := Load(func(string) string { return "" })
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.SonioxAddr != "127.0.0.1:18090" {
+		t.Errorf("SonioxAddr = %q", c.SonioxAddr)
+	}
+	if c.SonioxBaseURL != "https://api.soniox.com" {
+		t.Errorf("SonioxBaseURL = %q", c.SonioxBaseURL)
+	}
+	if c.SonioxPollInterval != time.Second {
+		t.Errorf("SonioxPollInterval = %v", c.SonioxPollInterval)
+	}
+	if c.SonioxDeadline != 30*time.Minute {
+		t.Errorf("SonioxDeadline = %v", c.SonioxDeadline)
+	}
+	if c.SonioxSweepInterval != 10*time.Minute {
+		t.Errorf("SonioxSweepInterval = %v", c.SonioxSweepInterval)
+	}
+}
+
+func TestConfigSonioxOverrides(t *testing.T) {
+	c, err := Load(envFrom(map[string]string{
+		"REMORA_PORT_SPEECH":           "19000",
+		"REMORA_SONIOX_DEADLINE":       "1h",
+		"REMORA_SONIOX_BASE_URL":       "http://fakes:9090/u/sx",
+		"REMORA_SONIOX_POLL_INTERVAL":  "500ms",
+		"REMORA_SONIOX_SWEEP_INTERVAL": "2s",
+	}))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.SonioxAddr != "127.0.0.1:19000" {
+		t.Errorf("SonioxAddr = %q", c.SonioxAddr)
+	}
+	if c.SonioxDeadline != time.Hour {
+		t.Errorf("SonioxDeadline = %v", c.SonioxDeadline)
+	}
+	if c.SonioxBaseURL != "http://fakes:9090/u/sx" {
+		t.Errorf("SonioxBaseURL = %q", c.SonioxBaseURL)
+	}
+	if c.SonioxPollInterval != 500*time.Millisecond {
+		t.Errorf("SonioxPollInterval = %v", c.SonioxPollInterval)
+	}
+	if c.SonioxSweepInterval != 2*time.Second {
+		t.Errorf("SonioxSweepInterval = %v", c.SonioxSweepInterval)
 	}
 }

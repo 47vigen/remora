@@ -681,13 +681,16 @@ func sonioxProvider(adapterURL string, deadline time.Duration) bifrost.Provider 
 const SonioxProviderName = "soniox" // the name clients use: "soniox/<model>"
 ```
 
-`sonioxProvider("http://127.0.0.1:18090", 30*time.Minute)`, created through plan 02's `bifrost.Client.CreateProvider`, must send exactly this body:
+`sonioxProvider("http://127.0.0.1:18090", 30*time.Minute)`, created through plan 02's `bifrost.Client.CreateProvider`, must send exactly this body (`stream_idle_timeout_in_seconds` and `concurrency_and_buffer_size` are what plan 02's client sends for every provider):
 
 ```json
 {"provider":"soniox",
- "network_config":{"base_url":"http://127.0.0.1:18090","default_request_timeout_in_seconds":1860,"max_retries":0,"allow_private_network":true},
+ "network_config":{"base_url":"http://127.0.0.1:18090","default_request_timeout_in_seconds":1860,"max_retries":0,"stream_idle_timeout_in_seconds":300,"allow_private_network":true},
+ "concurrency_and_buffer_size":{"concurrency":1000,"buffer_size":5000},
  "custom_provider_config":{"base_provider_type":"openai","is_key_less":false,"allowed_requests":{"transcription":true}}}
 ```
+
+The reconciler learns the adapter through two fields, set alike by `serve` and `apply` (`newReconciler` in `cmd/remora`): `SonioxURL` (`"http://" + cfg.SonioxAddr`; empty makes a `soniox` provider `ErrInvalid`) and `SonioxDeadline` (0 = 30m). A store provider of kind `soniox` takes no `type` and no `base_url`: its upstream is `REMORA_SONIOX_BASE_URL`.
 
 (`base_url` has no `/v1`: Bifrost appends `/v1/audio/transcriptions`. `allowed_requests` with only `transcription` disables list-models, chat and streaming for this provider.) The provider's keys follow plan 02's key path unchanged.
 

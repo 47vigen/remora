@@ -82,11 +82,7 @@ func apply(ctx context.Context, cfg config.Config, path string, getenv func(stri
 	if err := setSealer(st, cfg); err != nil {
 		return err
 	}
-	r := &reconcile.Reconciler{
-		Store:  st,
-		Engine: frontDoor(cfg, supervise.Credentials{BifrostAdminUser: user, BifrostAdminPassword: password}),
-		Log:    logger,
-	}
+	r := newReconciler(cfg, st, frontDoor(cfg, supervise.Credentials{BifrostAdminUser: user, BifrostAdminPassword: password}), logger)
 	return applyFile(ctx, r, f, getenv, out)
 }
 

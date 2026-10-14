@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/url"
 	"path/filepath"
 	"strconv"
+	"time"
 )
 
 // Environment variables read by Load.
@@ -20,6 +22,11 @@ const (
 	EnvPortRouter    = "REMORA_PORT_ROUTER"
 	EnvPortAccounts  = "REMORA_PORT_ACCOUNTS"
 	EnvPortSpeech    = "REMORA_PORT_SPEECH"
+
+	EnvSonioxBaseURL       = "REMORA_SONIOX_BASE_URL"
+	EnvSonioxPollInterval  = "REMORA_SONIOX_POLL_INTERVAL"
+	EnvSonioxDeadline      = "REMORA_SONIOX_DEADLINE"
+	EnvSonioxSweepInterval = "REMORA_SONIOX_SWEEP_INTERVAL"
 )
 
 // Defaults applied when a variable is unset or empty.
@@ -30,6 +37,11 @@ const (
 	DefaultPortRouter   = 18080
 	DefaultPortAccounts = 18317
 	DefaultPortSpeech   = 18090
+
+	DefaultSonioxBaseURL       = "https://api.soniox.com"
+	DefaultSonioxPollInterval  = time.Second
+	DefaultSonioxDeadline      = 30 * time.Minute
+	DefaultSonioxSweepInterval = 10 * time.Minute
 )
 
 // Ports are the loopback ports of the internal processes. The Go fields name
@@ -49,6 +61,13 @@ type Config struct {
 	EngineDir     string     // REMORA_ENGINE_DIR, default "/usr/local/lib/remora/engines"
 	MasterKey     string     // REMORA_MASTER_KEY, "" = $REMORA_DATA/master.key
 	Ports         Ports      // REMORA_PORT_ROUTER, REMORA_PORT_ACCOUNTS, REMORA_PORT_SPEECH
+
+	// The speech-to-text adapter.
+	SonioxAddr          string        // "127.0.0.1:" + Ports.Soniox
+	SonioxBaseURL       string        // REMORA_SONIOX_BASE_URL, default "https://api.soniox.com"
+	SonioxPollInterval  time.Duration // REMORA_SONIOX_POLL_INTERVAL, default 1s
+	SonioxDeadline      time.Duration // REMORA_SONIOX_DEADLINE, default 30m
+	SonioxSweepInterval time.Duration // REMORA_SONIOX_SWEEP_INTERVAL, default 10m
 }
 
 // Load reads the configuration through getenv. Every error names its variable.
@@ -60,6 +79,7 @@ func Load(getenv func(string) string) (Config, error) {
 		LogLevel:      slog.LevelInfo,
 		EngineDir:     orDefault(getenv(EnvEngineDir), DefaultEngineDir),
 		MasterKey:     getenv(EnvMasterKey),
+		SonioxBaseURL: orDefault(getenv(EnvSonioxBaseURL), DefaultSonioxBaseURL),
 	}
 
 	if v := getenv(EnvLogLevel); v != "" {
@@ -82,7 +102,37 @@ func Load(getenv func(string) string) (Config, error) {
 	if err := c.checkPorts(); err != nil {
 		return Config{}, err
 	}
+	c.SonioxAddr = net.JoinHostPort("127.0.0.1", strconv.Itoa(c.Ports.Soniox))
+
+	if u, perr := url.Parse(c.SonioxBaseURL); perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return Config{}, fmt.Errorf("config: %s=%q: want an http or https URL", EnvSonioxBaseURL, c.SonioxBaseURL)
+	}
+	if c.SonioxPollInterval, err = duration(getenv, EnvSonioxPollInterval, DefaultSonioxPollInterval); err != nil {
+		return Config{}, err
+	}
+	if c.SonioxDeadline, err = duration(getenv, EnvSonioxDeadline, DefaultSonioxDeadline); err != nil {
+		return Config{}, err
+	}
+	if c.SonioxSweepInterval, err = duration(getenv, EnvSonioxSweepInterval, DefaultSonioxSweepInterval); err != nil {
+		return Config{}, err
+	}
 	return c, nil
+}
+
+// duration reads a positive Go duration such as "500ms" or "1h".
+func duration(getenv func(string) string, env string, def time.Duration) (time.Duration, error) {
+	v := getenv(env)
+	if v == "" {
+		return def, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("config: %s=%q: want a duration such as 500ms or 1h: %w", env, v, err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("config: %s=%q: must be positive", env, v)
+	}
+	return d, nil
 }
 
 // DBPath is the path of the SQLite store.
