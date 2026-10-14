@@ -1,0 +1,72 @@
+name: engine-bump
+
+on:
+  schedule:
+    - cron: '23 5 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: engine-bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [bifrost, cliproxyapi]
+    steps:
+      # The bot App's token, so the pull request gets CI and can auto-merge
+      # (GITHUB_TOKEN events start no workflows; see docs/maintaining.md).
+      - name: Create bot token
+        id: app
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.REMORA_BOT_APP_ID }}
+          private-key: ${{ secrets.REMORA_BOT_PRIVATE_KEY }}
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ steps.app.outputs.token }}
+          submodules: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      # Prints kind= and title= for the outputs and one note line for the
+      # summary; for bump and unfork it stages the gitlink and its versions.env line (and, for unfork,
+      # .gitmodules and docs/patches.md).
+      - name: Decide
+        id: decide
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          ENGINE: ${{ matrix.engine }}
+          BODY: ${{ runner.temp }}/pr-body.md
+        run: go run ./tools/enginebump -engine "$ENGINE" -body "$BODY" >> "$GITHUB_OUTPUT" 2>> "$GITHUB_STEP_SUMMARY"
+      - name: Open or update the pull request
+        id: pr
+        if: steps.decide.outputs.kind == 'bump' || steps.decide.outputs.kind == 'unfork'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ steps.app.outputs.token }}
+          branch: engine-bump/${{ matrix.engine }}
+          title: ${{ steps.decide.outputs.title }}
+          commit-message: ${{ steps.decide.outputs.title }}
+          body-path: ${{ runner.temp }}/pr-body.md
+          delete-branch: true
+          add-paths: |
+            .gitmodules
+            docs/patches.md
+            engines/${{ matrix.engine }}
+            engines/versions.env
+      # Auto-merge waits for every required check, including e2e and
+      # quickstart; this job never merges by itself.
+      - name: Enable auto-merge
+        if: steps.pr.outputs.pull-request-operation == 'created' || steps.pr.outputs.pull-request-operation == 'updated'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          PR_URL: ${{ steps.pr.outputs.pull-request-url }}
+        run: gh pr merge --auto --squash "$PR_URL"
