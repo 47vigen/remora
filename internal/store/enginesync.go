@@ -29,3 +29,12 @@ func (tx *Tx) DeleteEngineMAC(ctx context.Context, object string) error {
 	}
 	return nil
 }
+
+// MAC returns HMAC-SHA256(macKey, data) with the store's Sealer, for the engine_sync records of objects that carry
+// a secret. ErrNoSealer when the store has none.
+func (tx *Tx) MAC(data []byte) ([]byte, error) {
+	if tx.sealer == nil {
+		return nil, ErrNoSealer
+	}
+	return tx.sealer.MAC(data), nil
+}
