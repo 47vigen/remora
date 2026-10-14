@@ -457,6 +457,9 @@ type Change struct {
 	Kind   ChangeKind `json:"kind"`
 	Name   string     `json:"name"`
 	Op     ChangeOp   `json:"op"`
+
+	// Value A client key value apply generated for a new key whose document gives none. Shown once, only in the answer of apply.
+	Value *string `json:"value,omitempty"`
 }
 
 // ChangeKind defines model for Change.Kind.
@@ -5952,6 +5955,11 @@ func (r ApplyConfigResponse) ContentType() string {
 	return ""
 }
 
+// ExportConfigResponse200Headers the declared response headers of an HTTP 200 response for ExportConfig
+type ExportConfigResponse200Headers struct {
+	ContentDisposition *string
+}
+
 type ExportConfigResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -5959,6 +5967,8 @@ type ExportConfigResponse struct {
 	YAML200 *string
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *Error
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *ExportConfigResponse200Headers
 }
 
 // GetYAML200 returns the response for an HTTP 200 `application/yaml` response
@@ -8546,6 +8556,19 @@ func ParseExportConfigResponse(rsp *http.Response) (*ExportConfigResponse, error
 		}
 		response.JSONDefault = &dest
 
+	}
+
+	switch {
+	case rsp.StatusCode == 200:
+		var headers ExportConfigResponse200Headers
+		if values := rsp.Header.Values("Content-Disposition"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Content-Disposition", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ContentDisposition = &value
+		}
+		response.Headers200 = &headers
 	}
 
 	return response, nil
@@ -11798,8 +11821,13 @@ type ExportConfigResponseObject interface {
 	VisitExportConfigResponse(w http.ResponseWriter) error
 }
 
+type ExportConfig200ResponseHeaders struct {
+	ContentDisposition *string
+}
+
 type ExportConfig200ApplicationyamlResponse struct {
 	Body          io.Reader
+	Headers       ExportConfig200ResponseHeaders
 	ContentLength int64
 }
 
@@ -11808,6 +11836,9 @@ func (response ExportConfig200ApplicationyamlResponse) VisitExportConfigResponse
 	w.Header().Set("Content-Type", "application/yaml")
 	if response.ContentLength != 0 {
 		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	if response.Headers.ContentDisposition != nil {
+		w.Header().Set("Content-Disposition", fmt.Sprint(*response.Headers.ContentDisposition))
 	}
 	w.WriteHeader(200)
 

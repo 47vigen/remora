@@ -7,10 +7,12 @@ import (
 
 	"github.com/47vigen/remora/internal/api/gen"
 	"github.com/47vigen/remora/internal/auth"
+	"github.com/47vigen/remora/internal/config"
 )
 
 // Deps are the services the management API runs on. A nil port answers 501 not_implemented for the operations
-// that need it. Later tasks add the log source, the log tail and the config service.
+// that need it (remora.yaml export, plan and apply need Providers, Aliases and Keys). Later tasks add the log source
+// and the log tail.
 type Deps struct {
 	Providers Providers
 	Accounts  Accounts // plan 03's accounts.Service; nil until it is wired
@@ -25,13 +27,20 @@ type Deps struct {
 // Server implements the management API's strict server interface.
 type Server struct {
 	d     Deps
-	tests providerTests // each provider's last test result
+	cfg   *config.Service // remora.yaml over Providers, Aliases and Keys; nil while one is missing
+	tests providerTests   // each provider's last test result
 }
 
 var _ gen.StrictServerInterface = (*Server)(nil)
 
 // New returns a Server over d.
-func New(d Deps) *Server { return &Server{d: d} }
+func New(d Deps) *Server {
+	s := &Server{d: d}
+	if d.Providers != nil && d.Aliases != nil && d.Keys != nil {
+		s.cfg = config.NewService(d.Providers, d.Aliases, d.Keys)
+	}
+	return s
+}
 
 func (s *Server) log() *slog.Logger {
 	if s.d.Log == nil {
@@ -40,8 +49,8 @@ func (s *Server) log() *slog.Logger {
 	return s.d.Log
 }
 
-// publicPaths answer without authentication. /api/system/version stays public as plan 01 shipped it (the
-// foundation e2e reads it anonymously), although the contract lists it as authenticated.
+// publicPaths answer without authentication: the operations the contract marks `security: []`.
+// /api/system/version stays public as plan 01 shipped it (the foundation e2e reads it anonymously).
 var publicPaths = map[string]bool{
 	"GET /api/health":         true,
 	"POST /api/auth/login":    true,

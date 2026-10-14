@@ -56,7 +56,7 @@ func TestOpenAPIConventions(t *testing.T) {
 	if !strings.HasPrefix(doc.OpenAPI, "3.1") {
 		t.Errorf("openapi = %q, want 3.1.x", doc.OpenAPI)
 	}
-	public := map[string]bool{"getHealth": true, "login": true}
+	public := map[string]bool{"getHealth": true, "getVersion": true, "login": true}
 	for path, item := range doc.Paths.Map() {
 		for method, op := range item.Operations() {
 			if op.OperationID == "" {

@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/47vigen/remora/api/remora.schema.json",
+  "title": "remora.yaml",
+  "description": "The providers, aliases and client keys `remora apply -f` makes a running remora match. Secrets never sit in the file: every secret is an `env:NAME` reference read from the environment of `remora apply`. Subscription accounts are not part of the document.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "description": "The format version. Absent is read as 1.",
+      "const": 1
+    },
+    "providers": {
+      "type": ["array", "null"],
+      "items": { "$ref": "#/$defs/provider" }
+    },
+    "aliases": {
+      "type": ["array", "null"],
+      "items": { "$ref": "#/$defs/alias" }
+    },
+    "keys": {
+      "type": ["array", "null"],
+      "items": { "$ref": "#/$defs/key" }
+    }
+  },
+  "$defs": {
+    "secretRef": {
+      "description": "An environment variable reference, `env:NAME`.",
+      "type": "string",
+      "pattern": "^env:[A-Za-z_][A-Za-z0-9_]*$"
+    },
+    "provider": {
+      "description": "An upstream provider reached with API keys, matched by name.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+        "kind": { "enum": ["builtin", "openai-compatible", "typesafe-compatible", "soniox"] },
+        "type": {
+          "description": "The front door's provider, such as openrouter. Only, and always, for kind builtin.",
+          "type": "string",
+          "minLength": 1
+        },
+        "base_url": { "type": "string" },
+        "allow_private_network": { "type": "boolean" },
+        "keys": {
+          "description": "The provider's keys, matched by name within the provider.",
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "value"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "value": { "$ref": "#/$defs/secretRef" }
+            }
+          }
+        }
+      },
+      "if": { "properties": { "kind": { "const": "builtin" } } },
+      "then": { "required": ["type"] },
+      "else": { "not": { "required": ["type"] } }
+    },
+    "alias": {
+      "description": "An alias and its ordered members: alias names or `<provider>/<model>`. Matched by name.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind", "members"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["chat", "embeddings", "transcription", "decisions"] },
+        "members": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "capabilities": {
+          "type": ["array", "null"],
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "context_window": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "key": {
+      "description": "A client key for /v1, matched by name. Without a value, apply generates one for a new key and shows it once.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "value": { "$ref": "#/$defs/secretRef" },
+        "allow": {
+          "description": "Alias names or `<provider>/<model>` patterns the key may use; `*` allows everything.",
+          "type": ["array", "null"],
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "enabled": { "type": "boolean" }
+      }
+    }
+  }
+}

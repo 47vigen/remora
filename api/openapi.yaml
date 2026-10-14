@@ -61,6 +61,7 @@ paths:
       tags: [system]
       operationId: getVersion
       summary: Report the version of remora and of each engine it runs.
+      security: []
       responses:
         "200":
           description: Versions.
@@ -826,6 +827,11 @@ paths:
       responses:
         "200":
           description: The `remora.yaml` document.
+          headers:
+            Content-Disposition:
+              description: "`attachment; filename=remora.yaml`"
+              schema:
+                type: string
           content:
             application/yaml:
               schema:
@@ -1604,6 +1610,11 @@ components:
           description: The fields an update changes; empty for create and delete.
           items:
             type: string
+        value:
+          type: string
+          description: >-
+            A client key value apply generated for a new key whose document gives none. Shown once, only in the
+            answer of apply.
     ConfigChanges:
       type: object
       required: [changes]

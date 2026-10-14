@@ -6,6 +6,7 @@ import (
 
 	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/auth"
+	"github.com/47vigen/remora/internal/config"
 	"github.com/47vigen/remora/internal/reconcile"
 	"github.com/47vigen/remora/internal/store"
 )
@@ -74,6 +75,7 @@ func toAPIError(err error) apiError {
 	}
 	for _, target := range []error{
 		alias.ErrCycle, alias.ErrDepth, alias.ErrUnknownMember, alias.ErrEmpty, alias.ErrInvalidName, reconcile.ErrInvalid,
+		config.ErrInvalid,
 	} {
 		if errors.Is(err, target) {
 			return apiError{http.StatusBadRequest, typeInvalidRequest, "invalid_request", innermost(err, target).Error()}

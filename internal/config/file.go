@@ -65,8 +65,9 @@ var aliasKinds = []alias.Kind{alias.KindChat, alias.KindEmbeddings, alias.KindTr
 
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// Parse decodes a remora.yaml and validates it. An unknown field is an error naming its line and field; every other
-// error names the field's path, such as "keys[0].value". An empty document is an empty File.
+// Parse decodes a remora.yaml and validates it, against Validate's rules and the published JSON Schema
+// (api/remora.schema.json). An unknown field is an error naming its line and field; every other error names the
+// field's path, such as "keys[0].value". An empty document is an empty File.
 func Parse(b []byte) (File, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(b))
 	dec.KnownFields(true)
@@ -80,6 +81,9 @@ func Parse(b []byte) (File, error) {
 		return File{}, errors.New("remora.yaml: more than one YAML document; put everything in one")
 	}
 	if err := f.Validate(); err != nil {
+		return File{}, err
+	}
+	if err := checkSchema(b); err != nil {
 		return File{}, err
 	}
 	return f, nil

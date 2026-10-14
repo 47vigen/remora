@@ -6,8 +6,9 @@ import (
 	"github.com/47vigen/remora/internal/api/gen"
 )
 
-// The operations below answer 501 not_implemented until their task implements them; each task deletes the
-// methods it implements, and the file goes when the last one does.
+// The operations below answer 501 not_implemented until their plan 05 task implements them (Task 5: accounts;
+// Tasks 8–11: logs, stats and key usage). Each task deletes the methods it implements, and the file goes when the
+// last one does; config_test.go's pendingOperations lists the same methods.
 
 // ListAccounts is not implemented yet.
 func (s *Server) ListAccounts(context.Context, gen.ListAccountsRequestObject) (gen.ListAccountsResponseObject, error) {
@@ -51,21 +52,6 @@ func (s *Server) UpdateAccount(context.Context, gen.UpdateAccountRequestObject) 
 
 // ResetAccountCooldown is not implemented yet.
 func (s *Server) ResetAccountCooldown(context.Context, gen.ResetAccountCooldownRequestObject) (gen.ResetAccountCooldownResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// ApplyConfig is not implemented yet.
-func (s *Server) ApplyConfig(context.Context, gen.ApplyConfigRequestObject) (gen.ApplyConfigResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// ExportConfig is not implemented yet.
-func (s *Server) ExportConfig(context.Context, gen.ExportConfigRequestObject) (gen.ExportConfigResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// PlanConfig is not implemented yet.
-func (s *Server) PlanConfig(context.Context, gen.PlanConfigRequestObject) (gen.PlanConfigResponseObject, error) {
 	return nil, errNotImplemented
 }
 
