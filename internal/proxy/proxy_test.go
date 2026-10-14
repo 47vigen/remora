@@ -550,6 +550,26 @@ func TestProxy_ErrorMapping(t *testing.T) {
 			want:     `{"error":{"message":"upstream <said> & failed","type":null,"code":null,"param":"model"}}`,
 		},
 		{
+			name: "native envelope on messages", path: "/v1/messages", status: http.StatusTooManyRequests,
+			upstream: `{"is_bifrost_error":true,"status_code":429,"error":{"type":"rate_limit_error","code":"insufficient_quota","message":"bifrost: key sk-bf-abc"},"extra_fields":{}}`,
+			want:     `{"type":"error","error":{"type":"rate_limit_error","message":"remora: key [redacted]"}}`,
+		},
+		{
+			name: "native envelope without type on messages", path: "/v1/messages", status: http.StatusBadGateway,
+			upstream: `{"is_bifrost_error":true,"error":{"message":"upstream <said> & failed"}}`,
+			want:     `{"type":"error","error":{"type":"api_error","message":"upstream <said> & failed"}}`,
+		},
+		{
+			name: "native envelope on systemone", path: "/v1/systemone", status: http.StatusBadRequest,
+			upstream: `{"is_bifrost_error":true,"status_code":400,"error":{"type":"invalid_request_error","message":"Bifrost rejected it"}}`,
+			want:     `{"detail":{"error_type":"invalid_request_error","message":"remora rejected it"}}`,
+		},
+		{
+			name: "native envelope without type on systemone", path: "/v1/systemone", status: http.StatusInternalServerError,
+			upstream: `{"is_bifrost_error":true,"error":{"code":"x"}}`,
+			want:     `{"detail":{"error_type":"api_error","message":"The upstream request failed."}}`,
+		},
+		{
 			name: "anthropic passthrough", path: "/v1/messages", status: http.StatusBadRequest,
 			upstream: `{"type":"error","error":{"type":"invalid_request_error","message":"bad"}}`,
 			want:     `{"type":"error","error":{"type":"invalid_request_error","message":"bad"}}`,
@@ -605,7 +625,13 @@ func itoa(n int) string {
 func TestProxy_SSEErrorEvent(t *testing.T) {
 	f := newFixture(t)
 	first := "data: {\"choices\":[{\"delta\":{\"content\":\"Bifrost \u200c\"}}]}\n\n"
-	cases := []struct{ name, event, want string }{
+	cases := []struct{ name, path, event, want string }{
+		{
+			name:  "native envelope on messages",
+			path:  "/v1/messages",
+			event: "event: error\ndata: {\"error\":{\"is_bifrost_error\":true,\"error\":{\"type\":\"overloaded_error\",\"message\":\"bifrost busy\"}}}\n\n",
+			want:  "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"remora busy\"}}\n\n",
+		},
 		{
 			name:  "top-level envelope",
 			event: "data: {\"is_bifrost_error\":true,\"error\":{\"message\":\"Bifrost x\"}}\n\n",
@@ -635,7 +661,11 @@ func TestProxy_SSEErrorEvent(t *testing.T) {
 				w.(http.Flusher).Flush()
 				_, _ = io.WriteString(w, c.event)
 			})
-			resp := f.do(t, http.MethodPost, "/v1/chat/completions", keyFull, "application/json", chatBody("fast"), nil)
+			path := c.path
+			if path == "" {
+				path = "/v1/chat/completions"
+			}
+			resp := f.do(t, http.MethodPost, path, keyFull, "application/json", chatBody("fast"), nil)
 			body := string(resp.Body)
 			if body != first+c.want {
 				t.Fatalf("stream = %q\nwant     %q", body, first+c.want)

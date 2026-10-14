@@ -89,8 +89,8 @@ func isEventStream(h http.Header) bool {
 	return mt == "text/event-stream"
 }
 
-// rewriteErrorBody reads an error body (at most maxErrorBody), maps the front door's native envelope to OpenAI's
-// shape, scrubs engine words from any other body, and replaces a larger body with remora's own error.
+// rewriteErrorBody reads an error body (at most maxErrorBody), maps the front door's native envelope to the
+// route's error shape, scrubs engine words from any other body, and replaces a larger body with remora's own error.
 func rewriteErrorBody(resp *http.Response, s shape) error {
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody+1))
 	_ = resp.Body.Close()
@@ -101,7 +101,7 @@ func rewriteErrorBody(resp *http.Response, s shape) error {
 	if len(raw) > maxErrorBody {
 		out = errUpstreamBody(resp.StatusCode).body(s)
 		resp.Header.Set("Content-Type", "application/json")
-	} else if mapped, ok := mapNativeError(raw); ok {
+	} else if mapped, ok := mapNativeError(raw, s); ok {
 		out = mapped
 		resp.Header.Set("Content-Type", "application/json")
 	} else {
@@ -163,13 +163,33 @@ func (n nativeError) openAI() openAIErrorBody {
 	return openAIErrorBody{Message: n.message, Type: orNull(n.typ), Code: orNull(n.code), Param: orNull(n.param)}
 }
 
-// mapNativeError turns the front door's error envelope into {"error":{"message","type","code","param"}}, scrubbed.
-func mapNativeError(raw []byte) ([]byte, bool) {
+// typeName is the envelope's error type as a string, or api_error when it has none.
+func (n nativeError) typeName() string {
+	var t string
+	if err := json.Unmarshal(n.typ, &t); err != nil || t == "" {
+		return typeAPI
+	}
+	return t
+}
+
+// mapNativeError turns the front door's error envelope into the error shape s, scrubbed: OpenAI's
+// {"error":{"message","type","code","param"}}, Anthropic's {"type":"error","error":{"type","message"}} or
+// TypeSafe's {"detail":{"error_type","message"}}.
+func mapNativeError(raw []byte, s shape) ([]byte, bool) {
 	n, ok := findNativeError(raw)
 	if !ok {
 		return nil, false
 	}
-	out, err := encodeJSON(openAIError{Error: n.openAI()})
+	var v any
+	switch s {
+	case shapeAnthropic:
+		v = anthropicError{Type: "error", Error: anthropicErrorBody{Type: n.typeName(), Message: n.message}}
+	case shapeTypeSafe:
+		v = typeSafeError{Detail: typeSafeErrorBody{ErrorType: n.typeName(), Message: n.message}}
+	default:
+		v = openAIError{Error: n.openAI()}
+	}
+	out, err := encodeJSON(v)
 	if err != nil {
 		return nil, false
 	}
@@ -184,9 +204,9 @@ func orNull(r json.RawMessage) json.RawMessage {
 }
 
 // rewriteSSELine returns line (with its line ending) unchanged, unless it is a data line carrying an error: the
-// front door's native envelope becomes OpenAI's error shape, and any other error event (a top-level "error" key or
+// front door's native envelope becomes the route's error shape s, and any other error event (a top-level "error" key or
 // "type":"error") is scrubbed. Content events are never touched.
-func rewriteSSELine(line []byte) []byte {
+func rewriteSSELine(line []byte, s shape) []byte {
 	if !bytes.HasPrefix(line, []byte("data:")) ||
 		!bytes.Contains(line, []byte(`"error"`)) && !bytes.Contains(line, []byte(nativeErrorKey)) {
 		return line
@@ -200,7 +220,7 @@ func rewriteSSELine(line []byte) []byte {
 	ending := payload[len(body):]
 
 	var out []byte
-	if mapped, ok := mapNativeError(body); ok {
+	if mapped, ok := mapNativeError(body, s); ok {
 		out = mapped
 	} else if isErrorEvent(body) {
 		out = scrub(body)
@@ -230,6 +250,7 @@ func isErrorEvent(body []byte) bool {
 // (rewriteSSELine). Nothing is held beyond the current line.
 type sseScrubber struct {
 	src         io.ReadCloser
+	shape       shape
 	br          *bufio.Reader
 	line        []byte // the current line, being assembled
 	pending     []byte // bytes ready for the caller
@@ -237,8 +258,8 @@ type sseScrubber struct {
 	err         error
 }
 
-func newSSEScrubber(src io.ReadCloser) *sseScrubber {
-	return &sseScrubber{src: src, br: bufio.NewReaderSize(src, 64<<10)}
+func newSSEScrubber(src io.ReadCloser, s shape) *sseScrubber {
+	return &sseScrubber{src: src, shape: s, br: bufio.NewReaderSize(src, 64<<10)}
 }
 
 func (s *sseScrubber) Read(p []byte) (int, error) {
@@ -271,7 +292,7 @@ func (s *sseScrubber) fill() {
 	case full:
 		// keep assembling the line
 	default:
-		s.pending, s.line = rewriteSSELine(s.line), nil
+		s.pending, s.line = rewriteSSELine(s.line, s.shape), nil
 	}
 }
 

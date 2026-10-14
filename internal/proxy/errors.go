@@ -62,26 +62,9 @@ func (e apiError) body(s shape) []byte {
 	var v any
 	switch s {
 	case shapeAnthropic:
-		v = struct {
-			Type  string `json:"type"`
-			Error struct {
-				Type    string `json:"type"`
-				Message string `json:"message"`
-			} `json:"error"`
-		}{Type: "error", Error: struct {
-			Type    string `json:"type"`
-			Message string `json:"message"`
-		}{e.typ, e.message}}
+		v = anthropicError{Type: "error", Error: anthropicErrorBody{Type: e.typ, Message: e.message}}
 	case shapeTypeSafe:
-		v = struct {
-			Detail struct {
-				ErrorType string `json:"error_type"`
-				Message   string `json:"message"`
-			} `json:"detail"`
-		}{Detail: struct {
-			ErrorType string `json:"error_type"`
-			Message   string `json:"message"`
-		}{e.typ, e.message}}
+		v = typeSafeError{Detail: typeSafeErrorBody{ErrorType: e.typ, Message: e.message}}
 	default:
 		v = openAIError{Error: openAIErrorBody{
 			Message: e.message, Type: jsonString(e.typ), Code: jsonString(e.code), Param: nil,
@@ -113,6 +96,27 @@ type openAIErrorBody struct {
 	Type    json.RawMessage `json:"type"`
 	Code    json.RawMessage `json:"code"`
 	Param   json.RawMessage `json:"param"`
+}
+
+// anthropicError is Anthropic's error envelope.
+type anthropicError struct {
+	Type  string             `json:"type"`
+	Error anthropicErrorBody `json:"error"`
+}
+
+type anthropicErrorBody struct {
+	Type    string `json:"type"`
+	Message string `json:"message"`
+}
+
+// typeSafeError is TypeSafe's error envelope.
+type typeSafeError struct {
+	Detail typeSafeErrorBody `json:"detail"`
+}
+
+type typeSafeErrorBody struct {
+	ErrorType string `json:"error_type"`
+	Message   string `json:"message"`
 }
 
 func jsonString(s string) json.RawMessage { return marshal(s) }

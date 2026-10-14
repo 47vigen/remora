@@ -275,7 +275,7 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 	setRemoraHeaders(resp.Header, info)
 	switch {
 	case isEventStream(resp.Header):
-		resp.Body = newSSEScrubber(resp.Body)
+		resp.Body = newSSEScrubber(resp.Body, info.shape)
 		resp.Header.Del("Content-Length")
 		resp.ContentLength = -1
 	case resp.StatusCode >= http.StatusBadRequest:

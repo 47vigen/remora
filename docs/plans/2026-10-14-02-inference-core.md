@@ -109,9 +109,9 @@ driver), `crypto/aes` GCM + `crypto/hkdf`, `github.com/coder/websocket` (WebSock
   matches every name, and a pattern ending in `/*` matches any depth below it (`openrouter/*` matches
   `openrouter/qwen/qwen3-embedding`). Raised as a contract refinement in the hand-off.
 - **Error shapes.** Errors remora creates, and engine errors in the native envelope (`is_bifrost_error` present),
-  are returned as `{"error":{"message","type","code","param"}}`. On `/v1/messages` and `/v1/systemone` the engine
-  already answers in Anthropic's and TypeSafe's native shapes for their SDKs; remora passes those through with
-  engine words scrubbed, and creates its own errors in the same native shape there.
+  are returned in the endpoint's own shape: `{"error":{"message","type","code","param"}}`, except on `/v1/messages`
+  and `/v1/systemone`, where they use Anthropic's and TypeSafe's shapes. The engine already answers there in those
+  shapes for their SDKs; remora passes those through with engine words scrubbed.
 - **What is not rewritten.** The engine adds `extra_fields` to OpenAI-shaped bodies. It names no engine and carries
   no credential; stripping it would mean re-encoding every chunk, which the spec forbids. The e2e leak guard
   (Task 11) proves no engine name or `sk-bf-` reaches a client.
