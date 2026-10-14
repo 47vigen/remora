@@ -59,3 +59,20 @@ func (s *Service) validToken(ctx context.Context, value string) (bool, error) {
 	}
 	return true, nil
 }
+
+// ListTokens lists the API tokens, oldest first. Values are never kept, so none is returned.
+func (s *Service) ListTokens(ctx context.Context) ([]store.APIToken, error) {
+	ts, err := s.st.ListAPITokens(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("auth: list tokens: %w", err)
+	}
+	return ts, nil
+}
+
+// DeleteToken revokes an API token at once. store.ErrNotFound when it does not exist.
+func (s *Service) DeleteToken(ctx context.Context, id string) error {
+	if err := s.st.DeleteAPIToken(ctx, id); err != nil {
+		return fmt.Errorf("auth: delete token: %w", err)
+	}
+	return nil
+}

@@ -13,6 +13,9 @@ import (
 // errNotImplemented answers 501 not_implemented: an operation whose handler or backing service is not wired yet.
 var errNotImplemented = errors.New("not implemented")
 
+// errForbidden answers 403 forbidden: the caller is authenticated, but not in a way that may do this.
+var errForbidden = errors.New("forbidden")
+
 // badRequest is a validation failure; its text is shown to the caller.
 type badRequest string
 
@@ -28,6 +31,7 @@ func (e requestError) Unwrap() error { return e.err }
 const (
 	typeInvalidRequest = "invalid_request_error"
 	typeAuthentication = "authentication_error"
+	typePermission     = "permission_error"
 	typeNotFound       = "not_found_error"
 	typeRateLimit      = "rate_limit_error"
 	typeAPI            = "api_error"
@@ -47,6 +51,8 @@ func toAPIError(err error) apiError {
 		re requestError
 	)
 	switch {
+	case errors.Is(err, errForbidden):
+		return apiError{http.StatusForbidden, typePermission, "forbidden", "Only a signed-in session may do this, not an API token."}
 	case errors.Is(err, errNotImplemented):
 		return apiError{http.StatusNotImplemented, typeAPI, "not_implemented", "This operation is not available yet."}
 	case errors.As(err, &br):

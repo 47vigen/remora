@@ -242,6 +242,7 @@ func TestErrorMapping(t *testing.T) {
 		{auth.ErrBadPassword, http.StatusUnauthorized, "unauthorized", ""},
 		{auth.ErrTooManyAttempts, http.StatusTooManyRequests, "too_many_attempts", ""},
 		{errNotImplemented, http.StatusNotImplemented, "not_implemented", ""},
+		{errForbidden, http.StatusForbidden, "forbidden", ""},
 		{errors.New("bifrost: dial tcp 127.0.0.1:18080: connection refused"), http.StatusBadGateway, "engine_error", ""},
 	} {
 		t.Run(tc.code, func(t *testing.T) {

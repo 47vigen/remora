@@ -84,26 +84,6 @@ func (s *Server) GetLog(context.Context, gen.GetLogRequestObject) (gen.GetLogRes
 	return nil, errNotImplemented
 }
 
-// ChangePassword is not implemented yet.
-func (s *Server) ChangePassword(context.Context, gen.ChangePasswordRequestObject) (gen.ChangePasswordResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// ListApiTokens is not implemented yet.
-func (s *Server) ListApiTokens(context.Context, gen.ListApiTokensRequestObject) (gen.ListApiTokensResponseObject, error) { //nolint:revive // the generated interface names it
-	return nil, errNotImplemented
-}
-
-// CreateApiToken is not implemented yet.
-func (s *Server) CreateApiToken(context.Context, gen.CreateApiTokenRequestObject) (gen.CreateApiTokenResponseObject, error) { //nolint:revive // the generated interface names it
-	return nil, errNotImplemented
-}
-
-// DeleteApiToken is not implemented yet.
-func (s *Server) DeleteApiToken(context.Context, gen.DeleteApiTokenRequestObject) (gen.DeleteApiTokenResponseObject, error) { //nolint:revive // the generated interface names it
-	return nil, errNotImplemented
-}
-
 // GetStats is not implemented yet.
 func (s *Server) GetStats(context.Context, gen.GetStatsRequestObject) (gen.GetStatsResponseObject, error) {
 	return nil, errNotImplemented

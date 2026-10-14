@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/47vigen/remora/internal/store"
 )
 
 func TestAPIToken(t *testing.T) {
@@ -50,8 +52,15 @@ func TestAPIToken(t *testing.T) {
 		t.Errorf("LastUsedAt after use = %+v, %v", got.LastUsedAt, err)
 	}
 
-	if err := st.DeleteAPIToken(ctx, tok.ID); err != nil {
-		t.Fatalf("DeleteAPIToken: %v", err)
+	list, err := s.ListTokens(ctx)
+	if err != nil || len(list) != 1 || list[0].ID != tok.ID || list[0].Prefix != tok.Prefix {
+		t.Errorf("ListTokens = %+v, %v", list, err)
+	}
+	if err := s.DeleteToken(ctx, tok.ID); err != nil {
+		t.Fatalf("DeleteToken: %v", err)
+	}
+	if err := s.DeleteToken(ctx, tok.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("DeleteToken again err = %v, want ErrNotFound", err)
 	}
 	if _, err := s.Authenticate(bearerReq(value)); !errors.Is(err, ErrUnauthenticated) {
 		t.Errorf("deleted token err = %v, want ErrUnauthenticated", err)
