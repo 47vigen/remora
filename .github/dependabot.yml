@@ -35,3 +35,14 @@ updates:
       all:
         patterns: ["*"]
         update-types: [minor, patch]
+
+  - package-ecosystem: bun
+    directory: /web
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: deps
+    groups:
+      all:
+        patterns: ["*"]
+        update-types: [minor, patch]
