@@ -59,7 +59,7 @@ func newRemora(t *testing.T) *remoraHarness {
 		t.Fatal(err)
 	}
 	rec := &reconcile.Reconciler{Store: st, Engine: reconciletest.New()}
-	h := &remoraHarness{token: token, aliases: api.NewAliases(st, rec), keys: api.NewKeys(st, rec)}
+	h := &remoraHarness{token: token, aliases: api.NewAliases(st, rec, nil), keys: api.NewKeys(st, rec)}
 	providers := api.NewProviders(st, rec)
 	mgmt := api.New(api.Deps{Providers: providers, Aliases: h.aliases, Keys: h.keys, Auth: authSvc}).Handler()
 	h.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +85,7 @@ func newRemora(t *testing.T) *remoraHarness {
 	if _, err := h.aliases.Put(ctx, alias.Alias{Name: "fast", Kind: alias.KindChat, Members: []alias.Member{{Ref: "or/vendor/m"}}}, true); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := h.keys.Create(ctx, "full", []string{"*"}, "sk-client-stored-value"); err != nil {
+	if _, _, err := h.keys.Create(ctx, "full", []string{"*"}, "sk-client-stored-value", true); err != nil {
 		t.Fatal(err)
 	}
 	return h

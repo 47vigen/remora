@@ -145,13 +145,19 @@ func planConfig(ctx context.Context, c *gen.ClientWithResponses, req gen.ConfigR
 	return resp.JSON200.Changes, nil
 }
 
+// applyConfig applies a document. When a change fails after others were made, it returns those changes, their
+// generated key values included, with the error.
 func applyConfig(ctx context.Context, c *gen.ClientWithResponses, req gen.ConfigRequest) ([]gen.Change, error) {
 	resp, err := c.ApplyConfigWithResponse(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 	if resp.JSON200 == nil {
-		return nil, apiError("apply", resp.HTTPResponse, resp.JSONDefault)
+		var applied []gen.Change
+		if resp.JSONDefault != nil && resp.JSONDefault.Error.Applied != nil {
+			applied = *resp.JSONDefault.Error.Applied
+		}
+		return applied, apiError("apply", resp.HTTPResponse, resp.JSONDefault)
 	}
 	return resp.JSON200.Changes, nil
 }

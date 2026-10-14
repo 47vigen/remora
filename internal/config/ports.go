@@ -74,7 +74,7 @@ type KeyPatch struct {
 type Keys interface {
 	List(ctx context.Context) ([]Key, error)
 	Get(ctx context.Context, id string) (Key, error)
-	Create(ctx context.Context, name string, allow []string, value string) (Key, string, error) // value "" → generated; returns the value
+	Create(ctx context.Context, name string, allow []string, value string, enabled bool) (Key, string, error) // value "" → generated; returns the value
 	Update(ctx context.Context, id string, p KeyPatch) (Key, error)
 	SetValue(ctx context.Context, id, value string) error // apply/import replacing a key's value
 	MatchesValue(ctx context.Context, id, value string) (bool, error)

@@ -161,7 +161,7 @@ func TestStatsGroupByProviderAndKey(t *testing.T) {
 	if _, err := env.providers.Create(ctx, Provider{Name: "or", Kind: "builtin"}); err != nil {
 		t.Fatal(err)
 	}
-	k, _, err := env.keys.Create(ctx, "svc", nil, "")
+	k, _, err := env.keys.Create(ctx, "svc", nil, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +204,7 @@ func TestStatsDefaultRange(t *testing.T) {
 
 func TestKeyUsage(t *testing.T) {
 	env := newTestEnv(t)
-	k, _, err := env.keys.Create(context.Background(), "svc", nil, "")
+	k, _, err := env.keys.Create(context.Background(), "svc", nil, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}

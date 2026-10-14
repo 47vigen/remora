@@ -513,9 +513,12 @@ type Error struct {
 
 // ErrorDetail defines model for ErrorDetail.
 type ErrorDetail struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-	Type    string `json:"type"`
+	// Applied Only on a failed `applyConfig`: the changes made before the failure, each generated client key value
+	// included once, so a committed key is never left without its value.
+	Applied *[]Change `json:"applied,omitempty"`
+	Code    string    `json:"code"`
+	Message string    `json:"message"`
+	Type    string    `json:"type"`
 }
 
 // Health defines model for Health.

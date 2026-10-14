@@ -66,6 +66,8 @@ func runApply(ctx context.Context, args []string, stdout io.Writer, env func(str
 	}
 	applied, err := applyConfig(ctx, c, req)
 	if err != nil {
+		// Keys generated before the failure are stored; their values are shown now or never.
+		printGenerated(stdout, applied)
 		return err
 	}
 	noun := "changes"
