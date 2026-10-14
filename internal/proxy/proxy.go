@@ -92,7 +92,8 @@ type route struct {
 	upstream string // front-door path, for routeForward
 }
 
-// routes maps "METHOD /path" to its route. GET /v1/responses with a WebSocket upgrade is served separately.
+// routes maps "METHOD /path" to its route. GET /v1/responses with a WebSocket upgrade is served by
+// serveResponsesWS.
 var routes = map[string]route{
 	"POST /v1/chat/completions":     {kind: routeForward, upstream: "/v1/chat/completions"},
 	"POST /v1/responses":            {kind: routeForward, upstream: "/v1/responses"},
@@ -137,8 +138,13 @@ func infoFrom(ctx context.Context) *reqInfo {
 // ServeHTTP serves one /v1 request.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	sh := shapeFor(r.URL.Path)
+	if r.Method == http.MethodGet && r.URL.Path == "/v1/responses" && isWebSocketUpgrade(r) {
+		if key, ok := p.authenticate(w, r, sh); ok {
+			p.serveResponsesWS(w, r, key)
+		}
+		return
+	}
 	rt, ok := routes[r.Method+" "+r.URL.Path]
-	// Task 7 serves GET /v1/responses with a WebSocket upgrade here, after authentication.
 	if !ok {
 		errNotFound.write(w, sh)
 		return
@@ -245,7 +251,11 @@ func (p *Proxy) rewrite(pr *httputil.ProxyRequest) {
 	pr.Out.URL = &u
 	pr.Out.Host = u.Host
 
-	h := pr.Out.Header
+	setUpstreamHeaders(pr.Out.Header, info.vk)
+}
+
+// setUpstreamHeaders replaces every client credential and engine control header in h with remora's own.
+func setUpstreamHeaders(h http.Header, vk string) {
 	for name := range h {
 		switch l := strings.ToLower(name); {
 		// Expect: the body is already read, so the front door must not be asked to confirm it.
@@ -254,7 +264,7 @@ func (p *Proxy) rewrite(pr *httputil.ProxyRequest) {
 			delete(h, name)
 		}
 	}
-	h.Set(headerVirtualKey, info.vk)
+	h.Set(headerVirtualKey, vk)
 	h.Set(headerExtraParams, "true")
 }
 

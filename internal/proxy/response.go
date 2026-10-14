@@ -114,28 +114,34 @@ func rewriteErrorBody(resp *http.Response, s shape) error {
 	return nil
 }
 
-// mapNativeError turns the front door's error envelope into {"error":{"message","type","code","param"}}, scrubbed.
-// The envelope is either the whole document or, as in the front door's SSE error events, the value of "error".
-func mapNativeError(raw []byte) ([]byte, bool) {
+// nativeError is the front door's error envelope (is_bifrost_error), read for remapping.
+type nativeError struct {
+	message          string
+	typ, code, param json.RawMessage // raw JSON; empty when absent
+}
+
+// findNativeError reads the front door's error envelope from raw: either the whole document or, as in the front
+// door's SSE error events, the value of "error".
+func findNativeError(raw []byte) (nativeError, bool) {
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &top); err != nil {
-		return nil, false
+		return nativeError{}, false
 	}
 	if _, ok := top[nativeErrorKey]; ok {
-		return openAIFromNative(top)
+		return nativeFrom(top), true
 	}
 	if e, ok := top["error"]; ok {
 		var inner map[string]json.RawMessage
 		if err := json.Unmarshal(e, &inner); err == nil {
 			if _, ok := inner[nativeErrorKey]; ok {
-				return openAIFromNative(inner)
+				return nativeFrom(inner), true
 			}
 		}
 	}
-	return nil, false
+	return nativeError{}, false
 }
 
-func openAIFromNative(env map[string]json.RawMessage) ([]byte, bool) {
+func nativeFrom(env map[string]json.RawMessage) nativeError {
 	var e struct {
 		Type    json.RawMessage `json:"type"`
 		Code    json.RawMessage `json:"code"`
@@ -149,9 +155,21 @@ func openAIFromNative(env map[string]json.RawMessage) ([]byte, bool) {
 	if err := json.Unmarshal(e.Message, &msg); err != nil || msg == "" {
 		msg = errUpstreamBody(0).message
 	}
-	out, err := encodeJSON(openAIError{Error: openAIErrorBody{
-		Message: msg, Type: orNull(e.Type), Code: orNull(e.Code), Param: orNull(e.Param),
-	}})
+	return nativeError{message: msg, typ: e.Type, code: e.Code, param: e.Param}
+}
+
+// openAI is the envelope's error in OpenAI's error object, null where the envelope has no value.
+func (n nativeError) openAI() openAIErrorBody {
+	return openAIErrorBody{Message: n.message, Type: orNull(n.typ), Code: orNull(n.code), Param: orNull(n.param)}
+}
+
+// mapNativeError turns the front door's error envelope into {"error":{"message","type","code","param"}}, scrubbed.
+func mapNativeError(raw []byte) ([]byte, bool) {
+	n, ok := findNativeError(raw)
+	if !ok {
+		return nil, false
+	}
+	out, err := encodeJSON(openAIError{Error: n.openAI()})
 	if err != nil {
 		return nil, false
 	}
@@ -184,23 +202,28 @@ func rewriteSSELine(line []byte) []byte {
 	var out []byte
 	if mapped, ok := mapNativeError(body); ok {
 		out = mapped
-	} else {
-		var top map[string]json.RawMessage
-		if err := json.Unmarshal(body, &top); err != nil {
-			return line
-		}
-		_, hasError := top["error"]
-		var typ string
-		_ = json.Unmarshal(top["type"], &typ)
-		if !hasError && typ != "error" {
-			return line
-		}
+	} else if isErrorEvent(body) {
 		out = scrub(body)
+	} else {
+		return line
 	}
 	res := make([]byte, 0, len(prefix)+len(out)+len(ending))
 	res = append(res, prefix...)
 	res = append(res, out...)
 	return append(res, ending...)
+}
+
+// isErrorEvent reports whether an event payload is an error: a JSON object with a top-level "error" key or
+// "type":"error".
+func isErrorEvent(body []byte) bool {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(body, &top); err != nil {
+		return false
+	}
+	_, hasError := top["error"]
+	var typ string
+	_ = json.Unmarshal(top["type"], &typ)
+	return hasError || typ == "error"
 }
 
 // sseScrubber forwards an SSE body line by line as each line arrives, rewriting only error events
