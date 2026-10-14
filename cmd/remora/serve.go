@@ -61,7 +61,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		return fmt.Errorf("ensure admin: %w", err)
 	}
 	if pw != "" {
-		logger.Warn("admin password generated; it is shown only this once", "password", pw)
+		logger.Log(ctx, passwordLogLevel(ctx, logger), "admin password generated; it is shown only this once", "password", pw)
 	}
 
 	creds, err := supervise.EnsureCredentials(ctx, st)
@@ -125,4 +125,13 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		return fmt.Errorf("shut down http: %w", err)
 	}
 	return nil
+}
+
+// passwordLogLevel is the level of the one-time admin password line: warn, raised to error when the configured
+// level would hide a warning, so the only copy of the password is never filtered out.
+func passwordLogLevel(ctx context.Context, logger *slog.Logger) slog.Level {
+	if logger.Enabled(ctx, slog.LevelWarn) {
+		return slog.LevelWarn
+	}
+	return slog.LevelError
 }

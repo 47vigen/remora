@@ -52,7 +52,7 @@ func TestHealthzOK(t *testing.T) {
 }
 
 func TestHealthzDegraded(t *testing.T) {
-	checkHealthz(t, both(false), http.StatusServiceUnavailable, `{"status":"degraded","down":["cliproxyapi"]}`)
+	checkHealthz(t, both(false), http.StatusServiceUnavailable, `{"status":"degraded","down":["accounts"]}`)
 }
 
 func TestSystemVersion(t *testing.T) {

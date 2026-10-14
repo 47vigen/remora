@@ -17,7 +17,19 @@ type StatusSource interface {
 // HealthResponse is the body of GET /healthz.
 type HealthResponse struct {
 	Status string   `json:"status"`         // "ok" | "degraded"
-	Down   []string `json:"down,omitempty"` // engine names not up
+	Down   []string `json:"down,omitempty"` // neutral component names not up ("router", "accounts")
+}
+
+// componentNames maps an engine to the neutral name a public endpoint may show. Engine names appear only in
+// /api/system/version and the credits.
+var componentNames = map[string]string{"bifrost": "router", "cliproxyapi": "accounts"}
+
+// componentName returns the neutral name of an engine, or "engine" for one remora does not know.
+func componentName(engine string) string {
+	if n, ok := componentNames[engine]; ok {
+		return n
+	}
+	return "engine"
 }
 
 // EngineVersionInfo names one engine and its release tag.
@@ -39,7 +51,7 @@ func RegisterSystem(mux *http.ServeMux, src StatusSource) {
 		resp := HealthResponse{Status: "ok"}
 		for _, e := range src.Status() {
 			if !e.Up {
-				resp.Down = append(resp.Down, e.Name)
+				resp.Down = append(resp.Down, componentName(e.Name))
 			}
 		}
 		code := http.StatusOK
