@@ -26,6 +26,7 @@ import (
 	"github.com/47vigen/remora/internal/soniox"
 	"github.com/47vigen/remora/internal/store"
 	"github.com/47vigen/remora/internal/supervise"
+	"github.com/47vigen/remora/internal/web"
 )
 
 const (
@@ -187,6 +188,8 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	// The OAuth engine's members are served as "remora-oauth/<name>/<model>"; clients see "<name>/<model>".
 	px.OnResponse(proxy.ServedByHook(cliproxyapi.UserRef))
 	mux.Handle("/v1/", px)
+	// Everything else is the web console.
+	mux.Handle("/", web.Handler())
 	srv := newServer(ctx, cfg.Listen, mux)
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.Listen)
 	if err != nil {

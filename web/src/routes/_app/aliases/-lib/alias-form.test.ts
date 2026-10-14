@@ -1,0 +1,63 @@
+import {
+  type AliasDraft,
+  aliasFromDraft,
+  draftFromAlias,
+  memberKind,
+  memberOptions,
+  type ModelSource,
+  toAliasTargets,
+  validateAliasDraft,
+} from "./alias-form";
+
+const d: AliasDraft = {
+  name: "fast",
+  kind: "chat",
+  members: ["openrouter/x", "free"],
+  capabilities: [],
+  contextWindow: null,
+};
+
+test("valid", () => expect(validateAliasDraft(d)).toEqual({}));
+test("name is required", () => expect(validateAliasDraft({ ...d, name: " " }).name).toBe("Enter a name."));
+test("name cannot contain / (it would read as a provider model)", () =>
+  expect(validateAliasDraft({ ...d, name: "a/b" }).name).toBeDefined());
+test("at least one member", () =>
+  expect(validateAliasDraft({ ...d, members: [] }).members).toBe("Add at least one member."));
+test("no duplicate members", () =>
+  expect(validateAliasDraft({ ...d, members: ["free", "free"] }).members).toBe("“free” is listed twice."));
+test("an alias cannot contain itself", () =>
+  expect(validateAliasDraft({ ...d, members: ["fast"] }).members).toBe("An alias cannot contain itself."));
+test("context window is a positive integer or empty", () => {
+  expect(validateAliasDraft({ ...d, contextWindow: 0 }).contextWindow).toBeDefined();
+  expect(validateAliasDraft({ ...d, contextWindow: 1.5 }).contextWindow).toBeDefined();
+  expect(validateAliasDraft({ ...d, contextWindow: 128000 }).contextWindow).toBeUndefined();
+});
+test("memberKind and memberOptions", () => {
+  expect(memberKind("free")).toBe("alias");
+  expect(memberKind("antigravity/gemini-3")).toBe("model");
+  expect(memberOptions(["fast", "free"], [{ name: "or", models: ["m1"] } as ModelSource], "fast")).toEqual({
+    aliases: ["free"],
+    models: ["or/m1"],
+  });
+});
+test("memberOptions merges sources with the same name and skips duplicates", () => {
+  expect(
+    memberOptions([], [{ name: "codex", models: ["a", "b"] }, { name: "codex", models: ["b"] }, { name: "or" }], "x"),
+  ).toEqual({ aliases: [], models: ["codex/a", "codex/b"] });
+});
+test("draft and alias convert both ways; an empty context window is left out", () => {
+  const alias = aliasFromDraft({ ...d, name: " fast " });
+  expect(alias).toEqual({ name: "fast", kind: "chat", members: ["openrouter/x", "free"], capabilities: [] });
+  expect(draftFromAlias({ ...alias, context_window: 8000 })).toEqual({ ...d, contextWindow: 8000 });
+});
+test("toAliasTargets marks cooling targets", () => {
+  expect(
+    toAliasTargets([
+      { provider: "or", model: "x" },
+      { provider: "cp", model: "y", cooling_until: "2026-10-14T10:30:00Z" },
+    ]),
+  ).toEqual([
+    { provider: "or", model: "x", cooling: false },
+    { provider: "cp", model: "y", cooling: true, coolingUntil: "2026-10-14T10:30:00Z" },
+  ]);
+});

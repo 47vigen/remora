@@ -6,3 +6,7 @@ coverage.out
 .env*
 /web/node_modules/
 /web/dist/
+/web/test-results/
+/web/playwright-report/
+internal/web/dist/*
+!internal/web/dist/.gitkeep
