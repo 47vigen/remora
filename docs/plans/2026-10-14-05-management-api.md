@@ -831,6 +831,40 @@ func TestManagementEndToEnd(t *testing.T) {
 - [ ] **Step 2: Run** — `make image fakes-image && go test -tags e2e ./test/e2e -run TestManagementEndToEnd -v` (plan 01's `TestMain` brings the stack up) → `--- PASS: TestManagementEndToEnd`.
 - [ ] **Step 3: Commit** — `git commit -m "test(e2e): drive the management API from login to a /v1 call"`
 
+
+## Corrections found during implementation
+
+- **Codegen output path (Task 1).** `api/oapi-codegen.yaml` writes `api.gen.go`: `go generate` runs in the package
+  directory, so the plan's full path nested the file. Every `number` carries `format: double` (float64 in Go).
+- **`/api/system/version` is public** (`security: []`), as plan 01's e2e test reads it without a session.
+- **Server details (Task 3).** The System port returns engine versions as an ordered list; health uses plan 01's
+  neutral engine names; the login limiter keys on the peer address and never trusts `X-Forwarded-For`; an engine
+  error answers a fixed 502 message and the raw text is only logged.
+- **Provider status (Task 4)** reads a provider's models from the targets the stored aliases reach, intersected
+  with cooling. Extra 400s refuse duplicate or nameless keys, empty members, negative context windows and empty
+  names.
+- **Accounts (Task 5).** Account ids are the store's integer ids as strings. The credential-type check lives in the
+  accounts service (`accounts.ErrBadCredential`, 400), since a provider's credential type can differ from its name.
+  An expired login answers 410 `login_expired`. Quota entries come from the engine's per-model cooldowns (remaining
+  0 when the reason is quota); `cooldown_until` is the latest whole-account restriction.
+- **Logs (Tasks 8–11).** `bifrost.ErrNotFound` answers 404. The detail view reads each failed attempt's error with
+  one `GetLog` per attempt (at most 50), since the list omits error details. `Scrub` also removes the OAuth
+  provider's internal prefixes. The live stream shares the cooling tail, so there is one poller. A provider-only
+  filter for a subscription provider matches every subscription provider's rows (the front door serves them all
+  from one provider); model, key and alias filters are exact. Without `from`/`to`, lists and stats cover the last
+  24 hours. `group_by=key` names groups by key id.
+- **Tokens (Task 12).** `auth.Service` gained thin `ListTokens` and `DeleteToken` wrappers.
+- **`remora.yaml` (Tasks 13–14).** The ports moved to `internal/config` (the api package aliases them). A change
+  carries an optional `value`, so a generated client key is shown once by `apply`. Migration `0005` also adds
+  `client_keys.prefix`. `remora apply` goes through `/api/config/plan` and `/api/config/apply`.
+- **OmniRoute (Tasks 15–16).** A quoted secret containing `=` yields a third candidate, as OmniRoute's own loader
+  does. A disabled or banned key imports as `enabled: false`; a missing `allowed_combos` means every combo. Skipped
+  rows (inactive connections, keyless API-key connections, unsupported custom nodes, unbuildable credentials) are
+  warnings; clashing key names are renamed `<name>-2`.
+- **e2e (Task 17).** The test uses provider `mgmt` and model `m1` (the fake lists only its own models), compares the
+  log entry's key to the key id, checks the log list and detail with the suite's engine-name pattern, and plans the
+  export while its objects exist. The first `/v1` call is retried for up to 30 s while the engines pick up the new
+  provider.
 ---
 
 ## Self-review notes
