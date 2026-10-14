@@ -27,6 +27,12 @@ They were copied once and modified; they are not kept in sync.
 - `web/src/lib/chart.ts`
 - `web/src/lib/live-socket.ts`
 - `web/src/lib/live-socket.test.ts`
+- `web/src/routes/_app/(overview)/-lib/export.ts`
+- `web/src/routes/_app/(overview)/-components/charts/barShape.tsx`
+- `web/src/routes/_app/(overview)/-components/charts/VolumeChart.tsx`
+- `web/src/routes/_app/(overview)/-components/charts/TokenChart.tsx`
+- `web/src/routes/_app/(overview)/-components/charts/CostChart.tsx`
+- `web/src/routes/_app/(overview)/-components/charts/LatencyChart.tsx`
 
 ## CLIProxyAPI
 
