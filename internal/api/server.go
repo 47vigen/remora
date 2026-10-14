@@ -9,6 +9,7 @@ import (
 	"github.com/47vigen/remora/internal/api/gen"
 	"github.com/47vigen/remora/internal/auth"
 	"github.com/47vigen/remora/internal/config"
+	"github.com/47vigen/remora/internal/engine/bifrost"
 )
 
 // Deps are the services the management API runs on. A nil port answers 501 not_implemented for the operations
@@ -20,7 +21,8 @@ type Deps struct {
 	Keys      Keys
 	System    System
 	Names     EngineNames
-	Logs      LogSource // the front door's request log
+	Logs      LogSource     // the front door's request log
+	Tail      *bifrost.Tail // the one poller following it, fanned out to live log viewers
 	Auth      *auth.Service
 	Log       *slog.Logger
 }
@@ -69,6 +71,8 @@ func (s *Server) Handler() http.Handler {
 		ResponseErrorHandlerFunc: s.writeError,
 	})
 	gen.HandlerWithOptions(strict, gen.StdHTTPServerOptions{BaseRouter: mux, ErrorHandlerFunc: s.requestErrorHandler})
+	// The live log WebSocket is not generated; it is more specific than /api/logs/{id}, so it wins.
+	mux.HandleFunc("GET /api/logs/live", s.streamLogs)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
 		auth.WriteError(w, http.StatusNotFound, typeNotFound, "not_found", "Unknown path or method.")
 	})

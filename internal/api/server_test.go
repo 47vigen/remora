@@ -15,6 +15,7 @@ import (
 
 	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/auth"
+	"github.com/47vigen/remora/internal/engine/bifrost"
 	"github.com/47vigen/remora/internal/store"
 )
 
@@ -35,6 +36,12 @@ type testEnv struct {
 
 // newTestEnv starts the management server over in-memory fakes and a real auth service, and logs a client in.
 func newTestEnv(t *testing.T) *testEnv {
+	t.Helper()
+	return newTestEnvTail(t, nil)
+}
+
+// newTestEnvTail is newTestEnv with tail as the live log feed.
+func newTestEnvTail(t *testing.T, tail *bifrost.Tail) *testEnv {
 	t.Helper()
 	ctx := context.Background()
 	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "remora.db"))
@@ -57,6 +64,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		System:    env.system,
 		Names:     env.names,
 		Logs:      env.logs,
+		Tail:      tail,
 		Auth:      auth.NewService(st, nil),
 	})
 	env.server = s

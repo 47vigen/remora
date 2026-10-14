@@ -164,6 +164,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		System:    api.NewSystem(sup),
 		Names:     api.NewNames(st),
 		Logs:      fd,
+		Tail:      tail, // the cooling tail; live log viewers share its one poller
 		Auth:      auth.NewService(st, nil),
 		Log:       logger,
 	})
