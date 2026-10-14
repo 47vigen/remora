@@ -46,3 +46,8 @@ updates:
       all:
         patterns: ["*"]
         update-types: [minor, patch]
+    ignore:
+      # The OpenAPI client generator needs the TypeScript 6 compiler API; type checking already runs TypeScript 7
+      # through the `typescript-7` alias (docs/plans/2026-10-14-06-web-ui.md, Corrections).
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
