@@ -11,6 +11,12 @@ services:
       E2E_KEY_FULL: rk-e2e-full-key
       E2E_KEY_LIMITED: rk-e2e-limited-key
       E2E_KEY_OFF: rk-e2e-off-key
+      E2E_SONIOX_KEY: fake-soniox-key
+      E2E_KEY_SPEECH: rk-e2e-speech-key
+      # The speech adapter talks to the Soniox fake; short intervals keep the long-job and sweep tests fast.
+      REMORA_SONIOX_BASE_URL: http://fakes:9090/u/sx
+      REMORA_SONIOX_POLL_INTERVAL: 500ms
+      REMORA_SONIOX_SWEEP_INTERVAL: 2s
       E2E_KEY_COOL: rk-e2e-cool-key
       # Cooling: read the front door's log every second; a failure without a retry hint cools for 1s, so a test
       # that cools a member on purpose gets it back quickly; 429s never cool here (the threshold is unit-tested),

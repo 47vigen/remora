@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/47vigen/remora/test/fakes/control"
+	"github.com/47vigen/remora/test/fakes/soniox"
 )
 
 const defaultListen = ":9090"
@@ -55,7 +57,7 @@ func listenAddr() string {
 func serve(ctx context.Context, logger *slog.Logger, addr string) error {
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           control.New(control.Defaults()).Handler(),
+		Handler:           newHandler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	errc := make(chan error, 1)
@@ -77,6 +79,26 @@ func serve(ctx context.Context, logger *slog.Logger, addr string) error {
 		return fmt.Errorf("listen %s: %w", addr, err)
 	}
 	return nil
+}
+
+// newHandler mounts every fake: the control server answers /u/{upstream}/...
+// (Soniox routes fall through to the Soniox fake unless scripted), the Soniox
+// fake's own control API lives under /_control/soniox/, and POST
+// /_control/reset resets both.
+func newHandler() http.Handler {
+	fake := soniox.New()
+	defaults := control.Defaults()
+	maps.Copy(defaults, fake.Defaults())
+	ctl := control.New(defaults).Handler()
+
+	mux := http.NewServeMux()
+	mux.Handle("/", ctl)
+	mux.Handle("/_control/soniox/", fake)
+	mux.HandleFunc("POST /_control/reset", func(w http.ResponseWriter, r *http.Request) {
+		fake.Reset()
+		ctl.ServeHTTP(w, r)
+	})
+	return mux
 }
 
 func get(ctx context.Context, url string, stdout, stderr io.Writer) int {

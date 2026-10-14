@@ -4,6 +4,7 @@ providers:
   - {name: up-c, kind: openai-compatible, base_url: http://fakes:9090/u/c, allow_private_network: true, keys: [{name: main, value: env:E2E_UPSTREAM_KEY}]}
   - {name: ts-a, kind: typesafe-compatible, base_url: http://fakes:9090/u/ts-a, allow_private_network: true, keys: [{name: main, value: env:E2E_UPSTREAM_KEY}]}
   - {name: ts-b, kind: typesafe-compatible, base_url: http://fakes:9090/u/ts-b, allow_private_network: true, keys: [{name: main, value: env:E2E_UPSTREAM_KEY}]}
+  - {name: soniox, kind: soniox, keys: [{name: main, value: env:E2E_SONIOX_KEY}]}
   - {name: cool-a, kind: openai-compatible, base_url: http://fakes:9090/u/cool-a, allow_private_network: true, keys: [{name: main, value: env:E2E_UPSTREAM_KEY}]}
   - {name: cool-b, kind: openai-compatible, base_url: http://fakes:9090/u/cool-b, allow_private_network: true, keys: [{name: main, value: env:E2E_UPSTREAM_KEY}]}
 aliases:
@@ -17,4 +18,5 @@ keys:
   - {name: full, value: env:E2E_KEY_FULL, allow: ["*"]}
   - {name: limited, value: env:E2E_KEY_LIMITED, allow: [fast, "up-a/*"]}
   - {name: off, value: env:E2E_KEY_OFF, allow: ["*"], enabled: false}
+  - {name: speech, value: env:E2E_KEY_SPEECH, allow: ["soniox/*"]}
   - {name: cool, value: env:E2E_KEY_COOL, allow: [cool]}

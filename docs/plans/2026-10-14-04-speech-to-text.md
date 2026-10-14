@@ -616,7 +616,8 @@ func (s *Sweeper) Run(ctx context.Context, every time.Duration)    // sweeps at 
 
 Per key, in this order:
 
-1. `ListTranscriptions`. `active` = set of `FileID` whose status is `queued` or `processing`.
+1. `ListTranscriptions`. `active` = set of `FileID` whose status is `queued` or `processing`, except jobs with prefix
+   `remora:` older than `MaxAge`: those are abandoned, and losing their file makes them fail.
 2. Delete each transcription with prefix `remora:`, `CreatedAt` before `Now()-MaxAge`, and status `completed` or `error`.
 3. `ListFiles`. Delete each file with prefix `remora:`, older than `MaxAge`, and not in `active` (deleting it would fail a job still running).
 4. An item that fails is logged and skipped; a key whose list fails is logged and joined into the returned error; other keys still run.
@@ -631,7 +632,8 @@ func TestSweepDeletesOldOwned(t *testing.T) {
     // res == SweepResult{Transcriptions:1, Files:1}
 }
 func TestSweepKeepsYoungAndForeign(t *testing.T) // remora:b at t0-30m and "app:x" at t0-5h survive
-func TestSweepKeepsActiveJobAndItsFile(t *testing.T) // processing remora:c at t0-3h and its file survive
+func TestSweepKeepsYoungActiveJobAndItsFile(t *testing.T) // processing remora:c at t0-30m, foreign queued job, and their files survive
+func TestSweepExpiresAbandonedJob(t *testing.T) // processing and queued remora jobs at t0-3h lose their files
 func TestSweepEachKeyIndependently(t *testing.T) // keys {"bad","k"}; fake 401s "bad" → k still swept; err != nil
 func TestSweepRunStopsOnCancel(t *testing.T) // Run with every=10ms; cancel; returns within 100ms; at least 1 sweep happened
 ```
@@ -681,13 +683,16 @@ func sonioxProvider(adapterURL string, deadline time.Duration) bifrost.Provider 
 const SonioxProviderName = "soniox" // the name clients use: "soniox/<model>"
 ```
 
-`sonioxProvider("http://127.0.0.1:18090", 30*time.Minute)`, created through plan 02's `bifrost.Client.CreateProvider`, must send exactly this body:
+`sonioxProvider("http://127.0.0.1:18090", 30*time.Minute)`, created through plan 02's `bifrost.Client.CreateProvider`, must send exactly this body (`stream_idle_timeout_in_seconds` and `concurrency_and_buffer_size` are what plan 02's client sends for every provider):
 
 ```json
 {"provider":"soniox",
- "network_config":{"base_url":"http://127.0.0.1:18090","default_request_timeout_in_seconds":1860,"max_retries":0,"allow_private_network":true},
+ "network_config":{"base_url":"http://127.0.0.1:18090","default_request_timeout_in_seconds":1860,"max_retries":0,"stream_idle_timeout_in_seconds":300,"allow_private_network":true},
+ "concurrency_and_buffer_size":{"concurrency":1000,"buffer_size":5000},
  "custom_provider_config":{"base_provider_type":"openai","is_key_less":false,"allowed_requests":{"transcription":true}}}
 ```
+
+The reconciler learns the adapter through two fields, set alike by `serve` and `apply` (`newReconciler` in `cmd/remora`): `SonioxURL` (`"http://" + cfg.SonioxAddr`; empty makes a `soniox` provider `ErrInvalid`) and `SonioxDeadline` (0 = 30m). A store provider of kind `soniox` takes no `type` and no `base_url`: its upstream is `REMORA_SONIOX_BASE_URL`.
 
 (`base_url` has no `/v1`: Bifrost appends `/v1/audio/transcriptions`. `allowed_requests` with only `transcription` disables list-models, chat and streaming for this provider.) The provider's keys follow plan 02's key path unchanged.
 
@@ -866,3 +871,25 @@ git commit -m "test(e2e): transcription speakers, cleanup, long job and sweep th
 
 - Spec coverage: adapter and port (Tasks 5, 7), parameter pass-through and booleans (3), bounded poll and deadline (5), delete in a finally path (5), `verbose_json` with speaker segments (4), sweep (6), custom provider registration (7), upstream patch and `docs/patches.md` (8), the spec's e2e item "transcription through the Soniox fake with segments, speakers and deletion verified" (9).
 - Not covered here, owned elsewhere: remora's `/v1` proxy has no timeout shorter than `SonioxDeadline + 60s` (plan 02, `TestProxy_NoResponseTimeout`); a forked engine is never bumped automatically and returns to upstream through plan 07's bump workflow; `soniox` as a provider kind in the OpenAPI contract and UI (plans 05, 06).
+
+## Corrections found during implementation
+
+- **The image must build against the submodule's core.** `transports/go.mod` requires the published
+  `github.com/maximhq/bifrost/core` module, so a patch in the submodule's `core/` never reached the binary. The
+  Dockerfile now copies `engines/bifrost/core` and builds with `go mod edit -replace github.com/maximhq/bifrost/core=../core`.
+  At `transports/v2.3.0` the submodule's `core/` is byte-identical to `core/v1.12.0`, the version transports requires,
+  so the only difference is the patch.
+- **The upstream PR is the owner's call** (Task 8 Step 6). Until it is opened, the `upstream PR` cell of
+  `docs/patches.md` reads `pending`. The bump tool accepts `pending` and holds the engine on its fork, and
+  `scripts/check-engine-pins.sh` checks a patched engine against its row: the submodule at the fork commit, and the
+  row's base tag equal to `engines/versions.env`.
+- `.gitmodules` points `engines/bifrost` at the fork without a `branch` line; the gitlink pins the commit.
+- **e2e (Task 9).** `testdata/short.wav` is a small silent PCM file added for the multipart upload. A `transcribe`
+  helper builds the multipart body with a per-call timeout and runs the same leak guard as `doV1`. Cleanup checks
+  poll the fake for up to 5 s. The failed-job test accepts any status of 400 or above (the adapter answers 502).
+  Step 3 (rebuilding at the unpatched pin to watch the speaker check fail) was not run: the patch is a single field,
+  and the image build against the submodule's core is what carries it.
+- **Abandoned jobs expire (review fix).** The sweeper first protected every queued or processing job forever, so a
+  job stuck at Soniox kept its file and transcription indefinitely. A remora job older than `MaxAge` now loses its
+  file, which makes it fail, and the next sweep deletes the failed transcription. `serve` sets `MaxAge` to the larger
+  of 1 h and the speech deadline plus 10 minutes, so a job a live request still waits on is never touched.

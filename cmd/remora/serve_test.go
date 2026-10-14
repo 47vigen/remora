@@ -3,15 +3,21 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/47vigen/remora/internal/config"
 	"github.com/47vigen/remora/internal/reconcile"
+	"github.com/47vigen/remora/internal/store"
 )
 
 func TestPasswordLogLevelIsNeverFiltered(t *testing.T) {
@@ -56,5 +62,82 @@ func TestWithOAuth(t *testing.T) {
 	}
 	if len(r.InternalRules) == 0 || len(r.Reserved) != len(r.InternalRules) || !slices.Contains(r.Reserved, "codex") {
 		t.Errorf("InternalRules = %d, Reserved = %q", len(r.InternalRules), r.Reserved)
+	}
+}
+
+func TestNewReconciler_SpeechAdapter(t *testing.T) {
+	cfg, err := config.Load(func(k string) string {
+		return map[string]string{"REMORA_PORT_SPEECH": "19000", "REMORA_SONIOX_DEADLINE": "1h"}[k]
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := newReconciler(cfg, nil, nil, slog.New(slog.DiscardHandler))
+	if r.SonioxURL != "http://127.0.0.1:19000" || r.SonioxDeadline != time.Hour {
+		t.Errorf("SonioxURL = %q, SonioxDeadline = %v", r.SonioxURL, r.SonioxDeadline)
+	}
+}
+
+func freePort(t *testing.T) int {
+	t.Helper()
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+	return ln.Addr().(*net.TCPAddr).Port
+}
+
+// TestStartSpeech serves the adapter on its loopback port, answers in the OpenAI error shape, and stops cleanly.
+func TestStartSpeech(t *testing.T) {
+	port := strconv.Itoa(freePort(t))
+	cfg, err := config.Load(func(k string) string {
+		return map[string]string{
+			"REMORA_PORT_SPEECH":           port,
+			"REMORA_SONIOX_BASE_URL":       "http://127.0.0.1:1",
+			"REMORA_SONIOX_SWEEP_INTERVAL": "1h",
+		}[k]
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "remora.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	stop, err := startSpeech(t.Context(), cfg, st, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("startSpeech: %v", err)
+	}
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://"+cfg.SonioxAddr+"/v1/audio/transcriptions", strings.NewReader("x"))
+	req.Header.Set("Authorization", "Bearer test-key")
+	req.Header.Set("Content-Type", "text/plain")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("adapter not reachable: %v", err)
+	}
+	var body struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest || body.Error.Message == "" {
+		t.Errorf("status %d, error %q; want 400 with an OpenAI error", resp.StatusCode, body.Error.Message)
+	}
+
+	done := make(chan struct{})
+	go func() { stop(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stop did not return")
+	}
+	if c, err := (&net.Dialer{Timeout: time.Second}).DialContext(t.Context(), "tcp", cfg.SonioxAddr); err == nil {
+		_ = c.Close()
+		t.Error("adapter still listening after stop")
 	}
 }

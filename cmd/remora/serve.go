@@ -23,6 +23,7 @@ import (
 	"github.com/47vigen/remora/internal/engine/cliproxyapi"
 	"github.com/47vigen/remora/internal/proxy"
 	"github.com/47vigen/remora/internal/reconcile"
+	"github.com/47vigen/remora/internal/soniox"
 	"github.com/47vigen/remora/internal/store"
 	"github.com/47vigen/remora/internal/supervise"
 )
@@ -31,6 +32,8 @@ const (
 	readHeaderTimeout = 10 * time.Second
 	shutdownTimeout   = 15 * time.Second
 	engineStopTimeout = 45 * time.Second // covers both engines' 15s SIGTERM grace
+	// sweepMargin keeps the speech sweeper off a job a live request still waits on.
+	sweepMargin = 10 * time.Minute
 )
 
 // runServe implements `remora serve`.
@@ -102,6 +105,14 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		return fmt.Errorf("load engine versions: %w", err)
 	}
 
+	// The speech adapter listens before the engines start, since the front door sends transcriptions to it. It
+	// stops after the engines, and its sweeper before the store closes.
+	stopSpeech, err := startSpeech(ctx, cfg, st, logger)
+	if err != nil {
+		return err
+	}
+	defer stopSpeech()
+
 	sup := supervise.New(logger, versions, supervise.Options{})
 	defer func() {
 		// ctx is already done here; the engines get their own deadline.
@@ -123,7 +134,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	// Cooling leaves failing alias members out of the compiled rules; a change recompiles through Sync.
 	accts := accounts.New(accountsEngine(cfg, creds), st, logger)
 	fd := frontDoor(cfg, creds)
-	rec := &reconcile.Reconciler{Store: st, Engine: fd, Log: logger}
+	rec := newReconciler(cfg, st, fd, logger)
 	withOAuth(rec, cfg, creds.CLIProxyAPIKey)
 	rec.Also = []func(context.Context) error{accts.Reconcile}
 	cooler := cooling.New(cooling.Config{
@@ -198,6 +209,68 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		return fmt.Errorf("shut down http: %w", err)
 	}
 	return nil
+}
+
+// newReconciler is serve's reconciler: the store, the front door and the speech adapter it registers.
+func newReconciler(cfg config.Config, st *store.Store, engine reconcile.Engine, logger *slog.Logger) *reconcile.Reconciler {
+	return &reconcile.Reconciler{
+		Store:          st,
+		Engine:         engine,
+		Log:            logger,
+		SonioxURL:      "http://" + cfg.SonioxAddr,
+		SonioxDeadline: cfg.SonioxDeadline,
+	}
+}
+
+// startSpeech serves the speech-to-text adapter on its loopback address and runs the sweeper of leftover upstream
+// files and transcriptions. The returned stop shuts the listener down (waiting up to shutdownTimeout for running
+// jobs, then closing it) and waits for the sweeper to end.
+func startSpeech(ctx context.Context, cfg config.Config, st *store.Store, logger *slog.Logger) (stop func(), err error) {
+	log := logger.With("component", "speech")
+	srv := newServer(ctx, cfg.SonioxAddr, soniox.New(soniox.Config{
+		BaseURL:      cfg.SonioxBaseURL,
+		PollInterval: cfg.SonioxPollInterval,
+		Deadline:     cfg.SonioxDeadline,
+		Logger:       log,
+	}))
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.SonioxAddr)
+	if err != nil {
+		return nil, fmt.Errorf("listen on %s: %w", cfg.SonioxAddr, err)
+	}
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("speech adapter stopped", "err", err)
+		}
+	}()
+
+	sweeper := &soniox.Sweeper{
+		Client: soniox.NewClient(cfg.SonioxBaseURL, &http.Client{}),
+		Keys: func(ctx context.Context) ([]string, error) {
+			return st.ProviderKeysByKind(ctx, store.KindSoniox)
+		},
+		MaxAge: max(soniox.DefaultMaxAge, cfg.SonioxDeadline+sweepMargin),
+		Logger: log,
+	}
+	sctx, scancel := context.WithCancel(ctx)
+	swept := make(chan struct{})
+	go func() {
+		defer close(swept)
+		sweeper.Run(sctx, cfg.SonioxSweepInterval)
+	}()
+
+	return func() {
+		scancel()
+		<-swept
+		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
+		defer cancel()
+		if err := srv.Shutdown(dctx); err != nil {
+			log.Warn("speech adapter did not drain; closing it", "err", err)
+			_ = srv.Close()
+		}
+		<-served
+	}, nil
 }
 
 // coolingFeedBuffer is how many log rows the cooling subscription holds before the tail drops it.

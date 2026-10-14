@@ -10,8 +10,10 @@ const (
 	RouteOpenAIDecisions      = "openai.decisions"             // POST /v1/decisions
 	RouteModels               = "models"                       // GET  /v1/models
 	RouteSonioxFileCreate     = "soniox.files.create"          // POST /v1/files
+	RouteSonioxFileList       = "soniox.files.list"            // GET  /v1/files
 	RouteSonioxFileDelete     = "soniox.files.delete"          // DELETE /v1/files/{id}
 	RouteSonioxTxCreate       = "soniox.transcriptions.create" // POST /v1/transcriptions
+	RouteSonioxTxList         = "soniox.transcriptions.list"   // GET  /v1/transcriptions
 	RouteSonioxTxGet          = "soniox.transcriptions.get"    // GET  /v1/transcriptions/{id}
 	RouteSonioxTxDelete       = "soniox.transcriptions.delete" // DELETE /v1/transcriptions/{id}
 	RouteSonioxTranscript     = "soniox.transcript.get"        // GET  /v1/transcriptions/{id}/transcript
@@ -35,8 +37,10 @@ func routeTable() []routeSpec {
 		{RouteOpenAIDecisions, http.MethodPost, "/v1/decisions"},
 		{RouteModels, http.MethodGet, "/v1/models"},
 		{RouteSonioxFileCreate, http.MethodPost, "/v1/files"},
+		{RouteSonioxFileList, http.MethodGet, "/v1/files"},
 		{RouteSonioxFileDelete, http.MethodDelete, "/v1/files/{id}"},
 		{RouteSonioxTxCreate, http.MethodPost, "/v1/transcriptions"},
+		{RouteSonioxTxList, http.MethodGet, "/v1/transcriptions"},
 		{RouteSonioxTxGet, http.MethodGet, "/v1/transcriptions/{id}"},
 		{RouteSonioxTxDelete, http.MethodDelete, "/v1/transcriptions/{id}"},
 		{RouteSonioxTranscript, http.MethodGet, "/v1/transcriptions/{id}/transcript"},
