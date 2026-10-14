@@ -11,6 +11,13 @@ services:
       E2E_KEY_FULL: rk-e2e-full-key
       E2E_KEY_LIMITED: rk-e2e-limited-key
       E2E_KEY_OFF: rk-e2e-off-key
+      E2E_KEY_COOL: rk-e2e-cool-key
+      # Cooling: read the front door's log every second; a failure without a retry hint cools for 1s, so a test
+      # that cools a member on purpose gets it back quickly; 429s never cool here (the threshold is unit-tested),
+      # so the fallback tests' scripted 429s leave their members in their chains.
+      REMORA_COOLING_POLL: 1s
+      REMORA_COOLING_DEFAULT: 1s
+      REMORA_COOLING_429_COUNT: "1000"
     volumes:
       - ./testdata:/e2e:ro
     ports:

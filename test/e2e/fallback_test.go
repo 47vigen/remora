@@ -38,6 +38,9 @@ func TestFallbackWithinRequest(t *testing.T) {
 		for _, stream := range []bool{false, true} {
 			t.Run(f.name+"/stream="+strconv.FormatBool(stream), func(t *testing.T) {
 				resetFakes(t)
+				if f.status == http.StatusPaymentRequired {
+					t.Cleanup(func() { awaitCoolingCycle(t) })
+				}
 				once(t, "a", control.RouteOpenAIChat, control.Step{Status: f.status, Body: f.body})
 
 				rep := chat(t, chatBody("fast", stream))
@@ -57,6 +60,15 @@ func TestFallbackWithinRequest(t *testing.T) {
 			})
 		}
 	}
+}
+
+// awaitCoolingCycle waits out the cooldown a 402 from up-a starts: first until fast is served by up-b without a
+// fallback (up-a is out of the chain), then until up-a serves it again, so later tests see the full chain.
+func awaitCoolingCycle(t *testing.T) {
+	t.Helper()
+	send := func() reply { return chat(t, chatBody("fast", false)) }
+	awaitServed(t, "fast while up-a cools", send, "up-b/m1", 200*time.Millisecond, 10*time.Second)
+	awaitServed(t, "fast after up-a cooled", send, "up-a/m1", 500*time.Millisecond, 15*time.Second)
 }
 
 func TestFallbackAllFail(t *testing.T) {
