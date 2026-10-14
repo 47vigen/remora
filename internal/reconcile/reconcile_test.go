@@ -14,6 +14,7 @@ import (
 
 	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/engine/bifrost"
+	"github.com/47vigen/remora/internal/reconcile/reconciletest"
 	"github.com/47vigen/remora/internal/store"
 )
 
@@ -37,7 +38,7 @@ func (b *syncBuffer) String() string {
 
 type harness struct {
 	st  *store.Store
-	eng *fakeEngine
+	eng *reconciletest.Engine
 	rec *Reconciler
 	log *syncBuffer
 }
@@ -55,7 +56,7 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("NewSealer: %v", err)
 	}
 	st.SetSealer(sl)
-	h := &harness{st: st, eng: newFakeEngine(), log: &syncBuffer{}}
+	h := &harness{st: st, eng: reconciletest.New(), log: &syncBuffer{}}
 	h.rec = &Reconciler{Store: st, Engine: h.eng, Log: slog.New(slog.NewTextHandler(h.log, nil))}
 	return h
 }
@@ -132,7 +133,7 @@ func (h *harness) base(t *testing.T) string {
 	return id
 }
 
-func ops(calls []call) []string {
+func ops(calls []reconciletest.Call) []string {
 	out := make([]string, 0, len(calls))
 	for _, c := range calls {
 		out = append(out, c.Op+" "+c.Name)
@@ -147,7 +148,7 @@ func TestSync_CreatesEverything(t *testing.T) {
 	ctx := context.Background()
 
 	for _, name := range []string{"up-a", "up-b"} {
-		p, ok := h.eng.provider(name)
+		p, ok := h.eng.Provider(name)
 		if !ok {
 			t.Fatalf("provider %s missing", name)
 		}
@@ -155,7 +156,7 @@ func TestSync_CreatesEverything(t *testing.T) {
 			t.Errorf("provider %s = %+v", name, p)
 		}
 	}
-	k, ok := h.eng.key("up-a", "up-a-key")
+	k, ok := h.eng.Key("up-a", "up-a-key")
 	if !ok {
 		t.Fatal("key up-a-key missing under up-a")
 	}
@@ -163,7 +164,7 @@ func TestSync_CreatesEverything(t *testing.T) {
 		t.Errorf("key = %+v, want name = id, the secret, enabled", k)
 	}
 
-	vk, ok := h.eng.vk(VirtualKeyName(c1))
+	vk, ok := h.eng.VK(VirtualKeyName(c1))
 	if !ok || !vk.Active {
 		t.Fatalf("virtual key %s = %+v, %v", VirtualKeyName(c1), vk, ok)
 	}
@@ -175,7 +176,7 @@ func TestSync_CreatesEverything(t *testing.T) {
 		t.Errorf("stored VK = %q %q, engine %q %q", ck.VKID, ck.VKValue, vk.ID, vk.Value)
 	}
 
-	rules := h.eng.rulesNamed("remora:alias:fast")
+	rules := h.eng.RulesNamed("remora:alias:fast")
 	if len(rules) != 1 {
 		t.Fatalf("rules = %+v", rules)
 	}
@@ -193,7 +194,7 @@ func TestSync_CreatesEverything(t *testing.T) {
 	}
 
 	// Order: providers, then keys, then virtual keys, then rules.
-	got := ops(h.eng.mutations())
+	got := ops(h.eng.Mutations())
 	want := []string{
 		"CreateProvider up-a", "CreateProvider up-b", "CreateKey up-a-key", "CreateKey up-b-key",
 		"CreateVirtualKey " + VirtualKeyName(c1), "CreateRoutingRule remora:alias:fast",
@@ -207,9 +208,9 @@ func TestSync_Idempotent(t *testing.T) {
 	h := newHarness(t)
 	h.base(t)
 	h.sync(t)
-	h.eng.mutations()
+	h.eng.Mutations()
 	h.sync(t)
-	if got := h.eng.mutations(); len(got) != 0 {
+	if got := h.eng.Mutations(); len(got) != 0 {
 		t.Errorf("second Sync made calls %q", ops(got))
 	}
 }
@@ -217,38 +218,38 @@ func TestSync_Idempotent(t *testing.T) {
 func TestSync_StoreWins(t *testing.T) {
 	h := newHarness(t)
 	h.base(t)
-	h.eng.seedProvider(bifrost.Provider{Name: "stray", BaseType: "openai", BaseURL: "http://stray.test"},
+	h.eng.SeedProvider(bifrost.Provider{Name: "stray", BaseType: "openai", BaseURL: "http://stray.test"},
 		bifrost.Key{ID: "stray-key", Name: "stray-key", Value: "x", Enabled: true})
-	h.eng.seedProvider(bifrost.Provider{Name: "up-a", BaseType: "openai"},
+	h.eng.SeedProvider(bifrost.Provider{Name: "up-a", BaseType: "openai"},
 		bifrost.Key{ID: "manual-key", Name: "manual-key", Value: "x", Enabled: true})
-	h.eng.seedVirtualKey("manual")
-	h.eng.seedRule(bifrost.RoutingRule{Name: "hand-made", CEL: "true", Target: bifrost.Route{Provider: "up-a"}})
+	h.eng.SeedVirtualKey("manual")
+	h.eng.SeedRule(bifrost.RoutingRule{Name: "hand-made", CEL: "true", Target: bifrost.Route{Provider: "up-a"}})
 	h.rec.Internal = []InternalProvider{{
 		Provider: bifrost.Provider{Name: "internal-x", BaseType: "openai", BaseURL: "http://internal.test"},
 		Keys:     []bifrost.Key{{ID: "internal-x-key", Name: "internal-x-key", Value: "internal-secret", Enabled: true}},
 	}}
 	h.sync(t)
 
-	if _, ok := h.eng.provider("stray"); ok {
+	if _, ok := h.eng.Provider("stray"); ok {
 		t.Error("provider stray kept")
 	}
-	if _, ok := h.eng.key("up-a", "manual-key"); ok {
+	if _, ok := h.eng.Key("up-a", "manual-key"); ok {
 		t.Error("unknown key manual-key under up-a kept")
 	}
-	if _, ok := h.eng.vk("manual"); ok {
+	if _, ok := h.eng.VK("manual"); ok {
 		t.Error("virtual key manual kept")
 	}
-	if r := h.eng.rulesNamed("hand-made"); len(r) != 0 {
+	if r := h.eng.RulesNamed("hand-made"); len(r) != 0 {
 		t.Error("rule hand-made kept")
 	}
-	if _, ok := h.eng.provider("internal-x"); !ok {
+	if _, ok := h.eng.Provider("internal-x"); !ok {
 		t.Error("internal provider missing")
 	}
-	if k, ok := h.eng.key("internal-x", "internal-x-key"); !ok || k.Value != "internal-secret" {
+	if k, ok := h.eng.Key("internal-x", "internal-x-key"); !ok || k.Value != "internal-secret" {
 		t.Errorf("internal key = %+v, %v", k, ok)
 	}
 	// up-a existed in the engine and was not created again; it was updated to the store's state.
-	if p, _ := h.eng.provider("up-a"); p.BaseURL != "http://up-a.test/v1" {
+	if p, _ := h.eng.Provider("up-a"); p.BaseURL != "http://up-a.test/v1" {
 		t.Errorf("up-a = %+v", p)
 	}
 }
@@ -256,32 +257,32 @@ func TestSync_StoreWins(t *testing.T) {
 func TestSync_KeepsOAuthObjects(t *testing.T) {
 	h := newHarness(t)
 	h.base(t)
-	h.eng.seedProvider(bifrost.Provider{Name: bifrost.OAuthProvider, BaseType: "openai", BaseURL: "http://oauth.test"})
-	h.eng.seedRule(bifrost.RoutingRule{Name: "remora-oauth-codex", CEL: "true", Target: bifrost.Route{Provider: bifrost.OAuthProvider}, Priority: 1})
-	h.eng.seedRule(bifrost.RoutingRule{Name: "remora-oauth-grok", CEL: "true", Target: bifrost.Route{Provider: bifrost.OAuthProvider}, Priority: 2})
+	h.eng.SeedProvider(bifrost.Provider{Name: bifrost.OAuthProvider, BaseType: "openai", BaseURL: "http://oauth.test"})
+	h.eng.SeedRule(bifrost.RoutingRule{Name: "remora-oauth-codex", CEL: "true", Target: bifrost.Route{Provider: bifrost.OAuthProvider}, Priority: 1})
+	h.eng.SeedRule(bifrost.RoutingRule{Name: "remora-oauth-grok", CEL: "true", Target: bifrost.Route{Provider: bifrost.OAuthProvider}, Priority: 2})
 	h.rec.InternalRules = []bifrost.RoutingRule{{
 		Name: "remora-oauth-x", CEL: `model.startsWith("x/")`, Target: bifrost.Route{Provider: bifrost.OAuthProvider},
 	}}
 	h.sync(t)
 
-	for _, c := range h.eng.mutations() {
+	for _, c := range h.eng.Mutations() {
 		if strings.HasPrefix(c.Op, "Delete") {
 			t.Errorf("unexpected %s %s", c.Op, c.Name)
 		}
 	}
-	if _, ok := h.eng.provider(bifrost.OAuthProvider); !ok {
+	if _, ok := h.eng.Provider(bifrost.OAuthProvider); !ok {
 		t.Error("provider remora-oauth deleted")
 	}
 	for _, name := range []string{"remora-oauth-codex", "remora-oauth-grok", "remora-oauth-x"} {
-		if len(h.eng.rulesNamed(name)) != 1 {
-			t.Errorf("rule %s: %+v", name, h.eng.rulesNamed(name))
+		if len(h.eng.RulesNamed(name)) != 1 {
+			t.Errorf("rule %s: %+v", name, h.eng.RulesNamed(name))
 		}
 	}
 	h.sync(t)
-	if got := h.eng.mutations(); len(got) != 0 {
+	if got := h.eng.Mutations(); len(got) != 0 {
 		t.Errorf("second Sync made calls %q", ops(got))
 	}
-	if len(h.eng.rulesNamed("remora-oauth-x")) != 1 {
+	if len(h.eng.RulesNamed("remora-oauth-x")) != 1 {
 		t.Error("internal rule lost on second Sync")
 	}
 }
@@ -293,20 +294,20 @@ func TestSync_EngineWiped(t *testing.T) {
 	ctx := context.Background()
 	before, _ := h.st.ClientKeyByValue(ctx, c1Value)
 
-	h.eng.reset()
+	h.eng.Reset()
 	h.sync(t)
 	after, err := h.st.ClientKeyByValue(ctx, c1Value)
 	if err != nil {
 		t.Fatal(err)
 	}
-	vk, ok := h.eng.vk(VirtualKeyName(after.ID))
+	vk, ok := h.eng.VK(VirtualKeyName(after.ID))
 	if !ok {
 		t.Fatal("virtual key not recreated")
 	}
 	if after.VKID != vk.ID || after.VKValue != vk.Value || after.VKValue == before.VKValue {
 		t.Errorf("stored VK %q %q, engine %q %q, before %q", after.VKID, after.VKValue, vk.ID, vk.Value, before.VKValue)
 	}
-	rules := h.eng.rulesNamed("remora:alias:fast")
+	rules := h.eng.RulesNamed("remora:alias:fast")
 	if len(rules) != 1 {
 		t.Fatalf("rules = %+v", rules)
 	}
@@ -315,11 +316,11 @@ func TestSync_EngineWiped(t *testing.T) {
 		t.Errorf("rule id %q, engine %q", ids["fast"], rules[0].ID)
 	}
 	for _, name := range []string{"up-a", "up-b"} {
-		if _, ok := h.eng.provider(name); !ok {
+		if _, ok := h.eng.Provider(name); !ok {
 			t.Errorf("provider %s not recreated", name)
 		}
 	}
-	if _, ok := h.eng.key("up-b", "up-b-key"); !ok {
+	if _, ok := h.eng.Key("up-b", "up-b-key"); !ok {
 		t.Error("key not recreated")
 	}
 }
@@ -328,11 +329,11 @@ func TestSync_AliasChange(t *testing.T) {
 	h := newHarness(t)
 	h.base(t)
 	h.sync(t)
-	h.eng.mutations()
+	h.eng.Mutations()
 	h.write(t, putAll(nil, chat("fast", "up-b/m1", "up-a/m1")))
 	h.sync(t)
 
-	got := h.eng.mutations()
+	got := h.eng.Mutations()
 	if len(got) != 1 || got[0].Op != "UpdateRoutingRule" {
 		t.Fatalf("calls = %q", ops(got))
 	}
@@ -373,7 +374,7 @@ func TestSync_NestedAliasFlattened(t *testing.T) {
 	h.write(t, putAll([]store.Provider{custom("up-a"), custom("up-c")},
 		chat("inner", "up-a/m1"), chat("memory/fast", "inner", "up-c/m1")))
 	h.sync(t)
-	rules := h.eng.rulesNamed(RuleName("memory/fast"))
+	rules := h.eng.RulesNamed(RuleName("memory/fast"))
 	if len(rules) != 1 {
 		t.Fatalf("rules = %+v", rules)
 	}
@@ -389,10 +390,10 @@ func TestSync_BadAliasSkipped(t *testing.T) {
 	h.base(t)
 	h.write(t, putAll(nil, chat("x", "nope")))
 	h.sync(t)
-	if len(h.eng.rulesNamed(RuleName("fast"))) != 1 {
+	if len(h.eng.RulesNamed(RuleName("fast"))) != 1 {
 		t.Error("rule for fast missing")
 	}
-	if len(h.eng.rulesNamed(RuleName("x"))) != 0 {
+	if len(h.eng.RulesNamed(RuleName("x"))) != 0 {
 		t.Error("rule for x pushed")
 	}
 	if !strings.Contains(h.log.String(), "level=ERROR") || !strings.Contains(h.log.String(), "alias=x") {
@@ -402,12 +403,12 @@ func TestSync_BadAliasSkipped(t *testing.T) {
 	// A rule pushed while the alias was valid is removed once it breaks.
 	h.write(t, putAll(nil, chat("x", "up-a/m2")))
 	h.sync(t)
-	if len(h.eng.rulesNamed(RuleName("x"))) != 1 {
+	if len(h.eng.RulesNamed(RuleName("x"))) != 1 {
 		t.Fatal("rule for x missing once valid")
 	}
 	h.write(t, putAll(nil, chat("x", "nope")))
 	h.sync(t)
-	if len(h.eng.rulesNamed(RuleName("x"))) != 0 {
+	if len(h.eng.RulesNamed(RuleName("x"))) != 0 {
 		t.Error("rule for broken alias x kept")
 	}
 	ids, _ := h.st.AliasRuleIDs(context.Background())
@@ -420,17 +421,17 @@ func TestSync_DisabledKeyDeactivatesVK(t *testing.T) {
 	h := newHarness(t)
 	c1 := h.base(t)
 	h.sync(t)
-	h.eng.mutations()
+	h.eng.Mutations()
 	h.write(t, func(ctx context.Context, tx *store.Tx) error {
 		_, err := tx.PutClientKey(ctx, store.ClientKey{ID: c1, Name: "c1", Allow: []string{"*"}, Enabled: false}, "")
 		return err
 	})
 	h.sync(t)
-	got := h.eng.mutations()
+	got := h.eng.Mutations()
 	if len(got) != 1 || got[0].Op != "UpdateVirtualKey" || got[0].Arg.(bifrost.VirtualKey).Active {
 		t.Fatalf("calls = %+v", got)
 	}
-	if vk, _ := h.eng.vk(VirtualKeyName(c1)); vk.Active {
+	if vk, _ := h.eng.VK(VirtualKeyName(c1)); vk.Active {
 		t.Error("virtual key still active")
 	}
 }
@@ -439,12 +440,12 @@ func TestSync_KeyUpdateSendsSecret(t *testing.T) {
 	h := newHarness(t)
 	h.base(t)
 	h.sync(t)
-	h.eng.mutations()
+	h.eng.Mutations()
 	h.write(t, func(ctx context.Context, tx *store.Tx) error {
 		return tx.PutProviderKey(ctx, store.ProviderKey{ID: "up-a-key", Provider: "up-a", Name: "main", Secret: "test-secret-up-a", Enabled: false})
 	})
 	h.sync(t)
-	got := h.eng.mutations()
+	got := h.eng.Mutations()
 	if len(got) != 1 || got[0].Op != "UpdateKey" {
 		t.Fatalf("calls = %q", ops(got))
 	}
@@ -457,14 +458,14 @@ func TestSync_RulePrioritiesUniqueAndStable(t *testing.T) {
 	h := newHarness(t)
 	h.base(t)
 	// A rule remora does not own holds the first free priority; it is deleted only after the pushes.
-	h.eng.seedRule(bifrost.RoutingRule{Name: "hand-made", CEL: "true", Target: bifrost.Route{Provider: "up-a"}, Priority: RulePriorityBase})
+	h.eng.SeedRule(bifrost.RoutingRule{Name: "hand-made", CEL: "true", Target: bifrost.Route{Provider: "up-a"}, Priority: RulePriorityBase})
 	h.write(t, putAll(nil, chat("b", "up-a/m1", "up-b/m1"), chat("d", "up-b/m1")))
 	h.sync(t)
 
 	prio := func() map[string]int {
 		out := map[string]int{}
 		for _, name := range []string{"b", "d", "fast", "a", "c"} {
-			if rs := h.eng.rulesNamed(RuleName(name)); len(rs) == 1 {
+			if rs := h.eng.RulesNamed(RuleName(name)); len(rs) == 1 {
 				out[name] = rs[0].Priority
 			}
 		}
@@ -483,7 +484,7 @@ func TestSync_RulePrioritiesUniqueAndStable(t *testing.T) {
 	}
 
 	// New aliases sorting before and between existing ones leave the existing priorities alone.
-	h.eng.mutations()
+	h.eng.Mutations()
 	h.write(t, putAll(nil, chat("a", "up-a/m1"), chat("c", "up-b/m1")))
 	h.sync(t)
 	second := prio()
@@ -492,7 +493,7 @@ func TestSync_RulePrioritiesUniqueAndStable(t *testing.T) {
 			t.Errorf("alias %s moved from priority %d to %d", name, p, second[name])
 		}
 	}
-	for _, c := range h.eng.mutations() {
+	for _, c := range h.eng.Mutations() {
 		if c.Op != "CreateRoutingRule" {
 			t.Errorf("unexpected %s %s", c.Op, c.Name)
 		}
@@ -503,10 +504,10 @@ func TestSync_DedupesRuleNames(t *testing.T) {
 	h := newHarness(t)
 	h.base(t)
 	h.sync(t)
-	keep := h.eng.rulesNamed(RuleName("fast"))[0]
-	h.eng.seedRule(bifrost.RoutingRule{Name: RuleName("fast"), CEL: RuleCEL("fast"), Target: bifrost.Route{Provider: "up-a", Model: "m1"}, Priority: 5})
+	keep := h.eng.RulesNamed(RuleName("fast"))[0]
+	h.eng.SeedRule(bifrost.RoutingRule{Name: RuleName("fast"), CEL: RuleCEL("fast"), Target: bifrost.Route{Provider: "up-a", Model: "m1"}, Priority: 5})
 	h.sync(t)
-	rules := h.eng.rulesNamed(RuleName("fast"))
+	rules := h.eng.RulesNamed(RuleName("fast"))
 	if len(rules) != 1 || rules[0].ID != keep.ID {
 		t.Errorf("rules = %+v, want only %s", rules, keep.ID)
 	}
@@ -520,10 +521,10 @@ func TestSync_KeyMovedBetweenProviders(t *testing.T) {
 		return tx.PutProviderKey(ctx, store.ProviderKey{ID: "up-a-key", Provider: "up-b", Name: "moved", Secret: "test-secret-moved", Enabled: true})
 	})
 	h.sync(t)
-	if _, ok := h.eng.key("up-a", "up-a-key"); ok {
+	if _, ok := h.eng.Key("up-a", "up-a-key"); ok {
 		t.Error("key still under up-a")
 	}
-	if k, ok := h.eng.key("up-b", "up-a-key"); !ok || k.Value != "test-secret-moved" {
+	if k, ok := h.eng.Key("up-b", "up-a-key"); !ok || k.Value != "test-secret-moved" {
 		t.Errorf("key under up-b = %+v, %v", k, ok)
 	}
 }
@@ -532,8 +533,8 @@ func TestChange_RecoveryRepushesTouched(t *testing.T) {
 	h := newHarness(t)
 	h.base(t)
 	h.sync(t)
-	h.eng.mutations()
-	h.eng.failOnce("CreateRoutingRule")
+	h.eng.Mutations()
+	h.eng.FailOnce("CreateRoutingRule")
 
 	err := h.rec.Change(context.Background(), func(ctx context.Context, tx *store.Tx) error {
 		p := custom("up-a")
@@ -547,7 +548,7 @@ func TestChange_RecoveryRepushesTouched(t *testing.T) {
 		t.Fatal("Change succeeded")
 	}
 	var updates []bifrost.Provider
-	for _, c := range h.eng.mutations() {
+	for _, c := range h.eng.Mutations() {
 		if c.Op == "UpdateProvider" && c.Name == "up-a" {
 			updates = append(updates, c.Arg.(bifrost.Provider))
 		}
@@ -555,11 +556,11 @@ func TestChange_RecoveryRepushesTouched(t *testing.T) {
 	if len(updates) != 2 || updates[0].BaseURL != "http://up-a.test/v2" || updates[1].BaseURL != "http://up-a.test/v1" {
 		t.Fatalf("up-a updates = %+v, want the change then the committed state", updates)
 	}
-	if p, _ := h.eng.provider("up-a"); p.BaseURL != "http://up-a.test/v1" {
+	if p, _ := h.eng.Provider("up-a"); p.BaseURL != "http://up-a.test/v1" {
 		t.Errorf("engine up-a = %+v", p)
 	}
 	h.sync(t)
-	if got := h.eng.mutations(); len(got) != 0 {
+	if got := h.eng.Mutations(); len(got) != 0 {
 		t.Errorf("Sync after recovery made calls %q", ops(got))
 	}
 }
@@ -568,8 +569,8 @@ func TestChange_RollsBackOnEngineError(t *testing.T) {
 	h := newHarness(t)
 	h.base(t)
 	h.sync(t)
-	h.eng.mutations()
-	h.eng.failOnce("CreateRoutingRule")
+	h.eng.Mutations()
+	h.eng.FailOnce("CreateRoutingRule")
 
 	err := h.rec.Change(context.Background(), func(ctx context.Context, tx *store.Tx) error {
 		return tx.PutAlias(ctx, chat("slow", "up-a/m2"))
@@ -581,10 +582,10 @@ func TestChange_RollsBackOnEngineError(t *testing.T) {
 	if _, ok := aliases["slow"]; ok {
 		t.Error("alias slow committed")
 	}
-	if len(h.eng.rulesNamed(RuleName("slow"))) != 0 {
+	if len(h.eng.RulesNamed(RuleName("slow"))) != 0 {
 		t.Error("rule for slow exists")
 	}
-	got := h.eng.mutations()
+	got := h.eng.Mutations()
 	if len(got) != 1 || got[0].Op != "CreateRoutingRule" {
 		t.Errorf("calls = %q, want only the failed create", ops(got))
 	}
@@ -598,7 +599,7 @@ func TestChange_Commits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rules := h.eng.rulesNamed(RuleName("slow"))
+	rules := h.eng.RulesNamed(RuleName("slow"))
 	if len(rules) != 1 {
 		t.Fatalf("rules = %+v", rules)
 	}
@@ -648,8 +649,8 @@ func TestChange_Invalid(t *testing.T) {
 			h.base(t)
 			h.rec.Reserved = tc.reserved
 			h.sync(t)
-			h.eng.mutations()
-			lists := h.eng.lists
+			h.eng.Mutations()
+			lists := h.eng.Lists()
 
 			err := h.rec.Change(context.Background(), tc.change)
 			if tc.wantErr == nil {
@@ -661,8 +662,8 @@ func TestChange_Invalid(t *testing.T) {
 			if !errors.Is(err, tc.wantErr) || !errors.Is(err, ErrInvalid) {
 				t.Fatalf("Change = %v, want %v and ErrInvalid", err, tc.wantErr)
 			}
-			if got := h.eng.mutations(); len(got) != 0 || h.eng.lists != lists {
-				t.Errorf("engine calls %q, lists %d → %d", ops(got), lists, h.eng.lists)
+			if got := h.eng.Mutations(); len(got) != 0 || h.eng.Lists() != lists {
+				t.Errorf("engine calls %q, lists %d → %d", ops(got), lists, h.eng.Lists())
 			}
 			aliases, _ := h.st.Aliases(context.Background())
 			if len(aliases) != 1 {
@@ -678,7 +679,7 @@ func TestSync_InvalidProviderFails(t *testing.T) {
 	if err := h.rec.Sync(context.Background()); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Sync = %v, want ErrInvalid", err)
 	}
-	if got := h.eng.mutations(); len(got) != 0 {
+	if got := h.eng.Mutations(); len(got) != 0 {
 		t.Errorf("calls %q", ops(got))
 	}
 }
@@ -694,16 +695,16 @@ func TestRun(t *testing.T) {
 		close(done)
 	}()
 	deadline := time.Now().Add(5 * time.Second)
-	for len(h.eng.rulesNamed(RuleName("fast"))) == 0 && time.Now().Before(deadline) {
+	for len(h.eng.RulesNamed(RuleName("fast"))) == 0 && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
-	h.eng.reset() // the timer pass recreates it
-	for len(h.eng.rulesNamed(RuleName("fast"))) == 0 && time.Now().Before(deadline) {
+	h.eng.Reset() // the timer pass recreates it
+	for len(h.eng.RulesNamed(RuleName("fast"))) == 0 && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	cancel()
 	<-done
-	if len(h.eng.rulesNamed(RuleName("fast"))) != 1 {
+	if len(h.eng.RulesNamed(RuleName("fast"))) != 1 {
 		t.Error("Run did not reconcile")
 	}
 }

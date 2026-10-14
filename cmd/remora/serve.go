@@ -8,12 +8,15 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"time"
 
 	"github.com/47vigen/remora/internal/api"
 	"github.com/47vigen/remora/internal/auth"
 	"github.com/47vigen/remora/internal/config"
+	"github.com/47vigen/remora/internal/proxy"
+	"github.com/47vigen/remora/internal/reconcile"
 	"github.com/47vigen/remora/internal/store"
 	"github.com/47vigen/remora/internal/supervise"
 )
@@ -64,6 +67,11 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		logger.Log(ctx, passwordLogLevel(ctx, logger), "admin password generated; it is shown only this once", "password", pw)
 	}
 
+	// Secrets at rest: load (or create) the master key before anything else needs the sealer.
+	if err := setSealer(st, cfg); err != nil {
+		return fmt.Errorf("master key: %w", err)
+	}
+
 	creds, err := supervise.EnsureCredentials(ctx, st)
 	if err != nil {
 		return fmt.Errorf("ensure engine credentials: %w", err)
@@ -96,14 +104,35 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		return fmt.Errorf("start engines: %w", err)
 	}
 
+	// Reconcile the front door now that it is healthy, before the listener opens, so /v1 never meets an engine that
+	// lags the store (a fresh or wiped engine data directory). A failure is logged, not fatal: the timer retries.
+	// Then reconcile on a timer; the goroutine ends before the engines stop and the store closes.
+	rec := &reconcile.Reconciler{Store: st, Engine: frontDoor(cfg, creds), Log: logger}
+	if err := rec.Sync(ctx); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		logger.Error("initial reconcile failed; retrying on the timer", "err", err)
+	}
+	rctx, rcancel := context.WithCancel(ctx)
+	reconciled := make(chan struct{})
+	go func() {
+		defer close(reconciled)
+		rec.Run(rctx)
+	}()
+	defer func() {
+		rcancel()
+		<-reconciled
+	}()
+
+	upstream, err := url.Parse(frontDoorURL(cfg))
+	if err != nil {
+		return fmt.Errorf("front door url: %w", err)
+	}
 	mux := http.NewServeMux()
 	api.RegisterSystem(mux, sup)
-	srv := &http.Server{
-		Addr:              cfg.Listen,
-		Handler:           mux,
-		ReadHeaderTimeout: readHeaderTimeout,
-		BaseContext:       func(net.Listener) context.Context { return context.WithoutCancel(ctx) },
-	}
+	mux.Handle("/v1/", proxy.New(upstream, st, logger))
+	srv := newServer(ctx, cfg.Listen, mux)
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.Listen)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", cfg.Listen, err)
@@ -134,4 +163,15 @@ func passwordLogLevel(ctx context.Context, logger *slog.Logger) slog.Level {
 		return slog.LevelWarn
 	}
 	return slog.LevelError
+}
+
+// newServer is the public listener's server. It has no ReadTimeout or WriteTimeout: /v1 streams answers for as
+// long as the upstream takes, and uploads may be large. ReadHeaderTimeout still bounds a slow client's headers.
+func newServer(ctx context.Context, addr string, h http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: readHeaderTimeout,
+		BaseContext:       func(net.Listener) context.Context { return context.WithoutCancel(ctx) },
+	}
 }
