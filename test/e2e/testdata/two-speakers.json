@@ -1,0 +1,11 @@
+{
+  "tokens": [
+    {"text": "سلام", "start_ms": 0, "end_ms": 300, "confidence": 0.98, "speaker": "1", "language": "fa"},
+    {"text": " می", "start_ms": 400, "end_ms": 500, "confidence": 0.97, "speaker": "1", "language": "fa"},
+    {"text": "‌شود", "start_ms": 500, "end_ms": 700, "confidence": 0.96, "speaker": "1", "language": "fa"},
+    {"text": " نمی", "start_ms": 900, "end_ms": 1000, "confidence": 0.95, "speaker": "2", "language": "fa"},
+    {"text": "‌خواهم", "start_ms": 1000, "end_ms": 1300, "confidence": 0.94, "speaker": "2", "language": "fa"}
+  ],
+  "text": "سلام می‌شود نمی‌خواهم",
+  "audio_duration_ms": 1500
+}
