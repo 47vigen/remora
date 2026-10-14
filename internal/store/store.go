@@ -10,6 +10,8 @@ import (
 	"io/fs"
 	"path"
 	"sort"
+	"strconv"
+	"sync/atomic"
 
 	_ "modernc.org/sqlite" // registers the "sqlite" database/sql driver
 )
@@ -21,7 +23,10 @@ var ErrSchemaTooNew = errors.New("store: database schema is newer than this remo
 var migrationFS embed.FS
 
 // Store is the SQLite store.
-type Store struct{ db *sql.DB }
+type Store struct {
+	db     *sql.DB
+	sealer atomic.Pointer[Sealer] // nil until SetSealer; repositories that touch secrets need it
+}
 
 // Open opens (or creates) the database at path and applies the embedded migrations that are missing.
 func Open(ctx context.Context, path string) (*Store, error) {
@@ -47,9 +52,12 @@ func (s *Store) DB() *sql.DB {
 	return s.db
 }
 
+// busyTimeoutMS is how long a statement waits for the database lock. Write waits longer (writeBusyTimeoutMS).
+const busyTimeoutMS = 5000
+
 // dsn sets the pragmas on every pooled connection and makes every transaction BEGIN IMMEDIATE.
 func dsn(p string) string {
-	return "file:" + p + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_txlock=immediate"
+	return "file:" + p + "?_pragma=busy_timeout(" + strconv.Itoa(busyTimeoutMS) + ")&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_txlock=immediate"
 }
 
 // migrations returns the embedded migration file names, sorted.

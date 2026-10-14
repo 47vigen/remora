@@ -33,11 +33,13 @@ func TestOpenAppliesMigrations(t *testing.T) {
 	if err := s.DB().QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatalf("user_version: %v", err)
 	}
-	if version != len(files) || version != 1 {
-		t.Errorf("user_version = %d, want %d (files) == 1", version, len(files))
+	if version != len(files) || version != 2 {
+		t.Errorf("user_version = %d, want %d (files) == 2", version, len(files))
 	}
 
-	for _, table := range []string{"settings", "engine_state"} {
+	for _, table := range []string{
+		"settings", "engine_state", "providers", "provider_keys", "client_keys", "aliases", "alias_members", "engine_sync",
+	} {
 		var n int
 		err := s.DB().QueryRowContext(ctx,
 			"SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?", table).Scan(&n)
