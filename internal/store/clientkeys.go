@@ -5,20 +5,41 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
+	"unicode/utf8"
 )
 
-// ClientKey is a remora key a client presents on /v1. Its value is never stored, only its MAC. VKID and VKValue
-// are the front door's virtual key for it (VKValue sealed at rest).
+// ClientKey is a remora key a client presents on /v1. Its value is never stored, only its MAC and a short Prefix
+// to recognise it by. VKID and VKValue are the front door's virtual key for it (VKValue sealed at rest). Prefix
+// and CreatedAt are set by the store; PutClientKey ignores them.
 type ClientKey struct {
 	ID, Name      string
+	Prefix        string
 	Allow         []string
 	Enabled       bool
 	VKID, VKValue string
+	CreatedAt     time.Time
 }
+
+// keyPrefixLen is the most characters of a key value kept as its prefix.
+const keyPrefixLen = 8
+
+// KeyPrefix returns the part of a key value kept to recognise it: its first 8 characters, but never more than
+// half of it, so a short caller-chosen value is not given away.
+func KeyPrefix(value string) string {
+	n := min(keyPrefixLen, len(value)/2)
+	for n > 0 && !utf8.RuneStart(value[n]) {
+		n-- // never split a character
+	}
+	return value[:n]
+}
+
+// createdAtLayout is how the schema's strftime('%Y-%m-%dT%H:%M:%fZ','now') default writes a time.
+const createdAtLayout = "2006-01-02T15:04:05.999Z"
 
 func clientKeyAAD(id string) string { return "client_key:" + id }
 
-const clientKeyCols = "id, name, allow, enabled, vk_id, vk_secret"
+const clientKeyCols = "id, name, prefix, allow, enabled, vk_id, vk_secret, created_at"
 
 // scanClientKey scans clientKeyCols and opens the virtual key value.
 func scanClientKey(sc interface{ Scan(...any) error }, sl *Sealer) (ClientKey, error) {
@@ -26,13 +47,17 @@ func scanClientKey(sc interface{ Scan(...any) error }, sl *Sealer) (ClientKey, e
 		k        ClientKey
 		allow    string
 		vkSecret []byte
+		created  string
 	)
-	if err := sc.Scan(&k.ID, &k.Name, &allow, &k.Enabled, &k.VKID, &vkSecret); err != nil {
+	if err := sc.Scan(&k.ID, &k.Name, &k.Prefix, &allow, &k.Enabled, &k.VKID, &vkSecret, &created); err != nil {
 		return ClientKey{}, err
 	}
 	var err error
 	if k.Allow, err = decodeList(allow); err != nil {
 		return ClientKey{}, fmt.Errorf("store: client key %s: %w", k.ID, err)
+	}
+	if k.CreatedAt, err = time.Parse(createdAtLayout, created); err != nil {
+		return ClientKey{}, fmt.Errorf("store: client key %s: created_at: %w", k.ID, err)
 	}
 	if vkSecret != nil {
 		if k.VKValue, err = sl.Open(vkSecret, clientKeyAAD(k.ID)); err != nil {
@@ -90,7 +115,7 @@ func (tx *Tx) ClientKeys(ctx context.Context) ([]ClientKey, error) {
 }
 
 // PutClientKey creates or updates the client key k.ID (an empty ID creates a key with a new UUID v4) and returns
-// it as stored. value is caller-chosen and only its MAC is stored; value "" on an existing key keeps the stored
+// it as stored. value is caller-chosen and only its MAC and prefix are stored; value "" on an existing key keeps the stored
 // MAC, and a new key needs a value. The virtual key fields are not changed here (see SetClientKeyVK).
 func (tx *Tx) PutClientKey(ctx context.Context, k ClientKey, value string) (ClientKey, error) {
 	if tx.sealer == nil {
@@ -105,14 +130,15 @@ func (tx *Tx) PutClientKey(ctx context.Context, k ClientKey, value string) (Clie
 	)
 	if value != "" {
 		res, err = tx.tx.ExecContext(ctx, `
-INSERT INTO client_keys (id, name, key_mac, allow, enabled) VALUES (?, ?, ?, ?, ?)
+INSERT INTO client_keys (id, name, key_mac, prefix, allow, enabled) VALUES (?, ?, ?, ?, ?, ?)
 ON CONFLICT (id) DO UPDATE SET
   name = excluded.name,
   key_mac = excluded.key_mac,
+  prefix = excluded.prefix,
   allow = excluded.allow,
   enabled = excluded.enabled,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
-			k.ID, k.Name, tx.sealer.MAC([]byte(value)), encodeList(k.Allow), boolInt(k.Enabled))
+			k.ID, k.Name, tx.sealer.MAC([]byte(value)), KeyPrefix(value), encodeList(k.Allow), boolInt(k.Enabled))
 	} else {
 		res, err = tx.tx.ExecContext(ctx, `
 UPDATE client_keys SET name = ?, allow = ?, enabled = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')

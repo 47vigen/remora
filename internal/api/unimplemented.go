@@ -69,31 +69,6 @@ func (s *Server) PlanConfig(context.Context, gen.PlanConfigRequestObject) (gen.P
 	return nil, errNotImplemented
 }
 
-// ListKeys is not implemented yet.
-func (s *Server) ListKeys(context.Context, gen.ListKeysRequestObject) (gen.ListKeysResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// CreateKey is not implemented yet.
-func (s *Server) CreateKey(context.Context, gen.CreateKeyRequestObject) (gen.CreateKeyResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// DeleteKey is not implemented yet.
-func (s *Server) DeleteKey(context.Context, gen.DeleteKeyRequestObject) (gen.DeleteKeyResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// GetKey is not implemented yet.
-func (s *Server) GetKey(context.Context, gen.GetKeyRequestObject) (gen.GetKeyResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// UpdateKey is not implemented yet.
-func (s *Server) UpdateKey(context.Context, gen.UpdateKeyRequestObject) (gen.UpdateKeyResponseObject, error) {
-	return nil, errNotImplemented
-}
-
 // GetKeyUsage is not implemented yet.
 func (s *Server) GetKeyUsage(context.Context, gen.GetKeyUsageRequestObject) (gen.GetKeyUsageResponseObject, error) {
 	return nil, errNotImplemented

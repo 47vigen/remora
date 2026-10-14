@@ -131,6 +131,12 @@ func TestKeysAdapter(t *testing.T) {
 	if err != nil || value == "" || k.ID == "" || !k.Enabled {
 		t.Fatalf("Create = %+v %q %v", k, value, err)
 	}
+	if k.Prefix != value[:8] || k.CreatedAt.IsZero() {
+		t.Errorf("Create prefix, created_at = %q, %v; want %q, set", k.Prefix, k.CreatedAt, value[:8])
+	}
+	if got, err := ks.Get(ctx, k.ID); err != nil || got.Prefix != k.Prefix || !got.CreatedAt.Equal(k.CreatedAt) {
+		t.Errorf("Get = %+v, %v", got, err)
+	}
 	if ok, err := ks.MatchesValue(ctx, k.ID, value); err != nil || !ok {
 		t.Errorf("MatchesValue = %v, %v", ok, err)
 	}

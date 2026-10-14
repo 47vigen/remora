@@ -283,10 +283,9 @@ type keysAdapter struct {
 	rec *reconcile.Reconciler
 }
 
-// toKey maps a stored client key. The store keeps neither a display prefix nor (in its struct) the creation time;
-// Task 7 fills them.
+// toKey maps a stored client key.
 func toKey(k store.ClientKey) Key {
-	return Key{ID: k.ID, Name: k.Name, Allow: k.Allow, Enabled: k.Enabled}
+	return Key{ID: k.ID, Name: k.Name, Prefix: k.Prefix, Allow: k.Allow, Enabled: k.Enabled, CreatedAt: k.CreatedAt}
 }
 
 func findClientKey(ctx context.Context, tx *store.Tx, id string) (store.ClientKey, error) {

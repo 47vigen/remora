@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/store"
@@ -224,7 +225,10 @@ func (f *fakeKeys) Create(_ context.Context, name string, allow []string, value 
 	if value == "" {
 		value = store.GenerateKeyValue()
 	}
-	k := Key{ID: fmt.Sprintf("k%d", len(f.m)+1), Name: name, Allow: allow, Enabled: true}
+	k := Key{
+		ID: fmt.Sprintf("k%d", len(f.m)+1), Name: name, Prefix: store.KeyPrefix(value), Allow: allow, Enabled: true,
+		CreatedAt: time.Now().UTC(),
+	}
 	f.m[k.ID], f.values[k.ID] = k, value
 	return k, value, nil
 }
@@ -265,7 +269,11 @@ func (f *fakeKeys) MatchesValue(_ context.Context, id, value string) (bool, erro
 func (f *fakeKeys) Delete(_ context.Context, id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if _, ok := f.m[id]; !ok {
+		return fmt.Errorf("%w: key %s", store.ErrNotFound, id)
+	}
 	delete(f.m, id)
+	delete(f.values, id)
 	return nil
 }
 
