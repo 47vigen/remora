@@ -161,7 +161,7 @@ func (r *Reconciler) desired(ctx context.Context, tx *store.Tx, strict bool) (*d
 	}
 
 	for _, ir := range r.InternalRules {
-		ir.ID, ir.Priority = "", 0
+		ir.ID = ""
 		d.Rules = append(d.Rules, desiredRule{Object: internalRuleObject(ir.Name), Rule: ir})
 	}
 
@@ -186,7 +186,7 @@ func (r *Reconciler) desired(ctx context.Context, tx *store.Tx, strict bool) (*d
 	}
 	slices.Sort(d.Aliases)
 	for _, name := range d.Aliases {
-		rule, err := r.aliasRule(aliases, name, isProvider, isTarget, fallbackOK)
+		rule, err := r.aliasRule(aliases, name, isProvider, isTarget, fallbackOK, reserved)
 		if err != nil {
 			if strict {
 				return nil, err
@@ -240,9 +240,10 @@ func engineProvider(p store.Provider, reserved, internal map[string]bool) (bifro
 	return bp, nil
 }
 
-// aliasRule validates one alias and builds its routing rule: the first target of the compiled chain is the rule's
-// target, the rest are its fallbacks.
-func (r *Reconciler) aliasRule(all map[string]alias.Alias, name string, isProvider, isTarget, fallbackOK func(string) bool) (bifrost.RoutingRule, error) {
+// aliasRule validates one alias and builds its routing rule: the compiled chain is validated whole, then members on
+// a reserved (subscription) provider are mapped by ToEngineTarget. The first target is the rule's target, the rest
+// are its fallbacks.
+func (r *Reconciler) aliasRule(all map[string]alias.Alias, name string, isProvider, isTarget, fallbackOK func(string) bool, reserved map[string]bool) (bifrost.RoutingRule, error) {
 	if err := alias.ValidName(name); err != nil {
 		return bifrost.RoutingRule{}, fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
@@ -253,14 +254,19 @@ func (r *Reconciler) aliasRule(all map[string]alias.Alias, name string, isProvid
 	if err != nil {
 		return bifrost.RoutingRule{}, fmt.Errorf("%w: alias %q: %w", ErrInvalid, name, err)
 	}
-	rule := bifrost.RoutingRule{Name: RuleName(name), CEL: RuleCEL(name)}
-	for i, t := range targets {
+	for _, t := range targets {
 		if !isTarget(t.Provider) {
 			return bifrost.RoutingRule{}, invalid("alias %q: member %s/%s: no provider %q", name, t.Provider, t.Model, t.Provider)
 		}
 		// The engine refuses a rule whose target or fallback names a provider without a key.
 		if !fallbackOK(t.Provider) {
 			return bifrost.RoutingRule{}, invalid("alias %q: member %s/%s: provider %q has no key", name, t.Provider, t.Model, t.Provider)
+		}
+	}
+	rule := bifrost.RoutingRule{Name: RuleName(name), CEL: RuleCEL(name)}
+	for i, t := range targets {
+		if reserved[t.Provider] {
+			t = ToEngineTarget(t)
 		}
 		if i == 0 {
 			rule.Target = bifrost.Route(t)

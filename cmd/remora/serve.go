@@ -12,9 +12,11 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/47vigen/remora/internal/accounts"
 	"github.com/47vigen/remora/internal/api"
 	"github.com/47vigen/remora/internal/auth"
 	"github.com/47vigen/remora/internal/config"
+	"github.com/47vigen/remora/internal/engine/cliproxyapi"
 	"github.com/47vigen/remora/internal/proxy"
 	"github.com/47vigen/remora/internal/reconcile"
 	"github.com/47vigen/remora/internal/store"
@@ -114,8 +116,12 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	// lags the store (a fresh or wiped engine data directory). A failure is logged, not fatal: the timer retries,
 	// and /v1 stays closed (503) until a pass succeeds.
 	// Then reconcile on a timer; the goroutine ends before the engines stop and the store closes.
+	// The OAuth engine is reconciled in the same pass, before the front door: its settings and accounts first.
+	accts := accounts.New(accountsEngine(cfg, creds), st, logger)
 	rec := &reconcile.Reconciler{Store: st, Engine: frontDoor(cfg, creds), Log: logger}
-	if err := rec.Sync(ctx); err != nil {
+	withOAuth(rec, cfg, creds.CLIProxyAPIKey)
+	rec.Also = []func(context.Context) error{accts.Reconcile}
+	if err := rec.SyncAll(ctx); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -142,6 +148,8 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	// management API and health stay reachable meanwhile.
 	px := proxy.New(upstream, st, logger)
 	px.Ready = rec.Synced
+	// The OAuth engine's members are served as "remora-oauth/<name>/<model>"; clients see "<name>/<model>".
+	px.OnResponse(proxy.ServedByHook(cliproxyapi.UserRef))
 	mux.Handle("/v1/", px)
 	srv := newServer(ctx, cfg.Listen, mux)
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.Listen)
