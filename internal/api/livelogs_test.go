@@ -45,6 +45,17 @@ func (s *tailSource) add(rows ...bifrost.Log) []string {
 	return ids
 }
 
+func (s *tailSource) GetLog(_ context.Context, id string) (bifrost.Log, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, l := range s.rows {
+		if l.ID == id {
+			return l, nil
+		}
+	}
+	return bifrost.Log{}, bifrost.ErrNotFound
+}
+
 func (s *tailSource) SearchLogs(_ context.Context, f bifrost.LogFilter) (bifrost.LogPage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
