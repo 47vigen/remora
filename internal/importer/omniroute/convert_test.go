@@ -36,7 +36,7 @@ func TestConvertProviders(t *testing.T) {
 		{Name: "oc", Kind: "openai-compatible", BaseURL: "https://llm.example.com/v1", Keys: []config.FileSecretKey{
 			{Name: "key-1", Value: "env:REMORA_PROVIDER_OC_KEY_1"},
 		}},
-		{Name: "opencode-go", Kind: "openai-compatible", BaseURL: "https://opencode.ai/zen/go/v1", Keys: []config.FileSecretKey{
+		{Name: "opencode-go", Kind: "builtin", Type: "opencode-go", Keys: []config.FileSecretKey{
 			{Name: "key-1", Value: "env:REMORA_PROVIDER_OPENCODE_GO_KEY_1"},
 		}},
 		{Name: "soniox", Kind: "soniox", Keys: []config.FileSecretKey{

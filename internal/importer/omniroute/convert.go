@@ -21,10 +21,10 @@ type Result struct {
 }
 
 // apiKeyProviders maps OmniRoute's API-key providers that are not front-door builtins to their remora shape. The base
-// URLs are the ones OmniRoute calls (its provider registry); every other provider must be a front-door builtin.
+// URLs are the ones OmniRoute calls (its provider registry); every other provider must be a front-door builtin, as
+// opencode-go is.
 var apiKeyProviders = map[string]config.FileProvider{
 	"opencode":    {Kind: "openai-compatible", BaseURL: "https://opencode.ai/zen/v1"},
-	"opencode-go": {Kind: "openai-compatible", BaseURL: "https://opencode.ai/zen/go/v1"},
 	"soniox":      {Kind: "soniox"},
 }
 
