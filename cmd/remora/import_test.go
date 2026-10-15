@@ -25,12 +25,16 @@ type fakeRemora struct {
 	aliases   map[string]bool
 	keys      map[string]string // name → value
 	accounts  []gen.AccountImport
+	served    map[string][]string // provider → the models its accounts serve
 	writes    int
 	prunes    []bool
 }
 
 func newFakeRemora(t *testing.T) (*fakeRemora, *httptest.Server) {
-	f := &fakeRemora{providers: map[string]bool{}, aliases: map[string]bool{"keep-me": true}, keys: map[string]string{}}
+	f := &fakeRemora{
+		providers: map[string]bool{}, aliases: map[string]bool{"keep-me": true}, keys: map[string]string{},
+		served: map[string][]string{"antigravity": {"gemini-3-flash", "gemini-3.8-flash-high"}},
+	}
 	mux := http.NewServeMux()
 	config := func(apply bool) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
@@ -77,6 +81,16 @@ func newFakeRemora(t *testing.T) (*fakeRemora, *httptest.Server) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(gen.Account{Provider: req.Provider, Status: "active"})
+	}))
+	mux.HandleFunc("GET /api/accounts", auth(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Query().Get("provider")
+		list := gen.AccountList{Items: []gen.Account{}}
+		if models, ok := f.served[p]; ok {
+			list.Items = append(list.Items, gen.Account{Provider: p, Status: "active", Models: models})
+		}
+		list.Total = len(list.Items)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(list)
 	}))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -150,6 +164,8 @@ func omniDir(t *testing.T) string {
 		`INSERT INTO provider_connections (id, provider, auth_type, email, access_token, refresh_token, id_token)
 			VALUES ('c3', 'codex', 'oauth', 'c@example.com', 'cx-access-secret', 'cx-refresh-secret', '` + idToken + `')`,
 		`INSERT INTO combos (name, data) VALUES ('fast', '{"models":["openrouter/vendor/model-a"]}')`,
+		`INSERT INTO combos (name, data) VALUES ('smart', '{"models":["antigravity/gemini-3.8-flash-tiered",
+			"antigravity/gemini-3.8-flash-high(8192)","antigravity/gemini-3-flash","codex/gpt-6"]}')`,
 		`INSERT INTO api_keys (id, name, key) VALUES ('k1', 'svc-a', 'sk-abc-verbatim-0123456789abcdef01')`,
 	} {
 		if _, err := db.ExecContext(context.Background(), q); err != nil {
@@ -186,6 +202,8 @@ func TestImportWithoutYes(t *testing.T) {
 	for _, want := range []string{
 		"+ provider openrouter", "+ alias fast", "+ key svc-a", "2 accounts: antigravity a@example.com, codex c@example.com",
 		"Codex refresh tokens are single-use: stop the old gateway before remora refreshes them.", "--yes",
+		"warning: alias smart: member antigravity/gemini-3.8-flash-tiered: no antigravity account serves gemini-3.8-flash-tiered; " +
+			"point it at a served model, e.g. antigravity/gemini-3.8-flash-high(8192)",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, s)
@@ -195,6 +213,12 @@ func TestImportWithoutYes(t *testing.T) {
 		if strings.Contains(s, secret) {
 			t.Errorf("stdout shows the secret %q", secret)
 		}
+	}
+	if n := strings.Count(s, "no antigravity account serves"); n != 1 {
+		t.Errorf("%d unserved-model warnings, want 1:\n%s", n, s)
+	}
+	if strings.Contains(s, "codex/gpt-6:") {
+		t.Errorf("warned about a provider whose models are unknown:\n%s", s)
 	}
 	if f.writes != 0 || len(f.providers) != 0 || len(f.keys) != 0 || len(f.accounts) != 0 {
 		t.Fatalf("the fake was changed: %+v", f)

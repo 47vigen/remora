@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ type importTarget interface {
 	Plan(ctx context.Context, doc []byte, sec config.Secrets) ([]gen.Change, error)
 	Apply(ctx context.Context, doc []byte, sec config.Secrets) ([]gen.Change, error)
 	ImportAccount(ctx context.Context, c omniroute.Credential) error
+	Models(ctx context.Context, provider string) ([]string, error)
 }
 
 // dialImport connects to the running remora the way export and apply do, from the environment: REMORA_URL (else
@@ -87,6 +89,7 @@ func runImport(ctx context.Context, args []string, stdout io.Writer, env func(st
 	printChanges(stdout, changes)
 	printAccounts(stdout, res.Credentials)
 	if !yes {
+		warnUnserved(ctx, stdout, target, res)
 		_, _ = fmt.Fprintln(stdout, "Run again with --yes to import.")
 		return nil
 	}
@@ -104,7 +107,41 @@ func runImport(ctx context.Context, args []string, stdout io.Writer, env func(st
 		}
 		_, _ = fmt.Fprintf(stdout, "Imported %s account %s.\n", c.Provider, accountName(c))
 	}
+	warnUnserved(ctx, stdout, target, res)
 	return nil
+}
+
+// warnUnserved warns about each alias member on an imported subscription provider whose accounts do not serve its
+// model, which the engine refuses at request time. A provider whose accounts list no model is not checked.
+func warnUnserved(ctx context.Context, w io.Writer, t importTarget, res omniroute.Result) {
+	served := map[string][]string{}
+	for _, c := range res.Credentials {
+		if _, ok := served[c.Provider]; ok {
+			continue
+		}
+		models, err := t.Models(ctx, c.Provider)
+		if err != nil {
+			_, _ = fmt.Fprintf(w, "warning: could not list the models of the %s accounts: %v\n", c.Provider, err)
+		}
+		served[c.Provider] = models
+	}
+	for _, a := range res.Doc.Aliases {
+		for _, m := range a.Members {
+			p, model, _ := strings.Cut(m, "/")
+			base, _, _ := strings.Cut(model, "(") // a thinking budget suffix: model(8192)
+			if len(served[p]) == 0 || slices.Contains(served[p], base) {
+				continue
+			}
+			hint := ""
+			if i := strings.LastIndex(base, "-"); i > 0 {
+				if j := slices.IndexFunc(served[p], func(s string) bool { return strings.HasPrefix(s, base[:i+1]) }); j >= 0 {
+					hint = fmt.Sprintf(", e.g. %s/%s(8192)", p, served[p][j])
+				}
+			}
+			_, _ = fmt.Fprintf(w, "warning: alias %s: member %s: no %s account serves %s; point it at a served model%s\n",
+				a.Name, m, p, base, hint)
+		}
+	}
 }
 
 func printAccounts(w io.Writer, creds []omniroute.Credential) {
@@ -142,6 +179,24 @@ func (t apiTarget) Plan(ctx context.Context, doc []byte, sec config.Secrets) ([]
 
 func (t apiTarget) Apply(ctx context.Context, doc []byte, sec config.Secrets) ([]gen.Change, error) {
 	return applyConfig(ctx, t.c, configRequest(doc, sec, false))
+}
+
+// Models returns the models the provider's accounts serve. shortcut: reads the first 200 accounts only, enough for
+// an import; page through them if a provider ever has more.
+func (t apiTarget) Models(ctx context.Context, provider string) ([]string, error) {
+	limit := 200
+	resp, err := t.c.ListAccountsWithResponse(ctx, &gen.ListAccountsParams{Provider: &provider, Limit: &limit})
+	if err != nil {
+		return nil, err
+	}
+	if resp.JSON200 == nil {
+		return nil, apiError("account list", resp.HTTPResponse, resp.JSONDefault)
+	}
+	var models []string
+	for _, a := range resp.JSON200.Items {
+		models = append(models, a.Models...)
+	}
+	return models, nil
 }
 
 func (t apiTarget) ImportAccount(ctx context.Context, c omniroute.Credential) error {
