@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"github.com/47vigen/remora/internal/alias"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/47vigen/remora/internal/alias"
 
 	"github.com/coder/websocket"
 

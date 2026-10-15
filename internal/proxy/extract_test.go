@@ -247,7 +247,7 @@ func TestWithModel(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		r := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", bytes.NewReader(got))
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/audio/transcriptions", bytes.NewReader(got))
 		r.Header.Set("Content-Type", ct)
 		if err := r.ParseMultipartForm(1 << 20); err != nil {
 			t.Fatal(err)
