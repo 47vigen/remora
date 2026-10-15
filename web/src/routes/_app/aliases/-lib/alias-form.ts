@@ -12,6 +12,8 @@ export type AliasDraft = {
   members: string[];
   capabilities: string[];
   contextWindow: number | null;
+  /** Kept as loaded: the editor has no control for it yet, and saving must not reset it. */
+  strategy?: Alias["strategy"];
 };
 
 /** One step of a compiled chain as the preview shows it. */
@@ -71,12 +73,14 @@ export function draftFromAlias(a: Alias): AliasDraft {
     members: [...a.members],
     capabilities: [...a.capabilities],
     contextWindow: a.context_window ?? null,
+    strategy: a.strategy,
   };
 }
 
 export function aliasFromDraft(d: AliasDraft): Alias {
   const alias: Alias = { name: d.name.trim(), kind: d.kind, members: d.members, capabilities: d.capabilities };
   if (d.contextWindow !== null) alias.context_window = d.contextWindow;
+  if (d.strategy) alias.strategy = d.strategy;
   return alias;
 }
 

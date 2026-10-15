@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/config"
 	"github.com/47vigen/remora/internal/engine/bifrost"
 )
@@ -191,7 +192,11 @@ func (c *converter) aliases() {
 		case d.ContextCamel != nil:
 			a.ContextWindow = int(*d.ContextCamel)
 		}
-		if d.Strategy != "" && d.Strategy != "priority" {
+		switch d.Strategy {
+		case "", "priority":
+		case string(alias.StrategyRoundRobin):
+			a.Strategy = d.Strategy
+		default:
 			c.warn("alias %s: strategy %s becomes ordered fallback", combo.Name, d.Strategy)
 		}
 		for i, raw := range d.Models {

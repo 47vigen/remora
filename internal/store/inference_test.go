@@ -329,7 +329,7 @@ func TestAliases(t *testing.T) {
 	mf := alias.Alias{
 		Name: "memory/fast", Kind: alias.KindChat,
 		Members:      []alias.Member{{Ref: "inner"}, {Ref: "up-c/m1"}},
-		Capabilities: []string{"structured_outputs"}, ContextWindow: 131072,
+		Capabilities: []string{"structured_outputs"}, ContextWindow: 131072, Strategy: alias.StrategyRoundRobin,
 	}
 	write(t, s, func(ctx context.Context, tx *Tx) error { return tx.PutAlias(ctx, mf) })
 	all, err := s.Aliases(ctx)

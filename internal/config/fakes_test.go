@@ -321,7 +321,7 @@ func populated() *world {
 		Name: "up-a", Kind: "openai-compatible", BaseURL: "http://upstream.test/a", AllowPrivateNetwork: true,
 		Keys: []ProviderKey{{Name: "main", Value: "sk-up-stored-secret"}, {Name: "backup", Value: "sk-up-stored-backup"}},
 	}
-	w.aliases["inner"] = alias.Alias{Name: "inner", Kind: alias.KindChat, Members: members("up-a/m1")}
+	w.aliases["inner"] = alias.Alias{Name: "inner", Kind: alias.KindChat, Members: members("up-a/m1"), Strategy: alias.StrategyRoundRobin}
 	w.aliases["fast"] = alias.Alias{
 		Name: "fast", Kind: alias.KindChat, Members: members("inner", "openrouter/vendor/model-a"),
 		Capabilities: []string{"structured_outputs", "tools"}, ContextWindow: 131072,

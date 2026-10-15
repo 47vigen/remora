@@ -29,7 +29,7 @@ func (tx *Tx) Aliases(ctx context.Context) (map[string]alias.Alias, error) {
 }
 
 func loadAliases(ctx context.Context, q dbtx) (map[string]alias.Alias, error) {
-	rows, err := q.QueryContext(ctx, "SELECT name, kind, capabilities, context_window FROM aliases")
+	rows, err := q.QueryContext(ctx, "SELECT name, kind, capabilities, context_window, strategy FROM aliases")
 	if err != nil {
 		return nil, fmt.Errorf("store: aliases: %w", err)
 	}
@@ -40,7 +40,7 @@ func loadAliases(ctx context.Context, q dbtx) (map[string]alias.Alias, error) {
 			a    alias.Alias
 			caps string
 		)
-		if err := rows.Scan(&a.Name, &a.Kind, &caps, &a.ContextWindow); err != nil {
+		if err := rows.Scan(&a.Name, &a.Kind, &caps, &a.ContextWindow, &a.Strategy); err != nil {
 			return nil, fmt.Errorf("store: aliases: %w", err)
 		}
 		if a.Capabilities, err = decodeList(caps); err != nil {
@@ -78,13 +78,14 @@ func (tx *Tx) PutAlias(ctx context.Context, a alias.Alias) error {
 		return fmt.Errorf("store: put alias: %w", err)
 	}
 	_, err := tx.tx.ExecContext(ctx, `
-INSERT INTO aliases (name, kind, capabilities, context_window) VALUES (?, ?, ?, ?)
+INSERT INTO aliases (name, kind, capabilities, context_window, strategy) VALUES (?, ?, ?, ?, ?)
 ON CONFLICT (name) DO UPDATE SET
   kind = excluded.kind,
   capabilities = excluded.capabilities,
   context_window = excluded.context_window,
+  strategy = excluded.strategy,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
-		a.Name, string(a.Kind), encodeList(a.Capabilities), a.ContextWindow)
+		a.Name, string(a.Kind), encodeList(a.Capabilities), a.ContextWindow, string(a.Strategy))
 	if err != nil {
 		return fmt.Errorf("store: put alias %q: %w", a.Name, mapErr(err))
 	}

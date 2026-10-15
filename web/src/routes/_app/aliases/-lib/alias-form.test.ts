@@ -1,3 +1,4 @@
+import type { Alias } from "../../../../client";
 import {
   type AliasDraft,
   aliasFromDraft,
@@ -50,6 +51,10 @@ test("draft and alias convert both ways; an empty context window is left out", (
   const alias = aliasFromDraft({ ...d, name: " fast " });
   expect(alias).toEqual({ name: "fast", kind: "chat", members: ["openrouter/x", "free"], capabilities: [] });
   expect(draftFromAlias({ ...alias, context_window: 8000 })).toEqual({ ...d, contextWindow: 8000 });
+});
+test("a loaded strategy survives a save", () => {
+  const alias: Alias = { name: "fast", kind: "chat", members: ["or/x"], capabilities: [], strategy: "round-robin" };
+  expect(aliasFromDraft(draftFromAlias(alias))).toEqual(alias);
 });
 test("toAliasTargets marks cooling targets", () => {
   expect(

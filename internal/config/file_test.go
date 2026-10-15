@@ -17,7 +17,7 @@ providers:
     keys: [{name: main, value: env:E2E_UPSTREAM_KEY}]
   - {name: router, kind: builtin, type: openrouter, keys: [{name: k1, value: env:OR_KEY}]}
 aliases:
-  - {name: memory/fast, kind: chat, members: [inner, up-c/m1], capabilities: [tools], context_window: 131072}
+  - {name: memory/fast, kind: chat, members: [inner, up-c/m1], capabilities: [tools], context_window: 131072, strategy: round-robin}
 keys:
   - {name: full, value: env:E2E_KEY_FULL, allow: ["*"]}
   - {name: off, allow: ["*"], enabled: false}
@@ -38,7 +38,7 @@ keys:
 		},
 		Aliases: []FileAlias{{
 			Name: "memory/fast", Kind: "chat", Members: []string{"inner", "up-c/m1"},
-			Capabilities: []string{"tools"}, ContextWindow: 131072,
+			Capabilities: []string{"tools"}, ContextWindow: 131072, Strategy: "round-robin",
 		}},
 		Keys: []FileKey{
 			{Name: "full", Value: "env:E2E_KEY_FULL", Allow: []string{"*"}},
@@ -78,6 +78,7 @@ func TestParse_Errors(t *testing.T) {
 		{"bad alias name", "aliases:\n  - {name: -a, kind: chat, members: [p/m]}\n", []string{"aliases[0].name"}},
 		{"alias without members", "aliases:\n  - {name: a, kind: chat}\n", []string{"aliases[0].members"}},
 		{"negative context", "aliases:\n  - {name: a, kind: chat, members: [p/m], context_window: -1}\n", []string{"aliases[0].context_window"}},
+		{"bad strategy", "aliases:\n  - {name: a, kind: chat, members: [p/m], strategy: random}\n", []string{"aliases[0].strategy", "random"}},
 		{"duplicate alias", "aliases:\n  - {name: a, kind: chat, members: [p/m]}\n  - {name: a, kind: chat, members: [p/m]}\n", []string{"aliases[1].name"}},
 		{"literal client key", "keys:\n  - {name: a, value: sk-x, allow: ['*']}\n", []string{"keys[0].value", "env:"}},
 		{"duplicate client key", "keys:\n  - {name: a}\n  - {name: a}\n", []string{"keys[1].name"}},

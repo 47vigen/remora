@@ -17,6 +17,7 @@ type aliasJSON struct {
 	Members       []string `json:"members"`
 	Capabilities  []string `json:"capabilities"`
 	ContextWindow *int     `json:"context_window"`
+	Strategy      *string  `json:"strategy"`
 }
 
 type chainJSON struct {
@@ -40,14 +41,15 @@ func TestAliasesCRUD(t *testing.T) {
 	env.aliases.m = map[string]alias.Alias{"cheap": {Name: "cheap", Kind: alias.KindChat, Members: []alias.Member{{Ref: "ag/b"}}}}
 
 	code, body := env.do(t, env.client, http.MethodPost, "/api/aliases",
-		`{"name":"fast","kind":"chat","members":["or/a","cheap"],"capabilities":["tools"],"context_window":128000}`)
+		`{"name":"fast","kind":"chat","members":["or/a","cheap"],"capabilities":["tools"],"context_window":128000,"strategy":"round-robin"}`)
 	if code != http.StatusCreated {
 		t.Fatalf("create = %d %s", code, body)
 	}
 	var a aliasJSON
 	decode(t, body, &a)
 	if a.Name != "fast" || a.Kind != "chat" || !slices.Equal(a.Members, []string{"or/a", "cheap"}) ||
-		!slices.Equal(a.Capabilities, []string{"tools"}) || a.ContextWindow == nil || *a.ContextWindow != 128000 {
+		!slices.Equal(a.Capabilities, []string{"tools"}) || a.ContextWindow == nil || *a.ContextWindow != 128000 ||
+		a.Strategy == nil || *a.Strategy != "round-robin" {
 		t.Errorf("create = %s", body)
 	}
 
@@ -68,8 +70,11 @@ func TestAliasesCRUD(t *testing.T) {
 		t.Errorf("put answer has no empty capabilities list: %s", body)
 	}
 	stored, _ := env.aliases.Get(t.Context(), "fast")
-	if got := refs(stored); !slices.Equal(got, []string{"cheap", "or/a"}) {
-		t.Errorf("stored members after PUT = %v", got)
+	if got := refs(stored); !slices.Equal(got, []string{"cheap", "or/a"}) || stored.Strategy != alias.StrategyFallback {
+		t.Errorf("stored after PUT = %+v", stored)
+	}
+	if strings.Contains(string(body), `"strategy"`) {
+		t.Errorf("put answer names the default strategy: %s", body)
 	}
 	if code, body := env.do(t, env.client, http.MethodPut, "/api/aliases/fast", `{"name":"slow","kind":"chat","members":["or/a"]}`); code != http.StatusBadRequest {
 		t.Errorf("put with a different name = %d %s", code, body)
@@ -103,6 +108,7 @@ func TestAliasErrors(t *testing.T) {
 		{"empty member", `{"name":"a","kind":"chat","members":[""]}`, nil, "member"},
 		{"bad name", `{"name":" a","kind":"chat","members":["or/a"]}`, nil, "name"},
 		{"negative context window", `{"name":"a","kind":"chat","members":["or/a"],"context_window":-1}`, nil, "context_window"},
+		{"unknown strategy", `{"name":"a","kind":"chat","members":["or/a"],"strategy":"random"}`, nil, "strategy"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env.aliases.mu.Lock()

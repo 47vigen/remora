@@ -12,12 +12,14 @@ import (
 // Route is a provider and model. In a rule target, Model "" is sent as null: the incoming model.
 type Route struct{ Provider, Model string }
 
-// RoutingRule is a global front-door routing rule with one target and an ordered fallback chain. The engine refuses
-// two global rules with the same Priority, so each rule needs its own; rules whose CEL expressions never match the
-// same request may take any distinct priorities.
+// RoutingRule is a global front-door routing rule with a target and an ordered fallback chain. With Spread, each
+// request goes to Target or one of Spread, picked at random with equal weight. The engine refuses two global rules
+// with the same Priority, so each rule needs its own; rules whose CEL expressions never match the same request may
+// take any distinct priorities.
 type RoutingRule struct {
 	ID, Name, CEL string
 	Target        Route
+	Spread        []Route `json:",omitempty"` // omitted, so rules without it keep the reconciler's stored MACs
 	Fallbacks     []Route
 	Priority      int
 }
@@ -70,10 +72,16 @@ type ruleAnswer struct {
 }
 
 func ruleWire(r RoutingRule) ruleBody {
-	target := ruleTarget{Provider: r.Target.Provider, Weight: 1}
-	if r.Target.Model != "" {
-		model := r.Target.Model
-		target.Model = &model
+	// The engine wants the weights to sum to 1.
+	weight := 1 / float64(1+len(r.Spread))
+	targets := make([]ruleTarget, 0, 1+len(r.Spread))
+	for _, t := range append([]Route{r.Target}, r.Spread...) {
+		target := ruleTarget{Provider: t.Provider, Weight: weight}
+		if t.Model != "" {
+			model := t.Model
+			target.Model = &model
+		}
+		targets = append(targets, target)
 	}
 	fallbacks := make([]ruleFallback, 0, len(r.Fallbacks))
 	for _, f := range r.Fallbacks {
@@ -84,7 +92,7 @@ func ruleWire(r RoutingRule) ruleBody {
 		Description:   managedDescription,
 		Enabled:       true,
 		CelExpression: r.CEL,
-		Targets:       []ruleTarget{target},
+		Targets:       targets,
 		Fallbacks:     fallbacks,
 		Scope:         "global",
 		Priority:      r.Priority,
@@ -93,11 +101,16 @@ func ruleWire(r RoutingRule) ruleBody {
 
 func (a ruleAnswer) toRule() RoutingRule {
 	r := RoutingRule{ID: a.ID, Name: a.Name, CEL: a.CelExpression, Priority: a.Priority}
-	if len(a.Targets) > 0 {
-		r.Target.Provider = a.Targets[0].Provider
-		if a.Targets[0].Model != nil {
-			r.Target.Model = *a.Targets[0].Model
+	for i, t := range a.Targets {
+		route := Route{Provider: t.Provider}
+		if t.Model != nil {
+			route.Model = *t.Model
 		}
+		if i == 0 {
+			r.Target = route
+			continue
+		}
+		r.Spread = append(r.Spread, route)
 	}
 	for _, f := range a.Fallbacks {
 		r.Fallbacks = append(r.Fallbacks, Route(f))

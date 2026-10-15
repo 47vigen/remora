@@ -187,6 +187,20 @@ func TestClient_Requests(t *testing.T) {
 			"targets":   []any{map[string]any{"provider": "up-a", "model": "m1", "weight": 1.0}},
 			"fallbacks": []any{map[string]any{"provider": "up-b", "model": "m1"}},
 		}, nil},
+		{"create spread rule", func(c *Client) error {
+			_, err := c.CreateRoutingRule(ctx, RoutingRule{
+				Name: "remora:alias:fast", CEL: `model == "fast"`,
+				Target: Route{"up-a", "m1"}, Spread: []Route{{"up-b", "m1"}, {"up-c", "m1"}, {"up-d", "m1"}},
+			})
+			return err
+		}, "POST", "/api/routing/rules", map[string]any{
+			"targets": []any{
+				map[string]any{"provider": "up-a", "model": "m1", "weight": 0.25},
+				map[string]any{"provider": "up-b", "model": "m1", "weight": 0.25},
+				map[string]any{"provider": "up-c", "model": "m1", "weight": 0.25},
+				map[string]any{"provider": "up-d", "model": "m1", "weight": 0.25},
+			},
+		}, nil},
 		{"update rule", func(c *Client) error {
 			return c.UpdateRoutingRule(ctx, RoutingRule{
 				ID: "r1", Name: "remora:alias:fast", CEL: `model == "fast"`, Target: Route{"up-a", "m1"}, Priority: 3,
@@ -327,7 +341,7 @@ func TestClient_ListsDecode(t *testing.T) {
 		"GET /api/providers/up-a/keys":     {200, `{"keys":[{"id":"k1","name":"main","value":{"value":"te****ey"},"models":["*"],"weight":1,"enabled":false},{"id":"k2","name":"spare","value":{"value":""}}],"total":2}`},
 		"GET /api/governance/virtual-keys": {200, `{"virtual_keys":[{"id":"vk1","name":"remora:key:c1","value":"sk-bf-x","is_active":true},{"id":"vk2","name":"remora:key:c2","value":{"value":"sk-bf-y"},"is_active":false}],"count":2}`},
 		"GET /api/routing/rules": {200, `{"rules":[
-			{"id":"r1","name":"n","cel_expression":"c","priority":2,"targets":[{"provider":"up-a","model":"m1","weight":1}],"fallbacks":["up-b/org/m2",{"provider":"up-c","model":"m3","key_id":"k9"}]},
+			{"id":"r1","name":"n","cel_expression":"c","priority":2,"targets":[{"provider":"up-a","model":"m1","weight":0.5},{"provider":"up-x","model":"m9","weight":0.5}],"fallbacks":["up-b/org/m2",{"provider":"up-c","model":"m3","key_id":"k9"}]},
 			{"id":"r2","name":"o","cel_expression":"true","targets":[{"provider":"remora-oauth","weight":1}]}],"count":2}`},
 	})
 	ctx := context.Background()
@@ -374,7 +388,7 @@ func TestClient_ListsDecode(t *testing.T) {
 	}
 	wantRules := []RoutingRule{
 		{
-			ID: "r1", Name: "n", CEL: "c", Priority: 2, Target: Route{"up-a", "m1"},
+			ID: "r1", Name: "n", CEL: "c", Priority: 2, Target: Route{"up-a", "m1"}, Spread: []Route{{"up-x", "m9"}},
 			Fallbacks: []Route{{"up-b", "org/m2"}, {"up-c", "m3"}},
 		},
 		{ID: "r2", Name: "o", CEL: "true", Target: Route{"remora-oauth", ""}},

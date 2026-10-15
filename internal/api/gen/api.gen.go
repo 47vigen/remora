@@ -43,6 +43,21 @@ func (e AccountLoginStatusStatus) Valid() bool {
 	}
 }
 
+// Defines values for AliasStrategy.
+const (
+	RoundRobin AliasStrategy = "round-robin"
+)
+
+// Valid indicates whether the value is a known member of the AliasStrategy enum.
+func (e AliasStrategy) Valid() bool {
+	switch e {
+	case RoundRobin:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AliasKind.
 const (
 	Chat          AliasKind = "chat"
@@ -398,7 +413,13 @@ type Alias struct {
 	// Members Alias names or `<provider>/<model>` references, in fallback order.
 	Members []string `json:"members"`
 	Name    string   `json:"name"`
+
+	// Strategy `round-robin` spreads requests over the compiled members at random with equal weight, falling back in order; absent, the members are tried in order.
+	Strategy *AliasStrategy `json:"strategy,omitempty"`
 }
+
+// AliasStrategy `round-robin` spreads requests over the compiled members at random with equal weight, falling back in order; absent, the members are tried in order.
+type AliasStrategy string
 
 // AliasChain defines model for AliasChain.
 type AliasChain struct {

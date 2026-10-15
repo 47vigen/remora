@@ -65,7 +65,7 @@ func (s *Service) Export(ctx context.Context) (File, error) {
 		return File{}, err
 	}
 	for _, a := range aliases {
-		fa := FileAlias{Name: a.Name, Kind: string(a.Kind), Members: make([]string, len(a.Members)), ContextWindow: a.ContextWindow}
+		fa := FileAlias{Name: a.Name, Kind: string(a.Kind), Members: make([]string, len(a.Members)), ContextWindow: a.ContextWindow, Strategy: string(a.Strategy)}
 		for i, m := range a.Members {
 			fa.Members[i] = m.Ref
 		}
