@@ -172,6 +172,11 @@ func TestConvertCombos(t *testing.T) {
 			"alias x: strategy round-robin becomes ordered fallback",
 		},
 		{
+			"provider id prefix on the model", `{"models":[{"model":"openai-compatible-chat-n1/m","providerId":"openai-compatible-chat-n1"}]}`,
+			config.FileAlias{Name: "x", Kind: "chat", Members: []string{"oc/m"}},
+			"",
+		},
+		{
 			"unknown provider kept", `{"models":["nowhere/m"]}`,
 			config.FileAlias{Name: "x", Kind: "chat", Members: []string{"nowhere/m"}},
 			"",
@@ -202,5 +207,43 @@ func TestConvertCombos(t *testing.T) {
 	}
 	if aliases["embed"].Kind != "embeddings" {
 		t.Fatalf("embed: %+v", aliases["embed"])
+	}
+}
+
+func TestConvertCombosDropWhatWasNotImported(t *testing.T) {
+	active := Connection{ID: "c1", Provider: "openrouter", AuthType: "apikey", Active: true, APIKey: "k"}
+	off := Connection{ID: "c2", Provider: "openai-compatible-chat-n1", AuthType: "apikey", APIKey: "k"}
+	s := Snapshot{
+		Nodes:       []Node{{ID: "openai-compatible-chat-n1", Type: "openai-compatible", Prefix: "oc", BaseURL: "https://llm.example.com/v1"}},
+		Connections: []Connection{active, off},
+		Combos: []Combo{
+			{Name: "mixed", Data: json.RawMessage(`{"models":[{"model":"m","providerId":"openai-compatible-chat-n1"},"openrouter/m","nowhere/m"]}`)},
+			{Name: "only-off", Data: json.RawMessage(`{"models":["oc/m"]}`)},
+			{Name: "ref-off", Data: json.RawMessage(`{"models":[{"kind":"combo-ref","comboName":"only-off"}]}`)},
+			{Name: "disabled", Data: json.RawMessage(`{"models":["openrouter/m"],"isActive":false}`)},
+			{Name: "ref-disabled", Data: json.RawMessage(`{"models":["disabled","openrouter/m"]}`)},
+		},
+	}
+	r := Convert(s, fixtureNow)
+	got := map[string][]string{}
+	for _, a := range r.Doc.Aliases {
+		got[a.Name] = a.Members
+	}
+	want := map[string][]string{"mixed": {"openrouter/m", "nowhere/m"}, "ref-disabled": {"openrouter/m"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("aliases %v, want %v", got, want)
+	}
+	for _, w := range []string{
+		"alias mixed: member oc/m skipped: its provider was not imported",
+		"skipped combo disabled: inactive",
+		"skipped alias only-off: no member left",
+		"skipped alias ref-off: no member left",
+	} {
+		if !hasWarning(r, w) {
+			t.Errorf("no warning %q in %q", w, r.Warnings)
+		}
+	}
+	if err := r.Doc.Validate(); err != nil {
+		t.Fatalf("the document does not validate: %v", err)
 	}
 }
