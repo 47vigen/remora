@@ -23,6 +23,7 @@ import (
 	"github.com/47vigen/remora/internal/engine/cliproxyapi/cliproxyapitest"
 	"github.com/47vigen/remora/internal/reconcile"
 	"github.com/47vigen/remora/internal/reconcile/reconciletest"
+	"github.com/47vigen/remora/internal/soniox"
 	"github.com/47vigen/remora/internal/store"
 )
 
@@ -45,7 +46,7 @@ func adapterStore(t *testing.T) (*store.Store, *reconcile.Reconciler, *reconcile
 func TestProvidersAdapter(t *testing.T) {
 	ctx := context.Background()
 	st, rec, _ := adapterStore(t)
-	ps := NewProviders(st, rec)
+	ps := NewProviders(st, rec, nil, nil)
 
 	p := Provider{
 		Name: "up", Kind: "openai-compatible", BaseURL: "http://up.test/v1",
@@ -88,7 +89,7 @@ func TestProvidersAdapter(t *testing.T) {
 func TestAliasesAndNamesAdapters(t *testing.T) {
 	ctx := context.Background()
 	st, rec, _ := adapterStore(t)
-	if _, err := NewProviders(st, rec).Create(ctx, Provider{
+	if _, err := NewProviders(st, rec, nil, nil).Create(ctx, Provider{
 		Name: "up", Kind: "openai-compatible",
 		BaseURL: "http://up.test/v1", Keys: []ProviderKey{{Name: "main", Value: "k1"}},
 	}); err != nil {
@@ -426,5 +427,61 @@ func TestNamesAdapterTranslatesSubscriptionProviders(t *testing.T) {
 		if !slices.Equal(ps, c.ps) || !slices.Equal(ms, c.ms) {
 			t.Errorf("EngineFilter(%q, %q) = %v, %v; want %v, %v", c.provider, c.model, ps, ms, c.ps, c.ms)
 		}
+	}
+}
+
+type fakeLister map[string][]bifrost.KeyStatus
+
+func (f fakeLister) RefreshProviderModels(_ context.Context, name string) ([]bifrost.KeyStatus, error) {
+	return f[name], nil
+}
+
+type fakeSonioxFiles map[string]error // key → answer
+
+func (f fakeSonioxFiles) ListFiles(_ context.Context, key string) ([]soniox.File, error) {
+	return nil, f[key]
+}
+
+func TestProvidersAdapterTest(t *testing.T) {
+	ctx := context.Background()
+	st, rec, _ := adapterStore(t)
+	rec.SonioxURL = "http://127.0.0.1:1"
+	create := NewProviders(st, rec, nil, nil)
+	for _, p := range []Provider{
+		{Name: "up", Kind: "openai-compatible", BaseURL: "http://up.test/v1", Keys: []ProviderKey{{Name: "main", Value: "k1"}, {Name: "spare", Value: "k2"}}},
+		{Name: "soniox", Kind: "soniox", Keys: []ProviderKey{{Name: "a", Value: "s1"}, {Name: "b", Value: "s2"}}},
+	} {
+		if _, err := create.Create(ctx, p); err != nil {
+			t.Fatalf("Create %s: %v", p.Name, err)
+		}
+	}
+	var ids []string
+	if err := read(ctx, st, func(tx *store.Tx) error {
+		keys, err := tx.ProviderKeys(ctx)
+		for _, k := range keys {
+			if k.Provider == "up" {
+				ids = append(ids, k.ID)
+			}
+		}
+		return err
+	}); err != nil || len(ids) != 2 {
+		t.Fatalf("keys %v %v", ids, err)
+	}
+	lister := fakeLister{"up": {{ID: ids[0], Status: "success"}, {ID: ids[1], Status: "list_models_failed", Description: "401 from bifrost"}}}
+	ps := NewProviders(st, rec, lister, fakeSonioxFiles{"s2": errors.New("bad key")})
+
+	r, err := ps.Test(ctx, "up")
+	if err != nil || r.OK || !strings.Contains(r.Message, ": 401 from gateway") {
+		t.Fatalf("one failing key = %+v, %v", r, err)
+	}
+	lister["up"][1].Status = "success"
+	if r, err = ps.Test(ctx, "up"); err != nil || !r.OK || r.Message != "2 of 2 keys answered" {
+		t.Fatalf("every key answers = %+v, %v", r, err)
+	}
+	if r, err = ps.Test(ctx, "soniox"); err != nil || r.OK || !strings.Contains(r.Message, "b: bad key") {
+		t.Fatalf("speech provider = %+v, %v", r, err)
+	}
+	if _, err = ps.Test(ctx, "nope"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("unknown provider err = %v", err)
 	}
 }

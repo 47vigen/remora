@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -505,6 +506,7 @@ type fakeLogs struct {
 	rows      []bifrost.Log
 	stats     func(bifrost.LogFilter) bifrost.LogStats // nil answers zeros
 	histogram []bifrost.HistogramBucket
+	models    []string // the distinct models LogModels searches
 
 	searches   []bifrost.LogFilter
 	statsCalls []bifrost.LogFilter
@@ -609,6 +611,18 @@ func (f *fakeLogs) LogStats(_ context.Context, fl bifrost.LogFilter) (bifrost.Lo
 		return bifrost.LogStats{}, nil
 	}
 	return f.stats(fl), nil
+}
+
+func (f *fakeLogs) LogModels(_ context.Context, query string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for _, m := range f.models {
+		if strings.Contains(m, query) {
+			out = append(out, m)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeLogs) Histogram(_ context.Context, fl bifrost.LogFilter) ([]bifrost.HistogramBucket, error) {

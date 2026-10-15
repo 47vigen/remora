@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ type LogSource interface {
 	GetLog(ctx context.Context, id string) (bifrost.Log, error)
 	LogStats(ctx context.Context, f bifrost.LogFilter) (bifrost.LogStats, error)
 	Histogram(ctx context.Context, f bifrost.LogFilter) ([]bifrost.HistogramBucket, error)
+	LogModels(ctx context.Context, query string) ([]string, error)
 }
 
 var _ LogSource = (*bifrost.Client)(nil)
@@ -143,7 +145,28 @@ func (s *Server) scope(ctx context.Context, f *bifrost.LogFilter, key, aliasName
 	if provider != "" || model != "" {
 		f.Providers, f.Models = s.d.Names.EngineFilter(ctx, provider, model)
 	}
+	if provider != "" && model == "" && isSubscription(provider) {
+		ms, err := s.subscriptionModels(ctx, provider)
+		if err != nil {
+			return err
+		}
+		if len(ms) == 0 {
+			return errNoMatch
+		}
+		f.Models = ms
+	}
 	return nil
+}
+
+// subscriptionModels lists the models a subscription provider has served. The front door logs every subscription
+// provider under the OAuth engine's one provider, so the provider alone would match them all; its models, which
+// carry its name as their prefix, tell them apart.
+func (s *Server) subscriptionModels(ctx context.Context, provider string) ([]string, error) {
+	all, err := s.d.Logs.LogModels(ctx, provider+"/")
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(all, func(m string) bool { return !strings.HasPrefix(m, provider+"/") }), nil
 }
 
 // statsWindow is the default time range: the 24 hours before to.

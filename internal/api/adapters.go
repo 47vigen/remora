@@ -17,6 +17,7 @@ import (
 	"github.com/47vigen/remora/internal/engine/bifrost"
 	"github.com/47vigen/remora/internal/engine/cliproxyapi"
 	"github.com/47vigen/remora/internal/reconcile"
+	"github.com/47vigen/remora/internal/soniox"
 	"github.com/47vigen/remora/internal/store"
 	"github.com/47vigen/remora/internal/version"
 )
@@ -57,14 +58,27 @@ func read(ctx context.Context, st *store.Store, fn func(tx *store.Tx) error) err
 	return st.Write(ctx, fn)
 }
 
-// NewProviders manages providers in st through rec.
-func NewProviders(st *store.Store, rec *reconcile.Reconciler) Providers {
-	return providersAdapter{st: st, rec: rec}
+// ModelLister lists models with every key of a front-door provider; *bifrost.Client satisfies it.
+type ModelLister interface {
+	RefreshProviderModels(ctx context.Context, name string) ([]bifrost.KeyStatus, error)
+}
+
+// SonioxFiles lists a Soniox account's files; *soniox.Client satisfies it.
+type SonioxFiles interface {
+	ListFiles(ctx context.Context, key string) ([]soniox.File, error)
+}
+
+// NewProviders manages providers in st through rec. A test lists models through fd, or, for a speech provider,
+// lists its files through sx.
+func NewProviders(st *store.Store, rec *reconcile.Reconciler, fd ModelLister, sx SonioxFiles) Providers {
+	return providersAdapter{st: st, rec: rec, fd: fd, sx: sx}
 }
 
 type providersAdapter struct {
 	st  *store.Store
 	rec *reconcile.Reconciler
+	fd  ModelLister
+	sx  SonioxFiles
 }
 
 func loadProviders(ctx context.Context, tx *store.Tx) ([]Provider, map[string][]store.ProviderKey, error) {
@@ -184,9 +198,72 @@ func (a providersAdapter) Delete(ctx context.Context, name string) error {
 	return a.rec.Change(ctx, func(ctx context.Context, tx *store.Tx) error { return tx.DeleteProvider(ctx, name) })
 }
 
-// Test has no backing service in plans 01–02.
-func (a providersAdapter) Test(context.Context, string) (ProviderTest, error) {
-	return ProviderTest{}, errNotImplemented
+// Test calls the upstream with every enabled key of the provider. It is OK when every key answers.
+func (a providersAdapter) Test(ctx context.Context, name string) (ProviderTest, error) {
+	var (
+		p    Provider
+		keys []store.ProviderKey
+	)
+	err := read(ctx, a.st, func(tx *store.Tx) error {
+		ps, byProvider, err := loadProviders(ctx, tx)
+		if err != nil {
+			return err
+		}
+		i := slices.IndexFunc(ps, func(p Provider) bool { return p.Name == name })
+		if i < 0 {
+			return fmt.Errorf("%w: provider %s", store.ErrNotFound, name)
+		}
+		p, keys = ps[i], byProvider[name]
+		return nil
+	})
+	if err != nil {
+		return ProviderTest{}, err
+	}
+	if a.fd == nil || a.sx == nil {
+		return ProviderTest{}, errNotImplemented
+	}
+	start := time.Now()
+	var failed []string
+	answered := 0
+	if p.Kind == string(store.KindSoniox) {
+		for _, k := range keys {
+			if !k.Enabled {
+				continue
+			}
+			if _, err := a.sx.ListFiles(ctx, k.Secret); err != nil {
+				failed = append(failed, k.Name+": "+err.Error())
+				continue
+			}
+			answered++
+		}
+	} else {
+		names := map[string]string{}
+		for _, k := range keys {
+			names[k.ID] = k.Name
+		}
+		statuses, err := a.fd.RefreshProviderModels(ctx, name)
+		if err != nil {
+			return ProviderTest{}, err
+		}
+		for _, k := range statuses {
+			switch k.Status {
+			case "success":
+				answered++
+			case "list_models_failed":
+				failed = append(failed, names[k.ID]+": "+k.Description)
+			}
+		}
+	}
+	r := ProviderTest{OK: len(failed) == 0 && answered > 0, Latency: time.Since(start)}
+	switch {
+	case len(failed) > 0:
+		r.Message = Scrub(strings.Join(failed, "; "))
+	case answered == 0:
+		r.Message = "no enabled key could be checked"
+	default:
+		r.Message = fmt.Sprintf("%d of %d keys answered", answered, len(keys))
+	}
+	return r, nil
 }
 
 // NewAliases manages aliases in st through rec. cooling reports the members cooling now (the cooler's Snapshot);

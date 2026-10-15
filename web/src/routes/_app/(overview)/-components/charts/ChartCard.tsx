@@ -18,7 +18,7 @@ export function ChartCard({
       <Card.Header>
         <Card.Title>{title}</Card.Title>
       </Card.Header>
-      <Card.Content className="h-56">
+      <Card.Content className="h-56 flex-none">
         {isEmpty ? <p className="text-muted flex h-full items-center justify-center text-sm">{emptyText}</p> : children}
       </Card.Content>
     </Card>

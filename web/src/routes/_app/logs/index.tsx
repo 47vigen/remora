@@ -177,6 +177,7 @@ function LogsPage() {
       {search.log !== undefined ? (
         <LogDetail
           log={detail.data}
+          keyName={detail.data?.key !== undefined ? keyNames.get(detail.data.key) : undefined}
           isLoading={detail.isPending}
           onClose={() => void navigate({ search: (prev) => ({ ...prev, log: undefined }) })}
         />

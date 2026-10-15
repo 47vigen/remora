@@ -84,3 +84,18 @@ test("the row actions report the key", async () => {
   await userEvent.click(within(row2).getByRole("button", { name: "Delete laptop" }));
   expect(handlers.onDelete).toHaveBeenCalledWith(k2);
 });
+
+test("usage that arrives after the rows replaces the loading placeholder", () => {
+  const props = {
+    items: [k1],
+    now,
+    onOpen: vi.fn<(k: Key) => void>(),
+    onToggle: vi.fn<(k: Key, on: boolean) => void>(),
+    onDelete: vi.fn<(k: Key) => void>(),
+  };
+  const { rerender } = render(<KeysTable {...props} usage={undefined} />);
+  const cell = () => within(screen.getAllByRole("row")[1]!).getAllByRole("gridcell")[3];
+  expect(cell()).toHaveTextContent(/^–$/);
+  rerender(<KeysTable {...props} usage={new Map([["k1", { name: "k1", summary: summary(1234) }]])} />);
+  expect(cell()).toHaveTextContent("1.23K");
+});

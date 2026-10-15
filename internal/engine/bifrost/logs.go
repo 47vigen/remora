@@ -175,6 +175,41 @@ func (c *Client) Histogram(ctx context.Context, f LogFilter) ([]HistogramBucket,
 	return out.Buckets, nil
 }
 
+// KeyStatus is what listing models with one provider key found: Status "success", "list_models_failed", or
+// "unknown" when the provider lists no models; Description carries the failure.
+type KeyStatus struct {
+	ID          string `json:"id"`
+	Status      string `json:"status"`
+	Description string `json:"description"`
+}
+
+// RefreshProviderModels calls POST /api/providers/{name}/refresh-models, which lists models with every enabled key
+// of the provider and answers each key's status.
+func (c *Client) RefreshProviderModels(ctx context.Context, name string) ([]KeyStatus, error) {
+	if err := requireID("provider name", name); err != nil {
+		return nil, err
+	}
+	var out struct {
+		Keys []KeyStatus `json:"keys"`
+	}
+	if err := c.do(ctx, http.MethodPost, providerPath(name)+"/refresh-models", nil, &out); err != nil {
+		return nil, err
+	}
+	return out.Keys, nil
+}
+
+// LogModels calls GET /api/logs/filterdata for the distinct models in the log whose name contains query.
+func (c *Client) LogModels(ctx context.Context, query string) ([]string, error) {
+	q := url.Values{"dimensions": {"models"}, "q": {query}}
+	var out struct {
+		Models []string `json:"models"`
+	}
+	if err := c.do(ctx, http.MethodGet, withQuery("/api/logs/filterdata", q), nil, &out); err != nil {
+		return nil, err
+	}
+	return out.Models, nil
+}
+
 // GetLog calls GET /api/logs/{id}, which carries the row's error details. A missing row matches ErrNotFound.
 func (c *Client) GetLog(ctx context.Context, id string) (Log, error) {
 	if err := requireID("log id", id); err != nil {
