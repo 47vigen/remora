@@ -27,6 +27,7 @@ func TestSchemaRejects(t *testing.T) {
 		{"unknown nested field", "keys:\n  - {name: k, allow: ['*'], color: red}\n", "color"},
 		{"alias without members", "aliases:\n  - {name: a, kind: chat, members: []}\n", "aliases[0].members"},
 		{"negative context window", "aliases:\n  - {name: a, kind: chat, members: [p/m], context_window: -1}\n", "aliases[0].context_window"},
+		{"unknown strategy", "aliases:\n  - {name: a, kind: chat, members: [p/m], strategy: random}\n", "aliases[0].strategy"},
 		{"not a mapping", "- a\n- b\n", "remora.yaml"},
 	}
 	for _, tt := range tests {

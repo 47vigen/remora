@@ -385,6 +385,27 @@ func TestSync_NestedAliasFlattened(t *testing.T) {
 	}
 }
 
+func TestSync_RoundRobinAliasSpreadsTheFirstTry(t *testing.T) {
+	h := newHarness(t)
+	rr := chat("spread", "inner", "up-c/m1")
+	rr.Strategy = alias.StrategyRoundRobin
+	h.write(t, putAll([]store.Provider{custom("up-a"), custom("up-b"), custom("up-c")},
+		chat("inner", "up-a/m1", "up-b/m1"), rr))
+	h.sync(t)
+	rules := h.eng.RulesNamed(RuleName("spread"))
+	if len(rules) != 1 {
+		t.Fatalf("rules = %+v", rules)
+	}
+	r := rules[0]
+	chain := []bifrost.Route{{Provider: "up-a", Model: "m1"}, {Provider: "up-b", Model: "m1"}, {Provider: "up-c", Model: "m1"}}
+	if r.Target != chain[0] || !reflect.DeepEqual(r.Spread, chain[1:]) || !reflect.DeepEqual(r.Fallbacks, chain) {
+		t.Errorf("rule = %+v, want target %v spread %v fallbacks %v", r, chain[0], chain[1:], chain)
+	}
+	if inner := h.eng.RulesNamed(RuleName("inner")); len(inner) != 1 || len(inner[0].Spread) != 0 {
+		t.Errorf("inner rule = %+v, want ordered fallback", inner)
+	}
+}
+
 func TestSync_BadAliasSkipped(t *testing.T) {
 	h := newHarness(t)
 	h.base(t)

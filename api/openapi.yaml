@@ -1269,6 +1269,12 @@ components:
         context_window:
           type: integer
           minimum: 0
+        strategy:
+          type: string
+          enum: [round-robin]
+          description: >-
+            `round-robin` spreads requests over the compiled members at random with equal weight, falling back in
+            order; absent, the members are tried in order.
     AliasList:
       type: object
       required: [items, total]

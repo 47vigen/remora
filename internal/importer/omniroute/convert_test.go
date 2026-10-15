@@ -167,9 +167,14 @@ func TestConvertCombos(t *testing.T) {
 			"",
 		},
 		{
-			"strategy", `{"models":["p/m","q/m"],"strategy":"round-robin"}`,
+			"round-robin", `{"models":["p/m","q/m"],"strategy":"round-robin"}`,
+			config.FileAlias{Name: "x", Kind: "chat", Members: []string{"p/m", "q/m"}, Strategy: "round-robin"},
+			"",
+		},
+		{
+			"other strategy", `{"models":["p/m","q/m"],"strategy":"least-used"}`,
 			config.FileAlias{Name: "x", Kind: "chat", Members: []string{"p/m", "q/m"}},
-			"alias x: strategy round-robin becomes ordered fallback",
+			"alias x: strategy least-used becomes ordered fallback",
 		},
 		{
 			"provider id prefix on the model", `{"models":[{"model":"openai-compatible-chat-n1/m","providerId":"openai-compatible-chat-n1"}]}`,
@@ -202,7 +207,7 @@ func TestConvertCombos(t *testing.T) {
 	for _, a := range r.Doc.Aliases {
 		aliases[a.Name] = a
 	}
-	if a := aliases["fast"]; !slices.Equal(a.Members, []string{"openrouter/vendor/model-a", "oc/model-b", "openrouter/vendor/model-c", "base"}) || a.ContextWindow != 128000 {
+	if a := aliases["fast"]; !slices.Equal(a.Members, []string{"openrouter/vendor/model-a", "oc/model-b", "openrouter/vendor/model-c", "base"}) || a.ContextWindow != 128000 || a.Strategy != "round-robin" {
 		t.Fatalf("fast: %+v", a)
 	}
 	if aliases["embed"].Kind != "embeddings" {

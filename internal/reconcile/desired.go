@@ -253,7 +253,8 @@ func engineBaseURL(raw string) string {
 
 // aliasRule validates one alias and builds its routing rule: the compiled chain is validated whole, Filter drops
 // cooling members, and members on a reserved (subscription) provider are mapped by ToEngineTarget. The first target is the rule's target, the rest
-// are its fallbacks.
+// are its fallbacks. A round-robin alias spreads the first try over the whole chain and falls back through all of it,
+// since the engine keeps one fallback chain whichever target it picked.
 func (r *Reconciler) aliasRule(all map[string]alias.Alias, name string, isTarget, fallbackOK func(string) bool, reserved map[string]bool) (bifrost.RoutingRule, error) {
 	if err := alias.ValidName(name); err != nil {
 		return bifrost.RoutingRule{}, fmt.Errorf("%w: %w", ErrInvalid, err)
@@ -277,15 +278,20 @@ func (r *Reconciler) aliasRule(all map[string]alias.Alias, name string, isTarget
 		}
 	}
 	rule := bifrost.RoutingRule{Name: RuleName(name), CEL: RuleCEL(name)}
+	routes := make([]bifrost.Route, len(targets))
 	for i, t := range targets {
 		if reserved[t.Provider] {
 			t = ToEngineTarget(t)
 		}
-		if i == 0 {
-			rule.Target = bifrost.Route(t)
-			continue
-		}
-		rule.Fallbacks = append(rule.Fallbacks, bifrost.Route(t))
+		routes[i] = bifrost.Route(t)
+	}
+	rule.Target = routes[0]
+	switch {
+	case len(routes) == 1:
+	case all[name].Strategy == alias.StrategyRoundRobin:
+		rule.Spread, rule.Fallbacks = routes[1:], routes
+	default:
+		rule.Fallbacks = routes[1:]
 	}
 	return rule, nil
 }

@@ -58,6 +58,11 @@ func TestExportValidatesAgainstSchema(t *testing.T) {
 			t.Errorf("client key %s exported with value %q", k.Name, k.Value)
 		}
 	}
+	for _, a := range doc.Aliases {
+		if want := map[string]string{"inner": "round-robin"}[a.Name]; a.Strategy != want {
+			t.Errorf("alias %s exported with strategy %q, want %q", a.Name, a.Strategy, want)
+		}
+	}
 	if doc.Keys[2].Name != "off" || doc.Keys[2].Enabled == nil || *doc.Keys[2].Enabled {
 		t.Errorf("disabled key exported as %+v", doc.Keys[2])
 	}
@@ -213,6 +218,9 @@ func TestPlanDiff(t *testing.T) {
 		{"several alias fields", func(f *File) {
 			f.Aliases[1].Capabilities, f.Aliases[1].ContextWindow = nil, 0 // fast
 		}, true, []Change{{Op: "update", Kind: "alias", Name: "fast", Fields: []string{"capabilities", "context_window"}}}},
+		{"alias strategy", func(f *File) {
+			f.Aliases[1].Strategy = "round-robin" // fast
+		}, true, []Change{{Op: "update", Kind: "alias", Name: "fast", Fields: []string{"strategy"}}}},
 		{
 			"removed key with prune", func(f *File) { f.Keys = f.Keys[:2] }, true,
 			[]Change{{Op: "delete", Kind: "key", Name: "off", Fields: []string{}}},

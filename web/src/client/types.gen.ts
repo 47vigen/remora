@@ -158,6 +158,10 @@ export type Alias = {
      */
     capabilities: Array<string>;
     context_window?: number;
+    /**
+     * `round-robin` spreads requests over the compiled members at random with equal weight, falling back in order; absent, the members are tried in order.
+     */
+    strategy?: 'round-robin';
 };
 
 export type AliasList = {

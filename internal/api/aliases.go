@@ -25,6 +25,10 @@ func toGenAlias(a alias.Alias) gen.Alias {
 		cw := a.ContextWindow
 		out.ContextWindow = &cw
 	}
+	if a.Strategy != alias.StrategyFallback {
+		st := gen.AliasStrategy(a.Strategy)
+		out.Strategy = &st
+	}
 	return out
 }
 
@@ -55,6 +59,12 @@ func fromGenAlias(b *gen.Alias) (alias.Alias, error) {
 			return alias.Alias{}, badRequest("context_window cannot be negative")
 		}
 		a.ContextWindow = *b.ContextWindow
+	}
+	if b.Strategy != nil {
+		if !b.Strategy.Valid() {
+			return alias.Alias{}, badRequest(fmt.Sprintf("strategy must be round-robin or absent; got %q", *b.Strategy))
+		}
+		a.Strategy = alias.Strategy(*b.Strategy)
 	}
 	return a, nil
 }

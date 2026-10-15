@@ -79,7 +79,11 @@
           "type": ["array", "null"],
           "items": { "type": "string", "minLength": 1 }
         },
-        "context_window": { "type": "integer", "minimum": 0 }
+        "context_window": { "type": "integer", "minimum": 0 },
+        "strategy": {
+          "description": "`round-robin` spreads requests over the compiled members at random with equal weight, falling back in order; omit it to try the members in order.",
+          "enum": ["round-robin"]
+        }
       }
     },
     "key": {

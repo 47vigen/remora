@@ -46,6 +46,7 @@ type FileAlias struct {
 	Members       []string `yaml:"members"`
 	Capabilities  []string `yaml:"capabilities,omitempty"`
 	ContextWindow int      `yaml:"context_window,omitempty"`
+	Strategy      string   `yaml:"strategy,omitempty"` // "round-robin" spreads requests; omitted tries members in order
 }
 
 // FileKey is a client key. Value is "env:NAME"; when it is omitted on a new key, apply generates one and prints it
@@ -167,6 +168,9 @@ func (f File) Validate() error {
 		}
 		if a.ContextWindow < 0 {
 			fail("%s.context_window: must not be negative", at)
+		}
+		if !alias.Strategy(a.Strategy).Valid() {
+			fail("%s.strategy: %q is not round-robin; omit it for ordered fallback", at, a.Strategy)
 		}
 	}
 

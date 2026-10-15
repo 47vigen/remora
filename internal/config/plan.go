@@ -217,7 +217,7 @@ func providerKeys(p *Provider, cur Provider, wp FileProvider, sec Secrets, prune
 func toAlias(fa FileAlias) alias.Alias {
 	a := alias.Alias{
 		Name: fa.Name, Kind: alias.Kind(fa.Kind), Members: make([]alias.Member, len(fa.Members)),
-		Capabilities: slices.Clone(fa.Capabilities), ContextWindow: fa.ContextWindow,
+		Capabilities: slices.Clone(fa.Capabilities), ContextWindow: fa.ContextWindow, Strategy: alias.Strategy(fa.Strategy),
 	}
 	for i, m := range fa.Members {
 		a.Members[i] = alias.Member{Ref: m}
@@ -288,6 +288,9 @@ func (s *Service) aliasSteps(ctx context.Context, want File) ([]step, error) {
 		}
 		if cur.ContextWindow != a.ContextWindow {
 			fields = append(fields, "context_window")
+		}
+		if cur.Strategy != a.Strategy {
+			fields = append(fields, "strategy")
 		}
 		if len(fields) == 0 {
 			continue
