@@ -243,3 +243,52 @@ func TestHistogramDecode(t *testing.T) {
 		}
 	}
 }
+
+func TestSeriesHistogramsDecode(t *testing.T) {
+	t0 := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
+	paths := map[string]url.Values{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths[r.URL.Path] = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/logs/histogram/tokens":
+			_, _ = w.Write([]byte(`{"buckets":[{"timestamp":"2026-10-14T00:00:00Z","prompt_tokens":10,"completion_tokens":5,` +
+				`"total_tokens":15,"cached_read_tokens":0}],"bucket_size_seconds":3600}`))
+		case "/api/logs/histogram/cost":
+			_, _ = w.Write([]byte(`{"buckets":[{"timestamp":"2026-10-14T00:00:00Z","total_cost":0.25,"by_model":{}}],` +
+				`"bucket_size_seconds":3600,"models":[]}`))
+		case "/api/logs/histogram/latency":
+			_, _ = w.Write([]byte(`{"buckets":[{"timestamp":"2026-10-14T00:00:00Z","avg_latency":80,"p90_latency":110,` +
+				`"p95_latency":120,"p99_latency":150,"total_requests":3}],"bucket_size_seconds":3600}`))
+		case "/api/logs/rankings":
+			_, _ = w.Write([]byte(`{"rankings":[{"model":"gpt-x","provider":"fd-or","total_requests":4,"trend":{}}]}`))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL, "admin", "secret", srv.Client())
+	ctx := context.Background()
+	f := LogFilter{VirtualKeyIDs: []string{"vk1"}, Start: &t0}
+
+	tok, err := c.TokenHistogram(ctx, f)
+	if err != nil || len(tok) != 1 || !tok[0].Timestamp.Equal(t0) || tok[0].PromptTokens != 10 ||
+		tok[0].CompletionTokens != 5 || tok[0].TotalTokens != 15 {
+		t.Fatalf("tokens = %+v, %v", tok, err)
+	}
+	cost, err := c.CostHistogram(ctx, f)
+	if err != nil || len(cost) != 1 || cost[0].TotalCost != 0.25 {
+		t.Fatalf("cost = %+v, %v", cost, err)
+	}
+	lat, err := c.LatencyHistogram(ctx, f)
+	if err != nil || len(lat) != 1 || lat[0].P95Latency != 120 || lat[0].TotalRequests != 3 {
+		t.Fatalf("latency = %+v, %v", lat, err)
+	}
+	usage, err := c.ModelUsage(ctx, f)
+	if err != nil || len(usage) != 1 || usage[0] != (ModelUsage{Provider: "fd-or", Model: "gpt-x", TotalRequests: 4}) {
+		t.Fatalf("model usage = %+v, %v", usage, err)
+	}
+	for _, p := range []string{"/api/logs/histogram/tokens", "/api/logs/histogram/cost", "/api/logs/histogram/latency", "/api/logs/rankings"} {
+		if q, ok := paths[p]; !ok || q.Get("virtual_key_ids") != "vk1" || q.Get("start_time") == "" {
+			t.Errorf("%s query = %v (called %v)", p, q, ok)
+		}
+	}
+}

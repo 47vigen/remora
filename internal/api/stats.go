@@ -87,14 +87,10 @@ func (s *Server) stats(ctx context.Context, f bifrost.LogFilter, groupBy string)
 	if out.Summary, err = s.summary(ctx, f); err != nil {
 		return gen.Stats{}, err
 	}
-	buckets, err := s.d.Logs.Histogram(ctx, f)
-	if err != nil {
+	if out.Series, err = s.series(ctx, f); err != nil {
 		return gen.Stats{}, err
 	}
-	for _, b := range buckets {
-		out.Series = append(out.Series, gen.StatsPoint{Time: b.Timestamp, Requests: int(b.Count), Errors: int(b.Error)})
-	}
-	members, err := s.groups(ctx, groupBy)
+	members, err := s.groups(ctx, f, groupBy)
 	if err != nil {
 		return gen.Stats{}, err
 	}
@@ -124,6 +120,72 @@ func (s *Server) stats(ctx context.Context, f bifrost.LogFilter, groupBy string)
 	return out, nil
 }
 
+// series is the time buckets over f's range: the engine's request, token, cost and latency histograms merged by
+// bucket start, plus each bucket's median read the way the summary's is. The p95 comes from the engine's latency
+// histogram over the successful attempts, the same set the median ranks.
+func (s *Server) series(ctx context.Context, f bifrost.LogFilter) ([]gen.StatsPoint, error) {
+	var (
+		counts []bifrost.HistogramBucket
+		tokens []bifrost.TokenBucket
+		costs  []bifrost.CostBucket
+		lat    []bifrost.LatencyBucket
+	)
+	lf := f
+	lf.Status = []string{"success"}
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() (err error) { counts, err = s.d.Logs.Histogram(gctx, f); return err })
+	g.Go(func() (err error) { tokens, err = s.d.Logs.TokenHistogram(gctx, f); return err })
+	g.Go(func() (err error) { costs, err = s.d.Logs.CostHistogram(gctx, f); return err })
+	g.Go(func() (err error) { lat, err = s.d.Logs.LatencyHistogram(gctx, lf); return err })
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	out := make([]gen.StatsPoint, len(counts))
+	at := make(map[int64]int, len(counts))
+	for i, b := range counts {
+		at[b.Timestamp.Unix()] = i
+		out[i] = gen.StatsPoint{Time: b.Timestamp, Requests: int(b.Count), Errors: int(b.Error)}
+	}
+	for _, b := range tokens {
+		if i, ok := at[b.Timestamp.Unix()]; ok {
+			out[i].PromptTokens, out[i].CompletionTokens = int(b.PromptTokens), int(b.CompletionTokens)
+			out[i].TotalTokens = int(b.TotalTokens)
+		}
+	}
+	for _, b := range costs {
+		if i, ok := at[b.Timestamp.Unix()]; ok {
+			out[i].CostUsd = finite(b.TotalCost)
+		}
+	}
+	for _, b := range lat {
+		if i, ok := at[b.Timestamp.Unix()]; ok && b.TotalRequests > 0 {
+			out[i].LatencyP95Ms = new(finite(b.P95Latency))
+		}
+	}
+	// The engine has no median histogram, so each bucket that saw a success ranks its own window.
+	g, gctx = errgroup.WithContext(ctx)
+	g.SetLimit(groupReads)
+	for i, b := range counts {
+		if b.Success == 0 {
+			continue
+		}
+		start, end := *f.Start, *f.End
+		if b.Timestamp.After(start) {
+			start = b.Timestamp
+		}
+		if i+1 < len(counts) && counts[i+1].Timestamp.Before(end) {
+			end = counts[i+1].Timestamp.Add(-time.Nanosecond)
+		}
+		bf := f
+		bf.Start, bf.End = &start, &end
+		g.Go(func() (err error) { out[i].LatencyP50Ms, err = percentile(gctx, s.d.Logs, bf, 0.5); return err })
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // narrowTo sets *field to [id], or keeps it when it already holds id; a base filter on another id cannot match.
 func narrowTo(field *[]string, id string) bool {
 	if len(*field) > 0 {
@@ -135,8 +197,8 @@ func narrowTo(field *[]string, id string) bool {
 
 // groups lists the members of a group_by set from the store: client keys by id, aliases and providers by name
 // (configured providers, then the subscription providers that have accounts). Members without a front-door id are
-// left out.
-func (s *Server) groups(ctx context.Context, groupBy string) ([]group, error) {
+// left out. Models come from the log instead: the ones that served what f matches, named "<provider>/<model>".
+func (s *Server) groups(ctx context.Context, f bifrost.LogFilter, groupBy string) ([]group, error) {
 	var out []group
 	switch gen.GetStatsParamsGroupBy(groupBy) {
 	case gen.GetStatsParamsGroupByKey:
@@ -198,9 +260,22 @@ func (s *Server) groups(ctx context.Context, groupBy string) ([]group, error) {
 				return true
 			}})
 		}
+	case gen.GetStatsParamsGroupByModel:
+		used, err := s.d.Logs.ModelUsage(ctx, f)
+		if err != nil {
+			return nil, err
+		}
+		for _, u := range used {
+			t := s.d.Names.Target(ctx, u.Provider, u.Model)
+			// The pair was read under the base filter, so it always matches it.
+			out = append(out, group{t.Provider + "/" + t.Model, func(f *bifrost.LogFilter) bool {
+				f.Providers, f.Models = []string{u.Provider}, []string{u.Model}
+				return true
+			}})
+		}
 	case gen.GetStatsParamsGroupByNone, "":
 	default:
-		return nil, badRequest("group_by must be none, key, alias or provider")
+		return nil, badRequest("group_by must be none, key, alias, provider or model")
 	}
 	return out, nil
 }

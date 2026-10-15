@@ -295,10 +295,28 @@ export type StatsSummary = {
     cost_usd: number;
 };
 
+/**
+ * One time bucket of the series. The bucket size follows the range: a minute under 2 hours, 10 minutes under 24 hours, an hour under 3 days, then 8 hours, a day, 3 days, a week and 30 days. Requests and errors count every attempt of a fallback chain; tokens and cost cover every finished attempt.
+ */
 export type StatsPoint = {
+    /**
+     * The start of the bucket.
+     */
     time: string;
     requests: number;
     errors: number;
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    cost_usd: number;
+    /**
+     * Over the successful attempts in the bucket, by nearest rank. Null when there are none.
+     */
+    latency_p50_ms?: number | null;
+    /**
+     * Over the successful attempts in the bucket, interpolated. Null when there are none.
+     */
+    latency_p95_ms?: number | null;
 };
 
 export type StatsGroup = {
@@ -1673,9 +1691,9 @@ export type GetStatsData = {
          */
         to?: string;
         /**
-         * With a value other than `none`, `groups` holds one summary per key, alias or provider.
+         * With a value other than `none`, `groups` holds one summary per key, alias, provider or model. A model group is named `<provider>/<model>` and lists the 100 busiest models of the range.
          */
-        group_by?: 'none' | 'key' | 'alias' | 'provider';
+        group_by?: 'none' | 'key' | 'alias' | 'provider' | 'model';
         /**
          * A client key id.
          */
