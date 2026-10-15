@@ -86,7 +86,11 @@ func newFakeRemora(t *testing.T) (*fakeRemora, *httptest.Server) {
 		p := r.URL.Query().Get("provider")
 		list := gen.AccountList{Items: []gen.Account{}}
 		if models, ok := f.served[p]; ok {
-			list.Items = append(list.Items, gen.Account{Provider: p, Status: "active", Models: models})
+			refs := []string{}
+			for _, m := range models { // the server answers user references, "<provider>/<model>"
+				refs = append(refs, p+"/"+m)
+			}
+			list.Items = append(list.Items, gen.Account{Provider: p, Status: "active", Models: refs})
 		}
 		list.Total = len(list.Items)
 		w.Header().Set("Content-Type", "application/json")

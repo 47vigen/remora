@@ -127,9 +127,9 @@ func warnUnserved(ctx context.Context, w io.Writer, t importTarget, res omnirout
 	}
 	for _, a := range res.Doc.Aliases {
 		for _, m := range a.Members {
-			p, model, _ := strings.Cut(m, "/")
+			p, model, ok := strings.Cut(m, "/")
 			base, _, _ := strings.Cut(model, "(") // a thinking budget suffix: model(8192)
-			if len(served[p]) == 0 || slices.Contains(served[p], base) {
+			if !ok || len(served[p]) == 0 || slices.Contains(served[p], base) {
 				continue
 			}
 			hint := ""
@@ -194,7 +194,9 @@ func (t apiTarget) Models(ctx context.Context, provider string) ([]string, error
 	}
 	var models []string
 	for _, a := range resp.JSON200.Items {
-		models = append(models, a.Models...)
+		for _, m := range a.Models {
+			models = append(models, strings.TrimPrefix(m, provider+"/"))
+		}
 	}
 	return models, nil
 }
