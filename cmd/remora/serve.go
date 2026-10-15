@@ -169,7 +169,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	mux := http.NewServeMux()
 	api.RegisterHealthz(mux, sup)
 	mgmt := api.New(api.Deps{
-		Providers: api.NewProviders(st, rec),
+		Providers: api.NewProviders(st, rec, fd, soniox.NewClient(cfg.SonioxBaseURL, &http.Client{})),
 		Accounts:  api.NewAccounts(accts),
 		Aliases:   api.NewAliases(st, rec, cooler.Snapshot),
 		Keys:      api.NewKeys(st, rec),
