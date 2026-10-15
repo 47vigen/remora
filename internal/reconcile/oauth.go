@@ -17,8 +17,9 @@ const oauthRulePriorityBase = 100
 const oauthKeyID = "remora-oauth-key"
 
 // oauthAllowed are the request types the front door may send to the OAuth engine. /v1/messages needs none of its
-// own: the front door turns it into a Responses request.
-var oauthAllowed = []string{"list_models", "chat_completion", "chat_completion_stream", "responses", "responses_stream"}
+// own: the front door turns it into a Responses request. list_models is left out on purpose: with it, the front door
+// gates every model against the list it fetched, which goes stale as accounts are added, and refuses the rest.
+var oauthAllowed = []string{"chat_completion", "chat_completion_stream", "responses", "responses_stream"}
 
 // OAuthProvider is the OAuth engine as the front door's internal custom provider. engineURL has no /v1: the front
 // door appends /v1/... itself. The engine listens on loopback, so private networks are allowed.
