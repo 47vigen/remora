@@ -155,13 +155,14 @@ func (p *Proxy) runWSHooks(w http.ResponseWriter, r *http.Request, upResp *http.
 
 // relayClientFrames copies the client's messages to the front door until either side fails, answering a denied
 // message itself instead of forwarding it.
-func relayClientFrames(ctx context.Context, client, up *websocket.Conn, check func(model string) *apiError) error {
+func relayClientFrames(ctx context.Context, client, up *websocket.Conn, check func(model string) (bool, *apiError)) error {
 	for {
 		typ, data, err := client.Read(ctx)
 		if err != nil {
 			return err
 		}
-		if e := checkClientFrame(data, check); e != nil {
+		data, e := checkClientFrame(data, check)
+		if e != nil {
 			if err := client.Write(ctx, websocket.MessageText, e.wsEvent()); err != nil {
 				return err
 			}
@@ -192,40 +193,48 @@ func relayServerFrames(ctx context.Context, up, client *websocket.Conn) error {
 // checkClientFrame returns nil when data may reach the front door, or the error to answer instead. A message
 // passes unchecked only when it is a JSON object with exactly one "type" key, spelled exactly, naming another
 // event; anything that could be read as a response.create (the engine's decoder matches keys case-insensitively)
-// is checked like an HTTP request body: one "model", no "fallbacks", and the model allowed for the key.
-func checkClientFrame(data []byte, check func(model string) *apiError) *apiError {
+// is checked like an HTTP request body: one "model", no "fallbacks", and the model allowed for the key. A frame for
+// an alias goes on with alias.EngineModel in its "model".
+func checkClientFrame(data []byte, check func(model string) (bool, *apiError)) ([]byte, *apiError) {
 	if !mayBeCreate(data) {
-		return nil
+		return data, nil
 	}
 	model, err := jsonModel(data)
 	switch {
 	case errors.Is(err, ErrClientFallbacks):
-		return &errClientFallbacks
+		return nil, &errClientFallbacks
 	case err != nil:
-		return &errModelRequired
+		return nil, &errModelRequired
 	}
-	return check(model)
+	isAlias, e := check(model)
+	if e != nil || !isAlias {
+		return data, e
+	}
+	out, err := jsonWithModel(data, alias.EngineModel(model))
+	if err != nil {
+		return nil, &errModelRequired
+	}
+	return out, nil
 }
 
 // wsModelCheck checks the model of one response.create frame against the client key as it is now, not as it was
 // at the handshake: a key disabled, deleted or narrowed while the socket is open applies to its next frame.
-func (p *Proxy) wsModelCheck(ctx context.Context, value string) func(model string) *apiError {
-	return func(model string) *apiError {
+func (p *Proxy) wsModelCheck(ctx context.Context, value string) func(model string) (bool, *apiError) {
+	return func(model string) (bool, *apiError) {
 		key, err := p.store.ClientKeyByValue(ctx, value)
 		switch {
 		case errors.Is(err, store.ErrNotFound):
-			return &errInvalidKey
+			return false, &errInvalidKey
 		case err != nil:
 			p.log.ErrorContext(ctx, "proxy: look up client key", slog.Any("err", err))
-			return &errInternal
+			return false, &errInternal
 		case !key.Enabled:
-			return &errInvalidKey
+			return false, &errInvalidKey
 		case !Allowed(key.Allow, model):
 			e := errModelNotAllowed(model)
-			return &e
+			return false, &e
 		}
-		_, e := p.checkAliasKind(ctx, model, alias.KindChat, "/v1/responses")
-		return e
+		return p.checkAliasKind(ctx, model, alias.KindChat, "/v1/responses")
 	}
 }
 

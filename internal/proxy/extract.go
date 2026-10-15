@@ -172,3 +172,79 @@ func multipartModel(raw []byte, boundary string) (string, error) {
 	}
 	return model, nil
 }
+
+// withModel returns body with its model replaced by model: the value of the top-level JSON "model", or the content of
+// the multipart "model" field. Every other byte of a JSON body stays as it was. body must have passed extractModel.
+func withModel(body []byte, contentType, model string) ([]byte, error) {
+	mediaType, params, _ := mime.ParseMediaType(contentType)
+	if mediaType == "multipart/form-data" {
+		return multipartWithModel(body, params["boundary"], model)
+	}
+	return jsonWithModel(body, model)
+}
+
+func jsonWithModel(raw []byte, model string) ([]byte, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	if _, err := dec.Token(); err != nil {
+		return nil, fmt.Errorf("%w: body is not a JSON object", ErrNoModel)
+	}
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil, fmt.Errorf("%w: invalid JSON: %w", ErrNoModel, err)
+		}
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			return nil, fmt.Errorf("%w: invalid JSON: %w", ErrNoModel, err)
+		}
+		if tok != modelField {
+			continue
+		}
+		// The decoder stops right after the value, and value holds exactly its bytes.
+		end := int(dec.InputOffset())
+		v, err := json.Marshal(model)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]byte, 0, len(raw)-len(value)+len(v))
+		out = append(out, raw[:end-len(value)]...)
+		out = append(out, v...)
+		return append(out, raw[end:]...), nil
+	}
+	return nil, ErrNoModel
+}
+
+// multipartWithModel writes the parts again under the same boundary, so the request's Content-Type still fits.
+func multipartWithModel(raw []byte, boundary, model string) ([]byte, error) {
+	mr := multipart.NewReader(bytes.NewReader(raw), boundary)
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	if err := mw.SetBoundary(boundary); err != nil {
+		return nil, fmt.Errorf("%w: invalid multipart boundary: %w", ErrNoModel, err)
+	}
+	for {
+		part, err := mr.NextRawPart()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%w: invalid multipart body: %w", ErrNoModel, err)
+		}
+		w, err := mw.CreatePart(part.Header)
+		if err != nil {
+			return nil, err
+		}
+		if part.FormName() == modelField && part.FileName() == "" {
+			_, err = io.WriteString(w, model)
+		} else {
+			_, err = io.Copy(w, part)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%w: invalid multipart body: %w", ErrNoModel, err)
+		}
+	}
+	if err := mw.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}

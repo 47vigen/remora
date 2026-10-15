@@ -109,6 +109,19 @@ func TestNestedAlias(t *testing.T) {
 	}
 }
 
+// TestAliasNamedLikeProviderModel: "openai" is one of the front door's own providers, yet an alias of that shape
+// reaches its member instead of being read as a direct provider model.
+func TestAliasNamedLikeProviderModel(t *testing.T) {
+	resetFakes(t)
+	rep := chat(t, chatBody("openai/fast", false))
+	wantStatus(t, rep, http.StatusOK)
+	wantHeader(t, rep, "X-Remora-Alias", "openai/fast")
+	wantHeader(t, rep, "X-Remora-Served-By", "up-b/m1")
+	if n := len(received(t, "b", control.RouteOpenAIChat)); n != 1 {
+		t.Errorf("up-b got %d chat requests, want 1", n)
+	}
+}
+
 // TestReconcileAfterEngineRestart kills the front door inside the container; the supervisor restarts it, and the
 // aliases and keys work again without another apply.
 func TestReconcileAfterEngineRestart(t *testing.T) {

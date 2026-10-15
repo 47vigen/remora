@@ -27,8 +27,9 @@ func VirtualKeyName(clientKeyID string) string { return vkPrefix + clientKeyID }
 
 // RuleCEL matches a request for the alias on every surface remora exposes: a bare model name parses to provider
 // "" on the native routes and Anthropic, "openai" on the Responses WebSocket and "typesafe" on System One.
-func RuleCEL(alias string) string {
-	return "model == " + strconv.Quote(alias) + ` && provider in ["", "openai", "typesafe"]`
+// The engine sees alias.EngineModel(name), never the alias name itself.
+func RuleCEL(name string) string {
+	return "model == " + strconv.Quote(alias.EngineModel(name)) + ` && provider in ["", "openai", "typesafe"]`
 }
 
 // isOAuthRule reports a routing rule the OAuth engine integration owns (plan 03); it is never deleted.
@@ -166,10 +167,6 @@ func (r *Reconciler) desired(ctx context.Context, tx *store.Tx, strict bool) (*d
 		d.Rules = append(d.Rules, desiredRule{Object: internalRuleObject(ir.Name), Rule: ir})
 	}
 
-	isProvider := func(name string) bool {
-		_, inStore := byName[name]
-		return inStore || internal[name] || reserved[name] || name == bifrost.OAuthProvider || bifrost.IsStandardProvider(name)
-	}
 	isTarget := func(name string) bool {
 		_, inStore := byName[name]
 		return inStore || internal[name] || reserved[name]
@@ -187,7 +184,7 @@ func (r *Reconciler) desired(ctx context.Context, tx *store.Tx, strict bool) (*d
 	}
 	slices.Sort(d.Aliases)
 	for _, name := range d.Aliases {
-		rule, err := r.aliasRule(aliases, name, isProvider, isTarget, fallbackOK, reserved)
+		rule, err := r.aliasRule(aliases, name, isTarget, fallbackOK, reserved)
 		if err != nil {
 			if strict {
 				return nil, err
@@ -257,12 +254,9 @@ func engineBaseURL(raw string) string {
 // aliasRule validates one alias and builds its routing rule: the compiled chain is validated whole, Filter drops
 // cooling members, and members on a reserved (subscription) provider are mapped by ToEngineTarget. The first target is the rule's target, the rest
 // are its fallbacks.
-func (r *Reconciler) aliasRule(all map[string]alias.Alias, name string, isProvider, isTarget, fallbackOK func(string) bool, reserved map[string]bool) (bifrost.RoutingRule, error) {
+func (r *Reconciler) aliasRule(all map[string]alias.Alias, name string, isTarget, fallbackOK func(string) bool, reserved map[string]bool) (bifrost.RoutingRule, error) {
 	if err := alias.ValidName(name); err != nil {
 		return bifrost.RoutingRule{}, fmt.Errorf("%w: %w", ErrInvalid, err)
-	}
-	if prefix, _, ok := strings.Cut(name, "/"); ok && isProvider(prefix) {
-		return bifrost.RoutingRule{}, invalid("alias %q: %q is a provider name, so the engine would read the alias as a provider model", name, prefix)
 	}
 	targets, err := alias.Compile(all, name, r.MaxDepth)
 	if err != nil {

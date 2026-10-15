@@ -248,10 +248,17 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt route, sh sha
 		return
 	}
 	info.isAlias = isAlias
+	body := raw
+	if isAlias {
+		if body, err = withModel(raw, r.Header.Get("Content-Type"), alias.EngineModel(model)); err != nil {
+			errModelRequired.write(w, sh)
+			return
+		}
+	}
 
 	out := r.WithContext(context.WithValue(ctx, reqInfoKey{}, info))
-	out.Body = io.NopCloser(bytes.NewReader(raw))
-	out.ContentLength = int64(len(raw))
+	out.Body = io.NopCloser(bytes.NewReader(body))
+	out.ContentLength = int64(len(body))
 	out.TransferEncoding = nil
 	p.rp.ServeHTTP(w, out)
 }

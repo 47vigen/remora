@@ -427,10 +427,19 @@ func TestProxy_StripsClientEngineHeaders(t *testing.T) {
 func TestProxy_BodyUnchanged(t *testing.T) {
 	f := newFixture(t)
 	t.Run("persian json", func(t *testing.T) {
-		body := []byte("{\"model\":\"fast\",\"messages\":[{\"role\":\"user\",\"content\":\"\u0645\u06cc\u200c\u0634\u0648\u062f \"}],\"x\":1}")
+		body := []byte("{\"model\":\"up-a/m1\",\"messages\":[{\"role\":\"user\",\"content\":\"\u0645\u06cc\u200c\u0634\u0648\u062f \"}],\"x\":1}")
 		resp := f.do(t, http.MethodPost, "/v1/chat/completions", keyFull, "application/json", body, nil)
 		if resp.StatusCode != http.StatusOK || !bytes.Equal(f.seen().body, body) {
 			t.Fatalf("status %d, upstream body %q, want %q", resp.StatusCode, f.seen().body, body)
+		}
+	})
+	t.Run("persian json for an alias", func(t *testing.T) {
+		// Only the model changes, to the name the front door routes on; every other byte stays.
+		body := []byte("{ \"model\" : \"memory/fast\",\"messages\":[{\"role\":\"user\",\"content\":\"\u0645\u06cc\u200c\u0634\u0648\u062f \"}],\"x\":1}")
+		want := []byte("{ \"model\" : \"remora-alias/memory/fast\",\"messages\":[{\"role\":\"user\",\"content\":\"\u0645\u06cc\u200c\u0634\u0648\u062f \"}],\"x\":1}")
+		resp := f.do(t, http.MethodPost, "/v1/chat/completions", keyFull, "application/json", body, nil)
+		if resp.StatusCode != http.StatusOK || !bytes.Equal(f.seen().body, want) {
+			t.Fatalf("status %d, upstream body %q, want %q", resp.StatusCode, f.seen().body, want)
 		}
 	})
 	t.Run("multipart", func(t *testing.T) {
