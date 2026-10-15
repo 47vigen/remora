@@ -35,7 +35,23 @@ func newWorld() *world {
 	return &world{providers: map[string]Provider{}, aliases: map[string]alias.Alias{}, keys: map[string]Key{}, values: map[string]string{}}
 }
 
-func (w *world) service() *Service { return NewService(fakeProviders{w}, fakeAliases{w}, fakeKeys{w}) }
+func (w *world) service() *Service {
+	return NewService(fakeProviders{w}, fakeAliases{w}, fakeKeys{w}, w.batch)
+}
+
+// batch restores the providers, aliases and keys when fn fails; the log keeps every write made.
+func (w *world) batch(ctx context.Context, fn func(context.Context) error) error {
+	w.mu.Lock()
+	p, a, k, v := maps.Clone(w.providers), maps.Clone(w.aliases), maps.Clone(w.keys), maps.Clone(w.values)
+	w.mu.Unlock()
+	err := fn(ctx)
+	if err != nil {
+		w.mu.Lock()
+		w.providers, w.aliases, w.keys, w.values = p, a, k, v
+		w.mu.Unlock()
+	}
+	return err
+}
 
 // write logs a write and reports the injected failure. The caller holds w.mu.
 func (w *world) write(entry string) error {

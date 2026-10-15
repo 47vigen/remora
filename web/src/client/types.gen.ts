@@ -13,8 +13,8 @@ export type ErrorDetail = {
     type: string;
     code: string;
     /**
-     * Only on a failed `applyConfig`: the changes made before the failure, each generated client key value
-     * included once, so a committed key is never left without its value.
+     * Not sent: a failed `applyConfig` changes nothing. Earlier versions applied change by change and listed
+     * here the changes made before the failure, each generated client key value included once.
      *
      */
     applied?: Array<Change>;

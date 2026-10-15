@@ -151,24 +151,21 @@ func TestConfigEndpoints(t *testing.T) {
 	}
 }
 
-func TestApplyConfigReportsPartialFailure(t *testing.T) {
+func TestApplyConfigReportsFailedChange(t *testing.T) {
 	env := newTestEnv(t)
 	env.aliases.putErr = fmt.Errorf("alias: %w: nowhere", alias.ErrUnknownMember)
 	doc := "providers:\n  - {name: p, kind: soniox, keys: [{name: main, value: env:P_KEY}]}\n" +
 		"aliases:\n  - {name: a, kind: chat, members: [p/m]}\n"
 	code, body := env.do(t, env.client, http.MethodPost, "/api/config/apply", configBody(t, doc, map[string]string{"P_KEY": "sk-p"}, nil))
-	if code != http.StatusBadRequest || !strings.Contains(string(body), "create alias a") || !strings.Contains(string(body), "+ provider p") {
-		t.Errorf("apply = %d %s; want 400 naming the failed change and the applied one", code, body)
-	}
-	if _, err := env.providers.Get(context.Background(), "p"); err != nil {
-		t.Error("the change before the failure was not kept")
+	if code != http.StatusBadRequest || !strings.Contains(string(body), "create alias a") || !strings.Contains(string(body), "Nothing was changed.") {
+		t.Errorf("apply = %d %s; want 400 naming the failed change", code, body)
 	}
 	var e gen.Error
 	if err := json.Unmarshal(body, &e); err != nil {
 		t.Fatal(err)
 	}
-	if e.Error.Applied == nil || len(*e.Error.Applied) != 1 || (*e.Error.Applied)[0].Name != "p" {
-		t.Errorf("applied = %+v; want the provider created before the failure", e.Error.Applied)
+	if e.Error.Applied != nil {
+		t.Errorf("applied = %+v; want none", e.Error.Applied)
 	}
 }
 

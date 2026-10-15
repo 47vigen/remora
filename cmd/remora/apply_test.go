@@ -61,7 +61,7 @@ func newRemora(t *testing.T) *remoraHarness {
 	rec := &reconcile.Reconciler{Store: st, Engine: reconciletest.New()}
 	h := &remoraHarness{token: token, aliases: api.NewAliases(st, rec, nil), keys: api.NewKeys(st, rec)}
 	providers := api.NewProviders(st, rec, nil, nil)
-	mgmt := api.New(api.Deps{Providers: providers, Aliases: h.aliases, Keys: h.keys, Auth: authSvc}).Handler()
+	mgmt := api.New(api.Deps{Providers: providers, Aliases: h.aliases, Keys: h.keys, Batch: rec.Batch, Auth: authSvc}).Handler()
 	h.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/config/plan" {
 			b, _ := io.ReadAll(r.Body)

@@ -54,7 +54,11 @@ func (a systemAdapter) Version() (string, []EngineVersion) {
 }
 
 // read runs fn in a store transaction that only reads. The store offers its repositories on write transactions.
+// Inside reconcile.Reconciler.Batch it reads the batch's transaction, so the batch sees its own writes.
 func read(ctx context.Context, st *store.Store, fn func(tx *store.Tx) error) error {
+	if tx, ok := store.TxFrom(ctx); ok {
+		return fn(tx)
+	}
 	return st.Write(ctx, fn)
 }
 
@@ -280,8 +284,16 @@ type aliasesAdapter struct {
 
 func (a aliasesAdapter) maxDepth() int { return a.rec.MaxDepth } // 0 = alias.DefaultMaxDepth
 
+// all reads every alias, from the batch's transaction inside reconcile.Reconciler.Batch.
+func (a aliasesAdapter) all(ctx context.Context) (map[string]alias.Alias, error) {
+	if tx, ok := store.TxFrom(ctx); ok {
+		return tx.Aliases(ctx)
+	}
+	return a.st.Aliases(ctx)
+}
+
 func (a aliasesAdapter) List(ctx context.Context) ([]alias.Alias, error) {
-	all, err := a.st.Aliases(ctx)
+	all, err := a.all(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -289,7 +301,7 @@ func (a aliasesAdapter) List(ctx context.Context) ([]alias.Alias, error) {
 }
 
 func (a aliasesAdapter) Get(ctx context.Context, name string) (alias.Alias, error) {
-	all, err := a.st.Aliases(ctx)
+	all, err := a.all(ctx)
 	if err != nil {
 		return alias.Alias{}, err
 	}
@@ -333,7 +345,7 @@ func (a aliasesAdapter) Delete(ctx context.Context, name string) error {
 }
 
 func (a aliasesAdapter) Chain(ctx context.Context, name string) ([]alias.Target, error) {
-	all, err := a.st.Aliases(ctx)
+	all, err := a.all(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -347,7 +359,7 @@ func (a aliasesAdapter) Compile(ctx context.Context, al alias.Alias) ([]alias.Ta
 	if err := alias.ValidName(al.Name); err != nil {
 		return nil, err
 	}
-	all, err := a.st.Aliases(ctx)
+	all, err := a.all(ctx)
 	if err != nil {
 		return nil, err
 	}

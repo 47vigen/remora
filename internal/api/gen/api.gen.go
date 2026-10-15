@@ -516,8 +516,8 @@ type Error struct {
 
 // ErrorDetail defines model for ErrorDetail.
 type ErrorDetail struct {
-	// Applied Only on a failed `applyConfig`: the changes made before the failure, each generated client key value
-	// included once, so a committed key is never left without its value.
+	// Applied Not sent: a failed `applyConfig` changes nothing. Earlier versions applied change by change and listed
+	// here the changes made before the failure, each generated client key value included once.
 	Applied *[]Change `json:"applied,omitempty"`
 	Code    string    `json:"code"`
 	Message string    `json:"message"`

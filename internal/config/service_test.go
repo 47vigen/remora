@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/47vigen/remora/internal/alias"
 )
 
 // exportDoc exports w and parses the marshalled document, as `remora export` followed by `remora apply` does.
@@ -289,18 +291,22 @@ func TestApplyOrder(t *testing.T) {
 	}
 }
 
-func TestApplyStopsOnError(t *testing.T) {
+func TestApplyFailureChangesNothing(t *testing.T) {
 	w := newWorld()
-	w.failOn = "create alias a"
-	applied, err := w.service().Apply(context.Background(), mustParse(t, applyOrderDoc), Secrets{"P_KEY": "sk-p", "K_KEY": "sk-k"}, true)
-	if !errors.Is(err, errFake) {
-		t.Fatalf("err = %v, want the injected failure", err)
+	doc := mustParse(t, strings.Replace(applyOrderDoc, "members: [a]", "members: [nowhere]", 1))
+	applied, err := w.service().Apply(context.Background(), doc, Secrets{"P_KEY": "sk-p", "K_KEY": "sk-k"}, true)
+	var ae *ApplyError
+	if !errors.As(err, &ae) || !errors.Is(err, alias.ErrUnknownMember) || ae.Change.Name != "b" {
+		t.Fatalf("err = %v, want an *ApplyError for alias b", err)
 	}
-	if len(applied) != 1 || applied[0].Kind != "provider" || applied[0].Name != "p" {
-		t.Errorf("applied = %+v, want only provider p", applied)
+	if len(applied) != 0 {
+		t.Errorf("applied = %+v, want none", applied)
 	}
-	if got := w.calls(); !reflect.DeepEqual(got, []string{"create provider p"}) {
+	if got := w.calls(); !reflect.DeepEqual(got, []string{"create provider p", "create alias a"}) {
 		t.Errorf("calls = %v", got)
+	}
+	if len(w.providers) != 0 || len(w.aliases) != 0 {
+		t.Errorf("providers %v, aliases %v; want the writes before the failure rolled back", w.providers, w.aliases)
 	}
 }
 
@@ -342,5 +348,15 @@ func TestApplyProviderKeysWithoutPrune(t *testing.T) {
 	want := []ProviderKey{{Name: "main", Value: "sk-new-main"}, {Name: "backup", Value: "sk-up-stored-backup"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("up-a keys = %+v, want %+v (an unlisted key kept without prune)", got, want)
+	}
+}
+
+func TestApplyNothingSkipsTheBatch(t *testing.T) {
+	w := newWorld()
+	s := NewService(fakeProviders{w}, fakeAliases{w}, fakeKeys{w}, func(context.Context, func(context.Context) error) error {
+		return errors.New("engine unavailable")
+	})
+	if applied, err := s.Apply(context.Background(), File{}, nil, true); err != nil || len(applied) != 0 {
+		t.Fatalf("applied %v, err %v; want a no-op apply to succeed without the engine", applied, err)
 	}
 }

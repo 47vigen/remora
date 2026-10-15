@@ -133,8 +133,11 @@ func (r *Reconciler) sync(ctx context.Context, force map[string]bool) error {
 // Change runs fn and a strict pass in one store.Write, so a change the engine refuses is not committed. When the pass
 // fails after it changed the engine, a recovery Sync pushes the committed state again, forcing every object the
 // failed pass touched, because the rolled-back MAC still matches the committed state while the engine holds the
-// newer write. The first error is returned.
+// newer write. The first error is returned. Inside Batch, fn runs in the batch's transaction and its pass.
 func (r *Reconciler) Change(ctx context.Context, fn func(ctx context.Context, tx *store.Tx) error) error {
+	if tx, ok := store.TxFrom(ctx); ok {
+		return fn(ctx, tx)
+	}
 	touched := map[string]bool{}
 	err := r.Store.Write(ctx, func(tx *store.Tx) error {
 		if err := fn(ctx, tx); err != nil {
@@ -153,6 +156,12 @@ func (r *Reconciler) Change(ctx context.Context, fn func(ctx context.Context, tx
 		}
 	}
 	return fmt.Errorf("reconcile: change: %w", err)
+}
+
+// Batch runs fn as one Change: every Change made with the context fn receives joins its store transaction and its
+// one strict pass, so they are committed together or not at all.
+func (r *Reconciler) Batch(ctx context.Context, fn func(ctx context.Context) error) error {
+	return r.Change(ctx, func(ctx context.Context, tx *store.Tx) error { return fn(store.WithTx(ctx, tx)) })
 }
 
 // SyncAll runs every Also function and then one Sync pass. Every step runs; the errors are joined.

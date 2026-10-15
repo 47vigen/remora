@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/47vigen/remora/internal/api/gen"
 	"github.com/47vigen/remora/internal/config"
@@ -80,8 +79,8 @@ func (s *Server) PlanConfig(ctx context.Context, req gen.PlanConfigRequestObject
 	return gen.PlanConfig200JSONResponse{Changes: toChanges(cs)}, nil
 }
 
-// ApplyConfig makes the store match a document and answers the changes made. When a change fails after others
-// were made, the error names the failed change and lists the ones made before it.
+// ApplyConfig makes the store match a document and answers the changes made. When a change fails, nothing is
+// changed and the error names the failed change.
 func (s *Server) ApplyConfig(ctx context.Context, req gen.ApplyConfigRequestObject) (gen.ApplyConfigResponseObject, error) {
 	svc, err := s.config()
 	if err != nil {
@@ -103,32 +102,9 @@ func (s *Server) ApplyConfig(ctx context.Context, req gen.ApplyConfigRequestObje
 	if e.status >= 500 {
 		s.log().ErrorContext(ctx, "remora.yaml apply failed", "change", ae.Change.Op+" "+ae.Change.Kind+" "+ae.Change.Name, "err", err)
 	}
-	msg := fmt.Sprintf("%s %s %s failed: %s", ae.Change.Op, ae.Change.Kind, ae.Change.Name, e.msg)
-	if len(applied) > 0 {
-		done := make([]string, len(applied))
-		for i, c := range applied {
-			done[i] = changeLine(c)
-		}
-		msg += " Applied before it: " + strings.Join(done, "; ") + "."
-	} else {
-		msg += " Nothing was changed."
-	}
+	msg := fmt.Sprintf("%s %s %s failed: %s Nothing was changed.", ae.Change.Op, ae.Change.Kind, ae.Change.Name, e.msg)
 	detail := gen.ErrorDetail{Type: e.typ, Code: e.code, Message: msg}
-	if len(applied) > 0 {
-		done := toChanges(applied)
-		detail.Applied = &done
-	}
 	return gen.ApplyConfigdefaultJSONResponse{StatusCode: e.status, Body: gen.Error{Error: detail}}, nil
-}
-
-// changeLine is "+ provider p", "~ alias fast (members)" or "- key old".
-func changeLine(c config.Change) string {
-	sign := map[string]string{"create": "+", "update": "~", "delete": "-"}[c.Op]
-	line := sign + " " + c.Kind + " " + c.Name
-	if len(c.Fields) > 0 {
-		line += " (" + strings.Join(c.Fields, ", ") + ")"
-	}
-	return line
 }
 
 func toChanges(cs []config.Change) []gen.Change {

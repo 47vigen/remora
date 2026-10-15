@@ -10,6 +10,9 @@ import (
 // Ports: the provider, alias and client key services Service drives. They are the management API's ports
 // (internal/api aliases them), declared here so this package does not import internal/api.
 
+// Batch runs fn so that the port writes made under the context it gets are committed together or not at all.
+type Batch func(ctx context.Context, fn func(ctx context.Context) error) error
+
 // ProviderKey is one credential of a provider. Value is never serialised by handlers.
 type ProviderKey struct{ Name, Value string }
 

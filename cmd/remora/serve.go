@@ -173,6 +173,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		Accounts:  api.NewAccounts(accts),
 		Aliases:   api.NewAliases(st, rec, cooler.Snapshot),
 		Keys:      api.NewKeys(st, rec),
+		Batch:     rec.Batch,
 		System:    api.NewSystem(sup),
 		Names:     api.NewNames(st),
 		Logs:      fd,

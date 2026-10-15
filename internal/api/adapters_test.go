@@ -17,6 +17,7 @@ import (
 
 	"github.com/47vigen/remora/internal/accounts"
 	"github.com/47vigen/remora/internal/alias"
+	"github.com/47vigen/remora/internal/config"
 	"github.com/47vigen/remora/internal/cooling"
 	"github.com/47vigen/remora/internal/engine/bifrost"
 	"github.com/47vigen/remora/internal/engine/cliproxyapi"
@@ -483,5 +484,50 @@ func TestProvidersAdapterTest(t *testing.T) {
 	}
 	if _, err = ps.Test(ctx, "nope"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("unknown provider err = %v", err)
+	}
+}
+
+// TestApplyOverAdaptersIsAtomic applies remora.yaml through the real adapters: a later alias that fails validation
+// leaves the provider and the alias planned before it unwritten.
+func TestApplyOverAdaptersIsAtomic(t *testing.T) {
+	ctx := context.Background()
+	st, rec, _ := adapterStore(t)
+	ps, as, ks := NewProviders(st, rec, nil, nil), NewAliases(st, rec, nil), NewKeys(st, rec)
+	svc := config.NewService(ps, as, ks, rec.Batch)
+	f, err := config.Parse([]byte(`
+providers:
+  - {name: p, kind: openai-compatible, base_url: http://up.test/v1, keys: [{name: main, value: env:P_KEY}]}
+aliases:
+  - {name: good, kind: chat, members: [p/m]}
+  - {name: zbad, kind: chat, members: [nope]}
+keys:
+  - {name: k, allow: [good]}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sec := config.Secrets{"P_KEY": "sk-p"}
+	applied, err := svc.Apply(ctx, f, sec, true)
+	var ae *config.ApplyError
+	if !errors.As(err, &ae) || !errors.Is(err, alias.ErrUnknownMember) || ae.Change.Name != "zbad" {
+		t.Fatalf("Apply err = %v, want an *ApplyError for alias zbad", err)
+	}
+	if len(applied) != 0 {
+		t.Errorf("applied = %+v, want none", applied)
+	}
+	if got, _ := ps.List(ctx); len(got) != 0 {
+		t.Errorf("providers = %+v, want none", got)
+	}
+	if got, _ := as.List(ctx); len(got) != 0 {
+		t.Errorf("aliases = %+v, want none", got)
+	}
+
+	f.Aliases = f.Aliases[:1]
+	applied, err = svc.Apply(ctx, f, sec, true)
+	if err != nil || len(applied) != 3 {
+		t.Fatalf("Apply = %+v, %v; want 3 changes", applied, err)
+	}
+	if cs, err := svc.Plan(ctx, f, sec, true); err != nil || len(cs) != 0 {
+		t.Errorf("Plan after apply = %+v, %v; want no changes", cs, err)
 	}
 }
