@@ -16,6 +16,17 @@ type fakeLogs struct {
 	polls [][]Log // one row set per poll; a poll ends when a page comes back short
 	poll  int
 	calls []LogFilter
+	byID  map[string]Log // what GetLog answers; a missing id is ErrNotFound
+}
+
+func (f *fakeLogs) GetLog(_ context.Context, id string) (Log, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	l, ok := f.byID[id]
+	if !ok {
+		return Log{}, ErrNotFound
+	}
+	return l, nil
 }
 
 func (f *fakeLogs) SearchLogs(_ context.Context, lf LogFilter) (LogPage, error) {
@@ -75,7 +86,7 @@ func TestTailDeliversOnceInOrder(t *testing.T) {
 		{row("b", 2, "success"), row("c", 3, "error")},
 	}}
 	tl := NewTail(src, time.Second, nil)
-	ch, cancel := tl.Subscribe(16)
+	ch, cancel := tl.Subscribe(16, 0)
 	defer cancel()
 	ctx := context.Background()
 	tl.poll(ctx)
@@ -98,7 +109,7 @@ func TestTailCatchesLateRow(t *testing.T) {
 		{row("a", 1, "error"), row("b", 300, "error")},
 	}}
 	tl := NewTail(src, time.Second, nil)
-	ch, cancel := tl.Subscribe(16)
+	ch, cancel := tl.Subscribe(16, 0)
 	defer cancel()
 	ctx := context.Background()
 	tl.poll(ctx)
@@ -118,7 +129,7 @@ func TestTailSkipsProcessing(t *testing.T) {
 		{row("a", 1, "error")},
 	}}
 	tl := NewTail(src, time.Second, nil)
-	ch, cancel := tl.Subscribe(16)
+	ch, cancel := tl.Subscribe(16, 0)
 	defer cancel()
 	ctx := context.Background()
 	tl.poll(ctx)
@@ -139,7 +150,7 @@ func TestTailPagesBeyondLimit(t *testing.T) {
 	}
 	src := &fakeLogs{polls: [][]Log{rows}}
 	tl := NewTail(src, time.Second, nil)
-	ch, cancel := tl.Subscribe(4000)
+	ch, cancel := tl.Subscribe(4000, 0)
 	defer cancel()
 	ctx := context.Background()
 	tl.poll(ctx)
@@ -176,7 +187,7 @@ func TestTailIdleWithoutSubscribers(t *testing.T) {
 		t.Fatalf("SearchLogs called %d times without subscribers", n)
 	}
 
-	ch, unsubscribe := tl.Subscribe(4)
+	ch, unsubscribe := tl.Subscribe(4, 0)
 	select {
 	case l := <-ch:
 		if l.ID != "a" {
@@ -197,17 +208,35 @@ func TestTailIdleWithoutSubscribers(t *testing.T) {
 	<-done
 }
 
-func TestTailDropsSlowSubscriber(t *testing.T) {
+func TestTailKeepsSlowSubscriber(t *testing.T) {
 	src := &fakeLogs{polls: [][]Log{{row("a", 1, "error"), row("b", 2, "error"), row("c", 3, "error")}}}
 	tl := NewTail(src, time.Second, nil)
-	slow, cancelSlow := tl.Subscribe(1)
-	fast, cancelFast := tl.Subscribe(16)
+	slow, cancelSlow := tl.Subscribe(1, 2)
+	defer cancelSlow()
+	fast, cancelFast := tl.Subscribe(16, 0)
 	defer cancelFast()
-	tl.poll(context.Background())
+	ctx := context.Background()
+	tl.poll(ctx)
 
 	if got := drain(fast); !eq(got, []string{"a:error", "b:error", "c:error"}) {
 		t.Fatalf("fast subscriber got %v", got)
 	}
+	var got []string
+	for range 3 {
+		got = append(got, drain(slow)...)
+		tl.poll(ctx)
+	}
+	if !eq(got, []string{"a:error", "b:error", "c:error"}) {
+		t.Fatalf("slow subscriber got %v", got)
+	}
+}
+
+func TestTailDropsSubscriberPastBacklog(t *testing.T) {
+	src := &fakeLogs{polls: [][]Log{{row("a", 1, "error"), row("b", 2, "error"), row("c", 3, "error")}}}
+	tl := NewTail(src, time.Second, nil)
+	slow, cancelSlow := tl.Subscribe(1, 1)
+	tl.poll(context.Background())
+
 	if l, ok := <-slow; !ok || l.ID != "a" {
 		t.Fatalf("slow subscriber first read = %+v, %v", l, ok)
 	}
@@ -215,4 +244,34 @@ func TestTailDropsSlowSubscriber(t *testing.T) {
 		t.Fatal("slow subscriber's channel is still open")
 	}
 	cancelSlow() // after a drop, cancel must not panic on a closed channel
+}
+
+func TestTailCatchesLongRequest(t *testing.T) {
+	src := &fakeLogs{
+		polls: [][]Log{
+			{row("a", 1, "processing"), row("gone", 2, "processing")},
+			{row("b", 1000, "success")}, // a and gone are now behind the lookback
+		},
+		byID: map[string]Log{"a": row("a", 1, "processing")},
+	}
+	tl := NewTail(src, time.Second, nil)
+	ch, cancel := tl.Subscribe(16, 0)
+	defer cancel()
+	ctx := context.Background()
+	tl.poll(ctx)
+	tl.poll(ctx)
+	if got := drain(ch); !eq(got, []string{"b:success"}) {
+		t.Fatalf("delivered %v", got)
+	}
+	src.mu.Lock()
+	src.byID["a"] = row("a", 1, "error")
+	src.mu.Unlock()
+	tl.poll(ctx)
+	tl.poll(ctx)
+	if got := drain(ch); !eq(got, []string{"a:error"}) {
+		t.Fatalf("delivered %v", got)
+	}
+	if len(tl.running) != 0 {
+		t.Fatalf("still tracking %v", tl.running)
+	}
 }

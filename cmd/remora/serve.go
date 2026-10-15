@@ -276,14 +276,19 @@ func startSpeech(ctx context.Context, cfg config.Config, st *store.Store, logger
 	}, nil
 }
 
-// coolingFeedBuffer is how many log rows the cooling subscription holds before the tail drops it.
-const coolingFeedBuffer = 1024
+const (
+	// coolingFeedBuffer is how many log rows the cooling subscription's channel holds.
+	coolingFeedBuffer = 1024
+	// coolingFeedBacklog is how many more rows the tail keeps for the cooling subscription before it drops it, so a
+	// burst of failures waits for the cooler instead of being lost.
+	coolingFeedBacklog = 64 * 1024
+)
 
 // runCooling feeds the front door's log rows to the cooler until ctx ends, subscribing again when the tail drops a
 // subscription that fell behind.
 func runCooling(ctx context.Context, cooler *cooling.Cooler, tail *bifrost.Tail, fd *bifrost.Client, logger *slog.Logger) {
 	for {
-		rows, cancel := tail.Subscribe(coolingFeedBuffer)
+		rows, cancel := tail.Subscribe(coolingFeedBuffer, coolingFeedBacklog)
 		err := cooler.Run(ctx, rows, fd.GetLog, 0)
 		cancel()
 		if ctx.Err() != nil {

@@ -47,7 +47,7 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Subscribe before the upgrade, so every row completed once the client is connected reaches it.
-	rows, unsubscribe := s.d.Tail.Subscribe(liveBuffer)
+	rows, unsubscribe := s.d.Tail.Subscribe(liveBuffer, 0)
 	defer unsubscribe()
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: []string{r.Host}})
 	if err != nil {
