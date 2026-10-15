@@ -460,3 +460,23 @@ func TestAwaitCredentialModels(t *testing.T) {
 		})
 	}
 }
+
+func TestAwaitCredentialModelsBoundsSlowReads(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+		}
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(release) })
+	start := time.Now()
+	got, err := cliproxyapi.New(srv.URL, "s", nil).AwaitCredentialModels(context.Background(), "codex-a.json", "codex", 20*time.Millisecond)
+	if err != nil || len(got) != 0 || time.Since(start) > time.Second {
+		t.Fatalf("models %v, err %v after %v; want none within the rounds", got, err, time.Since(start))
+	}
+}

@@ -118,16 +118,24 @@ func (c *Client) AwaitCredentialModels(ctx context.Context, name, prefix string,
 	}
 }
 
-// pollCredentialModels reads a credential's models until it has some or wait has passed.
+// pollCredentialModels reads a credential's models until it has some or wait has passed. Each read is bounded by the
+// round, so a slow engine answer ends the round empty instead of holding it up.
 func (c *Client) pollCredentialModels(ctx context.Context, name string, wait time.Duration) ([]string, error) {
 	interval := min(100*time.Millisecond, wait)
-	for deadline := time.Now().Add(wait); ; {
-		models, err := c.CredentialModels(ctx, name)
-		if err != nil || len(models) > 0 || time.Now().After(deadline) {
-			return models, err
+	round, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	for {
+		models, err := c.CredentialModels(round, name)
+		switch {
+		case err == nil && len(models) > 0:
+			return models, nil
+		case round.Err() != nil:
+			return nil, ctx.Err()
+		case err != nil:
+			return nil, err
 		}
 		select {
-		case <-ctx.Done():
+		case <-round.Done():
 			return nil, ctx.Err()
 		case <-time.After(interval):
 		}
