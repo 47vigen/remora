@@ -11,8 +11,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# A release pull request changes only the changelog and the version manifest, and release.yml builds and tests
+# the tagged image on both architectures, so its jobs are skipped; a skipped required check counts as passed.
 jobs:
   lint:
+    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -26,6 +29,7 @@ jobs:
           version: v2.14
 
   test:
+    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -39,6 +43,7 @@ jobs:
       - run: go test -race ./...
 
   engine:
+    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -60,6 +65,7 @@ jobs:
         run: REMORA_CLIPROXYAPI_BIN="$RUNNER_TEMP/cliproxyapi" go test -race -tags engine ./internal/engine/cliproxyapi/
 
   web:
+    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -86,6 +92,7 @@ jobs:
         run: go test -tags webdist ./internal/web/
 
   image:
+    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -208,6 +215,7 @@ jobs:
         run: REMORA_ADMIN_PASSWORD=x docker compose -f deploy/compose.yaml config -q
 
   actionlint:
+    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
