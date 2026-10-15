@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/47vigen/remora/compare/v0.1.2...v0.1.3) (2026-10-15)
+
+
+### Bug Fixes
+
+* **alias:** let an alias be named like a provider model ([#27](https://github.com/47vigen/remora/issues/27)) ([0a1c93f](https://github.com/47vigen/remora/commit/0a1c93fc08d603ba74a54a6c965b1d18a780090a))
+
 ## [0.1.2](https://github.com/47vigen/remora/compare/v0.1.1...v0.1.2) (2026-10-15)
 
 
