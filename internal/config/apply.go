@@ -27,6 +27,9 @@ func (s *Service) Apply(ctx context.Context, want File, sec Secrets, prune bool)
 	if err != nil {
 		return []Change{}, err
 	}
+	if len(steps) == 0 {
+		return []Change{}, nil
+	}
 	applied := make([]Change, 0, len(steps))
 	err = s.batch(ctx, func(ctx context.Context) error {
 		for _, st := range steps {

@@ -350,3 +350,13 @@ func TestApplyProviderKeysWithoutPrune(t *testing.T) {
 		t.Errorf("up-a keys = %+v, want %+v (an unlisted key kept without prune)", got, want)
 	}
 }
+
+func TestApplyNothingSkipsTheBatch(t *testing.T) {
+	w := newWorld()
+	s := NewService(fakeProviders{w}, fakeAliases{w}, fakeKeys{w}, func(context.Context, func(context.Context) error) error {
+		return errors.New("engine unavailable")
+	})
+	if applied, err := s.Apply(context.Background(), File{}, nil, true); err != nil || len(applied) != 0 {
+		t.Fatalf("applied %v, err %v; want a no-op apply to succeed without the engine", applied, err)
+	}
+}
