@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.4](https://github.com/47vigen/remora/compare/v0.1.3...v0.1.4) (2026-10-15)
+
+
+### Bug Fixes
+
+* **import:** drop what OmniRoute itself would not serve ([#29](https://github.com/47vigen/remora/issues/29)) ([0ec227c](https://github.com/47vigen/remora/commit/0ec227c75edab374d3fb9bccf4611f3ca9869c5a))
+* serve subscription members and OpenCode Go requests ([#31](https://github.com/47vigen/remora/issues/31)) ([7666f33](https://github.com/47vigen/remora/commit/7666f33d29312e859988a104366635b6ecf63d27))
+
 ## [0.1.3](https://github.com/47vigen/remora/compare/v0.1.2...v0.1.3) (2026-10-15)
 
 
