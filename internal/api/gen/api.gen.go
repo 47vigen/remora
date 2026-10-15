@@ -299,6 +299,7 @@ func (e ListLogsParamsStatus) Valid() bool {
 const (
 	GetStatsParamsGroupByAlias    GetStatsParamsGroupBy = "alias"
 	GetStatsParamsGroupByKey      GetStatsParamsGroupBy = "key"
+	GetStatsParamsGroupByModel    GetStatsParamsGroupBy = "model"
 	GetStatsParamsGroupByNone     GetStatsParamsGroupBy = "none"
 	GetStatsParamsGroupByProvider GetStatsParamsGroupBy = "provider"
 )
@@ -309,6 +310,8 @@ func (e GetStatsParamsGroupBy) Valid() bool {
 	case GetStatsParamsGroupByAlias:
 		return true
 	case GetStatsParamsGroupByKey:
+		return true
+	case GetStatsParamsGroupByModel:
 		return true
 	case GetStatsParamsGroupByNone:
 		return true
@@ -728,11 +731,23 @@ type StatsGroup struct {
 	Summary StatsSummary `json:"summary"`
 }
 
-// StatsPoint defines model for StatsPoint.
+// StatsPoint One time bucket of the series. The bucket size follows the range: a minute under 2 hours, 10 minutes under 24 hours, an hour under 3 days, then 8 hours, a day, 3 days, a week and 30 days. Requests and errors count every attempt of a fallback chain; tokens and cost cover every finished attempt.
 type StatsPoint struct {
-	Errors   int       `json:"errors"`
-	Requests int       `json:"requests"`
-	Time     time.Time `json:"time"`
+	CompletionTokens int     `json:"completion_tokens"`
+	CostUsd          float64 `json:"cost_usd"`
+	Errors           int     `json:"errors"`
+
+	// LatencyP50Ms Over the successful attempts in the bucket, by nearest rank. Null when there are none.
+	LatencyP50Ms *float64 `json:"latency_p50_ms,omitempty"`
+
+	// LatencyP95Ms Over the successful attempts in the bucket, interpolated. Null when there are none.
+	LatencyP95Ms *float64 `json:"latency_p95_ms,omitempty"`
+	PromptTokens int      `json:"prompt_tokens"`
+	Requests     int      `json:"requests"`
+
+	// Time The start of the bucket.
+	Time        time.Time `json:"time"`
+	TotalTokens int       `json:"total_tokens"`
 }
 
 // StatsSummary defines model for StatsSummary.
@@ -938,7 +953,7 @@ type GetStatsParams struct {
 	// To End of the time range (RFC 3339). Defaults to now.
 	To *To `form:"to,omitempty" json:"to,omitempty"`
 
-	// GroupBy With a value other than `none`, `groups` holds one summary per key, alias or provider.
+	// GroupBy With a value other than `none`, `groups` holds one summary per key, alias, provider or model. A model group is named `<provider>/<model>` and lists the 100 busiest models of the range.
 	GroupBy *GetStatsParamsGroupBy `form:"group_by,omitempty" json:"group_by,omitempty"`
 
 	// Key A client key id.

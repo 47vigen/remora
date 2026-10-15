@@ -15,28 +15,31 @@ export function TokensTable({ items, now, onDelete }: { items: ApiToken[]; now: 
             <Table.Column>Token</Table.Column>
             <Table.Column>Created</Table.Column>
             <Table.Column>Last used</Table.Column>
-            <Table.Column>Actions</Table.Column>
+            <Table.Column>
+              <span className="sr-only">Actions</span>
+            </Table.Column>
           </Table.Header>
           <Table.Body items={items}>
             {(t) => (
               <Table.Row id={t.id}>
-                <Table.Cell>{t.name}</Table.Cell>
-                <Table.Cell className="font-mono text-sm">{t.prefix}…</Table.Cell>
-                <Table.Cell>
+                <Table.Cell className="font-medium">{t.name}</Table.Cell>
+                <Table.Cell className="text-muted font-mono text-[13px]">{t.prefix}…</Table.Cell>
+                <Table.Cell className="text-muted text-[13px] whitespace-nowrap">
                   <time dateTime={t.created_at}>{formatRelative(t.created_at, now)}</time>
                 </Table.Cell>
-                <Table.Cell>
+                <Table.Cell className="text-muted text-[13px] whitespace-nowrap">
                   {t.last_used_at ? (
                     <time dateTime={t.last_used_at}>{formatRelative(t.last_used_at, now)}</time>
                   ) : (
                     "Never"
                   )}
                 </Table.Cell>
-                <Table.Cell>
+                <Table.Cell className="w-0 text-end">
                   <Button
                     isIconOnly
                     size="sm"
                     variant="ghost"
+                    className="text-muted hover:text-danger"
                     aria-label={`Delete ${t.name}`}
                     onPress={() => onDelete(t)}
                   >

@@ -1,6 +1,7 @@
 import { AlertDialog, Button } from "@heroui/react";
 import type { ReactNode } from "react";
 
+/** Asks before something is destroyed; `body` says what stops working. */
 export function ConfirmDelete({
   title,
   body,
@@ -23,18 +24,18 @@ export function ConfirmDelete({
         if (!open && !isPending) onCancel();
       }}
     >
-      <AlertDialog.Container>
+      <AlertDialog.Container size="sm">
         <AlertDialog.Dialog>
           <AlertDialog.Header>
             <AlertDialog.Icon status="danger" />
             <AlertDialog.Heading>{title}</AlertDialog.Heading>
           </AlertDialog.Header>
-          <AlertDialog.Body>{body}</AlertDialog.Body>
+          <AlertDialog.Body className="text-muted text-sm">{body}</AlertDialog.Body>
           <AlertDialog.Footer>
-            <Button variant="tertiary" isDisabled={isPending} onPress={onCancel}>
+            <Button size="sm" variant="secondary" isDisabled={isPending} onPress={onCancel}>
               Cancel
             </Button>
-            <Button variant="danger" isPending={isPending} onPress={onConfirm}>
+            <Button size="sm" variant="danger" isPending={isPending} onPress={onConfirm}>
               Delete
             </Button>
           </AlertDialog.Footer>

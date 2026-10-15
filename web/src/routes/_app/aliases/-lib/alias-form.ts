@@ -87,3 +87,56 @@ export function toAliasTargets(targets: readonly ChainTarget[]): AliasTarget[] {
       : { provider: t.provider, model: t.model, cooling: false },
   );
 }
+
+/** One row of the fallback pipeline: a member, or a member of a nested alias, at its nesting depth. */
+export type ChainNode = {
+  ref: string;
+  depth: number;
+  kind: "alias" | "model";
+  /** A model's place in the order requests try them. */
+  position?: number;
+  coolingUntil?: string;
+  /** The first model that is not cooling: where a request lands now. */
+  serving?: boolean;
+  /** An alias that is not in the loaded list, or one that contains itself. */
+  problem?: "unknown" | "cycle";
+};
+
+/** Expands members depth-first through nested aliases, in the order a request walks them. */
+export function chainNodes(
+  members: readonly string[],
+  aliasMembers: ReadonlyMap<string, readonly string[]>,
+  coolingUntil: ReadonlyMap<string, string>,
+  self: string,
+): ChainNode[] {
+  const nodes: ChainNode[] = [];
+  let position = 0;
+  let served = false;
+  const walk = (refs: readonly string[], depth: number, path: ReadonlySet<string>) => {
+    for (const ref of refs) {
+      if (memberKind(ref) === "model") {
+        const until = coolingUntil.get(ref);
+        const serving = !served && until === undefined;
+        served ||= serving;
+        nodes.push({
+          ref,
+          depth,
+          kind: "model",
+          position: ++position,
+          serving,
+          ...(until ? { coolingUntil: until } : {}),
+        });
+        continue;
+      }
+      const inner = aliasMembers.get(ref);
+      if (path.has(ref)) nodes.push({ ref, depth, kind: "alias", problem: "cycle" });
+      else if (inner === undefined) nodes.push({ ref, depth, kind: "alias", problem: "unknown" });
+      else {
+        nodes.push({ ref, depth, kind: "alias" });
+        walk(inner, depth + 1, new Set(path).add(ref));
+      }
+    }
+  };
+  walk(members, 0, new Set([self]));
+  return nodes;
+}

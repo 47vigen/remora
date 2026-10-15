@@ -41,6 +41,19 @@ test("an empty allowlist warns that the key can call nothing", () => {
 
 test("shows what the patterns match", () => {
   render(<AllowlistEditor value={["f*"]} suggestions={[]} candidates={["fast", "free", "slow"]} onChange={() => {}} />);
-  expect(screen.getByText("Matches 2: fast, free")).toBeInTheDocument();
+  const list = screen.getByRole("list", { name: "Matches 2" });
+  expect(
+    within(list)
+      .getAllByRole("listitem")
+      .map((li) => li.textContent),
+  ).toEqual(["fast", "free"]);
   expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("a long preview lists the first names and counts the rest", () => {
+  const names = Array.from({ length: 10 }, (_, i) => `m${i}`);
+  render(<AllowlistEditor value={["*"]} suggestions={[]} candidates={names} onChange={() => {}} />);
+  const list = screen.getByRole("list", { name: "Matches 10" });
+  expect(within(list).getAllByRole("listitem")).toHaveLength(9);
+  expect(within(list).getByText("and 2 more")).toBeInTheDocument();
 });

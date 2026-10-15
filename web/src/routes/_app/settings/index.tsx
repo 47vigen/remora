@@ -1,8 +1,8 @@
 import { ArrowDownToLine, ArrowUpFromLine, Plus } from "@gravity-ui/icons";
-import { Alert, Button, Card, FieldError, Form, Input, Label, Modal, Tabs, TextField } from "@heroui/react";
+import { Alert, Button, FieldError, Form, Input, Label, Modal, Skeleton, TextField } from "@heroui/react";
 import { type MutationFunctionContext, useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { FileTrigger } from "react-aria-components";
 
 import {
@@ -23,10 +23,11 @@ import {
 } from "../../../client/@tanstack/react-query.gen";
 import { ConfirmDelete } from "../../../components/confirm-delete/ConfirmDelete";
 import { DataList } from "../../../components/data-list/DataList";
+import { PageHeader } from "../../../components/page-header/PageHeader";
 import { SecretOnce } from "../../../components/secret-once/SecretOnce";
 import { errorMessage } from "../../../lib/api";
 import { downloadFile } from "../../../lib/download";
-import { type ListSearch, parseEnum, parseListSearch } from "../../../lib/list-search";
+import { type ListSearch, parseListSearch } from "../../../lib/list-search";
 import { invalidateOps } from "../../../lib/query";
 import { About } from "./-components/About";
 import { ImportReview } from "./-components/ImportReview";
@@ -34,15 +35,17 @@ import { PasswordForm } from "./-components/PasswordForm";
 import { TokensTable } from "./-components/TokensTable";
 import { appliedBeforeError, formatChanges, type GeneratedKey, generatedKeys, withoutValue } from "./-lib/config-diff";
 
-const TABS = ["password", "tokens", "backup", "about"] as const;
-type Tab = (typeof TABS)[number];
-type SettingsSearch = ListSearch & { tab: Tab };
+const SECTIONS = [
+  { id: "password", label: "Password" },
+  { id: "tokens", label: "API tokens" },
+  { id: "backup", label: "Import / export" },
+  { id: "about", label: "About" },
+] as const;
+/** The list parameters belong to the API tokens table. */
+type SettingsSearch = ListSearch;
 
 export const Route = createFileRoute("/_app/settings/")({
-  validateSearch: (raw: Record<string, unknown>): SettingsSearch => ({
-    ...parseListSearch(raw),
-    tab: parseEnum(raw.tab, TABS) ?? "password",
-  }),
+  validateSearch: (raw: Record<string, unknown>): SettingsSearch => parseListSearch(raw),
   component: SettingsPage,
 });
 
@@ -59,53 +62,75 @@ function ErrorAlert({ title, error }: { title: string; error: unknown }) {
 }
 
 function SettingsPage() {
-  const search = Route.useSearch();
-  const navigate = Route.useNavigate();
-
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-2xl font-semibold">Settings</h1>
-      <Tabs
-        selectedKey={search.tab}
-        onSelectionChange={(key) => {
-          const tab = parseEnum(key, TABS) ?? "password";
-          void navigate({ search: { ...parseListSearch({}), tab }, replace: true });
-        }}
-      >
-        <Tabs.ListContainer>
-          <Tabs.List aria-label="Settings">
-            <Tabs.Tab id="password">
-              Password
-              <Tabs.Indicator />
-            </Tabs.Tab>
-            <Tabs.Tab id="tokens">
-              API tokens
-              <Tabs.Indicator />
-            </Tabs.Tab>
-            <Tabs.Tab id="backup">
-              Backup
-              <Tabs.Indicator />
-            </Tabs.Tab>
-            <Tabs.Tab id="about">
-              About
-              <Tabs.Indicator />
-            </Tabs.Tab>
-          </Tabs.List>
-        </Tabs.ListContainer>
-        <Tabs.Panel id="password" className="pt-6">
-          <PasswordPanel />
-        </Tabs.Panel>
-        <Tabs.Panel id="tokens" className="pt-6">
-          <TokensPanel />
-        </Tabs.Panel>
-        <Tabs.Panel id="backup" className="pt-6">
-          <BackupPanel />
-        </Tabs.Panel>
-        <Tabs.Panel id="about" className="pt-6">
-          <AboutPanel />
-        </Tabs.Panel>
-      </Tabs>
+      <PageHeader
+        title="Settings"
+        description="The admin password, management API tokens, and the configuration file."
+      />
+      <div className="grid gap-8 lg:grid-cols-[11rem_minmax(0,1fr)]">
+        <nav aria-label="Settings sections" className="sticky top-8 hidden self-start lg:block">
+          <ul className="border-border flex flex-col border-l">
+            {SECTIONS.map((s) => (
+              <li key={s.id}>
+                <a
+                  href={`#${s.id}`}
+                  className="text-muted hover:text-foreground hover:border-ink-strong -ml-px block border-l border-transparent py-1.5 pl-3 text-sm transition-colors duration-150"
+                >
+                  {s.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <div className="flex min-w-0 flex-col gap-6">
+          <Panel id="password" title="Password" description="The password that signs in to this console.">
+            <PasswordPanel />
+          </Panel>
+          <Panel
+            id="tokens"
+            title="API tokens"
+            description="Tokens call the management API with the same rights as the admin password."
+          >
+            <TokensPanel />
+          </Panel>
+          <Panel id="backup" title="Import / export" description="Providers, aliases and keys as one remora.yaml file.">
+            <BackupPanel />
+          </Panel>
+          <Panel id="about" title="About" description="Versions and credits.">
+            <AboutPanel />
+          </Panel>
+        </div>
+      </div>
     </div>
+  );
+}
+
+function Panel({
+  id,
+  title,
+  description,
+  children,
+}: {
+  id: string;
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
+  return (
+    <section
+      id={id}
+      aria-labelledby={`${id}-title`}
+      className="bg-surface border-border flex scroll-mt-8 flex-col gap-4 rounded-sm border p-4 md:p-6"
+    >
+      <header className="flex flex-col gap-1">
+        <h2 id={`${id}-title`} className="label-caps text-muted">
+          {title}
+        </h2>
+        <p className="text-muted text-sm">{description}</p>
+      </header>
+      {children}
+    </section>
   );
 }
 
@@ -158,21 +183,25 @@ function TokensPanel() {
     },
   });
 
+  const newToken = (
+    <Button size="sm" variant="secondary" onPress={() => setCreating(true)}>
+      <Plus aria-hidden="true" />
+      New token
+    </Button>
+  );
+
   return (
     <DataList.Root>
       <DataList.Toolbar>
         <DataList.Search value={q} onChange={(next) => update({ q: next })} placeholder="Search tokens" />
-        <Button variant="primary" onPress={() => setCreating(true)}>
-          <Plus aria-hidden="true" />
-          New token
-        </Button>
+        <span className="ml-auto">{newToken}</span>
       </DataList.Toolbar>
-      <p className="text-muted text-sm">Tokens call the management API with the same rights as the admin password.</p>
       <DataList.State
         isLoading={list.isPending}
         error={list.error ?? undefined}
         isEmpty={(list.data?.items.length ?? 0) === 0}
-        emptyText={q ? "No tokens match this search." : "No API tokens yet."}
+        emptyText={q ? "No tokens match this search." : "No API tokens yet. Create one for each script or service."}
+        emptyAction={q ? undefined : newToken}
       >
         <TokensTable
           items={list.data?.items ?? []}
@@ -257,7 +286,7 @@ function CreateTokenModal({
       <Modal.Container>
         <Modal.Dialog>
           <Form
-            className="flex flex-col gap-4"
+            className="flex flex-col"
             onSubmit={(e) => {
               e.preventDefault();
               setSubmitted(true);
@@ -267,6 +296,7 @@ function CreateTokenModal({
           >
             <Modal.Header>
               <Modal.Heading>New API token</Modal.Heading>
+              <p className="text-muted text-sm">The secret is shown once, right after you create it.</p>
             </Modal.Header>
             <Modal.Body className="flex flex-col gap-4">
               <TextField value={name} onChange={setName} isRequired isInvalid={nameError !== undefined}>
@@ -277,7 +307,7 @@ function CreateTokenModal({
               {create.error ? <ErrorAlert title="Could not create the token" error={create.error} /> : null}
             </Modal.Body>
             <Modal.Footer>
-              <Button variant="tertiary" onPress={close} isDisabled={create.isPending}>
+              <Button variant="secondary" onPress={close} isDisabled={create.isPending}>
                 Cancel
               </Button>
               <Button type="submit" variant="primary" isPending={create.isPending}>
@@ -336,31 +366,26 @@ function BackupPanel() {
   };
 
   return (
-    <div className="flex max-w-2xl flex-col gap-6">
-      <Card>
-        <Card.Header>
-          <Card.Title>Export</Card.Title>
-          <Card.Description>
-            Download providers, aliases and keys as remora.yaml. Secrets are written as references (
-            <code>env:NAME</code>), never as values.
-          </Card.Description>
-        </Card.Header>
-        <Card.Footer className="flex flex-col items-start gap-3">
-          <Button variant="secondary" isPending={exporter.isPending} onPress={() => exporter.mutate()}>
+    <div className="flex flex-col gap-4">
+      <div className="border-border divide-separator flex flex-col divide-y rounded-sm border">
+        <BackupRow
+          title="Export"
+          description={
+            <>
+              Download the configuration. Secrets are written as references (<code className="font-mono">env:NAME</code>
+              ), never as values.
+            </>
+          }
+        >
+          <Button size="sm" variant="secondary" isPending={exporter.isPending} onPress={() => exporter.mutate()}>
             <ArrowDownToLine aria-hidden="true" />
             Export
           </Button>
-          {exporter.error ? <ErrorAlert title="Could not export" error={exporter.error} /> : null}
-        </Card.Footer>
-      </Card>
-      <Card>
-        <Card.Header>
-          <Card.Title>Import</Card.Title>
-          <Card.Description>
-            Choose a remora.yaml file. You see what would change before anything is applied.
-          </Card.Description>
-        </Card.Header>
-        <Card.Footer className="flex flex-col items-start gap-3">
+        </BackupRow>
+        <BackupRow
+          title="Import"
+          description="Choose a remora.yaml file. You see what would change before anything is applied."
+        >
           <FileTrigger
             acceptedFileTypes={[".yaml", ".yml"]}
             onSelect={(files) => {
@@ -368,21 +393,22 @@ function BackupPanel() {
               if (file) void file.text().then(review);
             }}
           >
-            <Button variant="secondary">
+            <Button size="sm" variant="secondary">
               <ArrowUpFromLine aria-hidden="true" />
               Import
             </Button>
           </FileTrigger>
-          {applied ? (
-            <Alert status="success">
-              <Alert.Indicator />
-              <Alert.Content>
-                <Alert.Title>The configuration was applied.</Alert.Title>
-              </Alert.Content>
-            </Alert>
-          ) : null}
-        </Card.Footer>
-      </Card>
+        </BackupRow>
+      </div>
+      {exporter.error ? <ErrorAlert title="Could not export" error={exporter.error} /> : null}
+      {applied ? (
+        <Alert status="success">
+          <Alert.Indicator />
+          <Alert.Content>
+            <Alert.Title>The configuration was applied.</Alert.Title>
+          </Alert.Content>
+        </Alert>
+      ) : null}
       {yaml !== null ? (
         <div className="flex flex-col gap-3">
           <ImportReview
@@ -401,6 +427,7 @@ function BackupPanel() {
       ) : null}
       <SecretOnce
         title={generated[0] ? `Key ${generated[0].name} created` : ""}
+        example={`curl ${window.location.origin}/v1/models \\\n  -H "Authorization: Bearer $REMORA_KEY"`}
         value={generated[0]?.value ?? null}
         onClose={() => setGenerated((keys) => keys.slice(1))}
       />
@@ -408,9 +435,21 @@ function BackupPanel() {
   );
 }
 
+function BackupRow({ title, description, children }: { title: string; description: ReactNode; children: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 p-4">
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <h3 className="text-sm font-medium">{title}</h3>
+        <p className="text-muted max-w-xl text-sm">{description}</p>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 function AboutPanel() {
   const version = useQuery(getVersionOptions());
   if (version.error) return <ErrorAlert title="Could not load the versions" error={version.error} />;
-  if (!version.data) return null;
+  if (!version.data) return <Skeleton className="h-24 w-full max-w-md" />;
   return <About remora={version.data.remora} engines={version.data.engines} />;
 }

@@ -34,14 +34,16 @@ export function ImportReview({
         ) : diff === "" ? (
           <p className="text-muted text-sm">No changes.</p>
         ) : (
-          <pre className="bg-surface-secondary rounded-md p-3 font-mono text-sm whitespace-pre-wrap">{diff}</pre>
+          <pre className="bg-surface-secondary border-border max-h-96 overflow-auto rounded-sm border p-3 font-mono text-[13px] leading-5 whitespace-pre-wrap">
+            {diff}
+          </pre>
         )}
       </Card.Content>
       <Card.Footer className="flex gap-2">
         <Button variant="primary" isPending={isPending} isDisabled={!diff || error !== undefined} onPress={onApply}>
           Apply
         </Button>
-        <Button variant="tertiary" isDisabled={isPending} onPress={onCancel}>
+        <Button variant="secondary" isDisabled={isPending} onPress={onCancel}>
           Cancel
         </Button>
       </Card.Footer>

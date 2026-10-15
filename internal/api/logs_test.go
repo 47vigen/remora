@@ -74,7 +74,7 @@ func TestListLogsPaging(t *testing.T) {
 	now := time.Now().UTC()
 	for i := range 5 {
 		env.logs.add(bifrost.Log{
-			ID: string(rune('a' + i)), Timestamp: now.Add(time.Duration(i) * time.Second), Provider: "or", Model: "m",
+			ID: string(rune('a' + i)), Timestamp: now.Add(time.Duration(i-5) * time.Second), Provider: "or", Model: "m",
 			Status: "success",
 		})
 	}

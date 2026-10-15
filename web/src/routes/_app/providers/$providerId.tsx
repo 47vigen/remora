@@ -1,58 +1,77 @@
-import { ChevronLeft, Plus } from "@gravity-ui/icons";
-import { Alert, AlertDialog, Button, Card, Link, Spinner, toast } from "@heroui/react";
+import { ChevronLeft, PencilToSquare, PlugConnection, Plus, TrashBin } from "@gravity-ui/icons";
+import { Alert, AlertDialog, Button, Link, Skeleton, toast } from "@heroui/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, stripSearchParams, useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 import {
   deleteAccountMutation,
+  deleteProviderMutation,
   getProviderOptions,
   listAccountsOptions,
   resetAccountCooldownMutation,
   testProviderMutation,
   updateAccountMutation,
 } from "../../../client/@tanstack/react-query.gen";
-import type { Account, Provider } from "../../../client/types.gen";
+import type { Account } from "../../../client/types.gen";
 import { ConfirmDelete } from "../../../components/confirm-delete/ConfirmDelete";
 import { DataList } from "../../../components/data-list/DataList";
-import { ProviderIcon } from "../../../components/provider-icon/ProviderIcon";
+import { PageHeader, SectionLabel } from "../../../components/page-header/PageHeader";
 import { StatusChip } from "../../../components/status-chip/StatusChip";
 import { errorMessage } from "../../../lib/api";
 import { type ListSearch, parseListSearch } from "../../../lib/list-search";
-import { getOAuthProviderLabel, isOAuthProvider } from "../../../lib/providers";
+import { getOAuthProviderLabel, getProviderLabel, isOAuthProvider } from "../../../lib/providers";
 import { invalidateOps } from "../../../lib/query";
 import { AccountLoginDialog } from "./-components/AccountLoginDialog";
 import { AccountsTable } from "./-components/AccountsTable";
-import { ProviderForm } from "./-components/ProviderForm";
+import { ProviderEditorDrawer } from "./-components/ProviderEditorDrawer";
+import { ProviderMark } from "./-components/ProviderMark";
+import { ProviderTraffic } from "./-components/ProviderTraffic";
+import { SpecSheet } from "./-components/SpecSheet";
 import { useAccountLogin } from "./-hooks/useAccountLogin";
-import { useProviderEditor } from "./-hooks/useProviderEditor";
-import { displayGroup, fromProvider, GROUP_LABELS } from "./-lib/provider-form";
+import { displayGroup, GROUP_LABELS, KIND_LABELS } from "./-lib/provider-form";
 
-type DetailSearch = ListSearch & { login?: "1" };
+type DetailSearch = ListSearch & { login?: "1"; edit?: "1" };
 
 export const Route = createFileRoute("/_app/providers/$providerId")({
   validateSearch: (raw: Record<string, unknown>): DetailSearch => ({
     ...parseListSearch(raw),
     login: raw.login === "1" || raw.login === 1 ? "1" : undefined,
+    edit: raw.edit === "1" || raw.edit === 1 ? "1" : undefined,
   }),
   search: { middlewares: [stripSearchParams({ page: 1, pageSize: 25, q: "" })] },
   component: ProviderDetailPage,
 });
 
+const backLink = (
+  <Link
+    href="/providers"
+    className="text-muted hover:text-foreground flex items-center gap-1 self-start text-sm no-underline transition-colors duration-150"
+  >
+    <ChevronLeft aria-hidden="true" className="size-4" />
+    Providers
+  </Link>
+);
+
 function ProviderDetailPage() {
   const { providerId } = Route.useParams();
   return (
     <div className="flex flex-col gap-6">
-      <Link href="/providers" className="text-muted flex items-center gap-1 self-start text-sm no-underline">
-        <ChevronLeft aria-hidden="true" className="size-4" />
-        Providers
-      </Link>
       {isOAuthProvider(providerId) ? (
         <SubscriptionProvider providerId={providerId} />
       ) : (
         <ApiKeyProvider providerId={providerId} />
       )}
     </div>
+  );
+}
+
+function Title({ icon, name, children }: { icon: string; name: string; children: ReactNode }) {
+  return (
+    <span className="flex min-w-0 items-center gap-3">
+      <ProviderMark type={icon} name={name} size="md" />
+      {children}
+    </span>
   );
 }
 
@@ -136,23 +155,37 @@ function SubscriptionProvider({ providerId }: { providerId: string }) {
 
   const label = getOAuthProviderLabel(providerId);
   const total = accounts.data?.total ?? 0;
+  const addAccount = (
+    <Button variant="primary" onPress={() => setSearch({ login: "1" })}>
+      <Plus aria-hidden="true" />
+      Add account
+    </Button>
+  );
 
   return (
     <>
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="flex items-center gap-2 text-xl font-semibold">
-          <ProviderIcon type={providerId} size="md" />
-          {label}
-        </h1>
-        <Button variant="primary" onPress={() => setSearch({ login: "1" })}>
-          <Plus aria-hidden="true" />
-          Add account
-        </Button>
-      </div>
-      <p className="text-muted text-sm">
-        {GROUP_LABELS.subscription}: accounts signed in to {label}. Requests rotate across the enabled ones.
-      </p>
+      <PageHeader
+        before={backLink}
+        title={
+          <Title icon={providerId} name={label}>
+            {label}
+          </Title>
+        }
+        description={`Accounts signed in to ${label}. Requests rotate across the enabled ones.`}
+        actions={addAccount}
+      />
 
+      <SpecSheet>
+        <SpecSheet.Item label="Group">{GROUP_LABELS.subscription}</SpecSheet.Item>
+        <SpecSheet.Item label="Accounts" mono>
+          {accounts.data ? total : "—"}
+        </SpecSheet.Item>
+        <SpecSheet.Item label="Call as" mono wide>
+          {providerId}/model
+        </SpecSheet.Item>
+      </SpecSheet>
+
+      <SectionLabel>Accounts</SectionLabel>
       <DataList>
         <DataList.Toolbar>
           <DataList.Search value={search.q} onChange={(q) => setSearch({ q })} placeholder="Search accounts" />
@@ -161,7 +194,8 @@ function SubscriptionProvider({ providerId }: { providerId: string }) {
           isLoading={accounts.isLoading}
           error={accounts.error}
           isEmpty={(accounts.data?.items.length ?? 0) === 0}
-          emptyText={search.q ? "No account matches." : "No accounts yet. Add one to sign in."}
+          emptyText={search.q ? "No account matches. Clear the search." : "No accounts yet. Add one to sign in."}
+          emptyAction={search.q ? undefined : addAccount}
         >
           <AccountsTable
             items={accounts.data?.items ?? []}
@@ -239,36 +273,12 @@ function SubscriptionProvider({ providerId }: { providerId: string }) {
   );
 }
 
-function ProviderEditCard({ provider }: { provider: Provider }) {
-  const editor = useProviderEditor({
-    initial: fromProvider(provider),
-    isEdit: true,
-    onSaved: (p) => toast.success(`Saved ${p.name}`),
-  });
-  return (
-    <Card>
-      <Card.Header>
-        <Card.Title>Settings</Card.Title>
-      </Card.Header>
-      <Card.Content>
-        <ProviderForm
-          draft={editor.draft}
-          errors={editor.errors}
-          isEdit
-          keyHints={provider.keys?.map((k) => k.name) ?? []}
-          isPending={editor.isPending}
-          error={editor.error}
-          onChange={editor.setDraft}
-          onSubmit={editor.submit}
-          onCancel={() => editor.setDraft(fromProvider(provider))}
-        />
-      </Card.Content>
-    </Card>
-  );
-}
-
 function ApiKeyProvider({ providerId }: { providerId: string }) {
+  const search = Route.useSearch();
+  const navigate = useNavigate({ from: Route.fullPath });
+  const go = useNavigate();
   const qc = useQueryClient();
+  const [deleting, setDeleting] = useState(false);
   const provider = useQuery(getProviderOptions({ path: { name: providerId } }));
   const test = useMutation({
     ...testProviderMutation(),
@@ -279,41 +289,166 @@ function ApiKeyProvider({ providerId }: { providerId: string }) {
     onError: (e) => toast.danger(errorMessage(e)),
     onSettled: () => invalidateOps(qc, "listProviders", "getProvider"),
   });
+  const remove = useMutation({
+    ...deleteProviderMutation(),
+    onSuccess: async () => {
+      setDeleting(false);
+      toast.success(`Deleted ${providerId}`);
+      await invalidateOps(qc, "listProviders");
+      void go({ to: "/providers", search: { page: 1, pageSize: 25, q: "" } });
+    },
+  });
+  const setEdit = (open: boolean) => void navigate({ search: (prev) => ({ ...prev, edit: open ? "1" : undefined }) });
 
   if (provider.isLoading)
     return (
-      <div className="flex justify-center py-12">
-        <Spinner />
-      </div>
+      <>
+        <PageHeader before={backLink} title={<span className="font-mono">{providerId}</span>} />
+        <Skeleton className="h-20 w-full" />
+        <Skeleton className="h-40 w-full" />
+      </>
     );
   if (provider.error || !provider.data)
     return (
-      <Alert status="danger" role="alert">
-        <Alert.Indicator />
-        <Alert.Content>
-          <Alert.Title>Could not load {providerId}</Alert.Title>
-          <Alert.Description>{errorMessage(provider.error)}</Alert.Description>
-        </Alert.Content>
-      </Alert>
+      <>
+        <PageHeader before={backLink} title={<span className="font-mono">{providerId}</span>} />
+        <Alert status="danger" role="alert">
+          <Alert.Indicator />
+          <Alert.Content>
+            <Alert.Title>Could not load {providerId}</Alert.Title>
+            <Alert.Description>{errorMessage(provider.error)}</Alert.Description>
+          </Alert.Content>
+        </Alert>
+      </>
     );
 
   const p = provider.data;
+  const keys = p.keys ?? [];
+  const lastTest = test.data
+    ? test.data.ok
+      ? `Reachable · ${test.data.latency_ms} ms`
+      : "Did not answer"
+    : "Not run yet";
+
   return (
     <>
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="flex items-center gap-2 text-xl font-semibold">
-          <ProviderIcon type={p.type ?? p.name} size="md" />
-          <span className="font-mono">{p.name}</span>
-          <StatusChip status={p.status} />
-        </h1>
-        <Button variant="secondary" isPending={test.isPending} onPress={() => test.mutate({ path: { name: p.name } })}>
-          Test
-        </Button>
-      </div>
-      <p className="text-muted text-sm">
-        {GROUP_LABELS[displayGroup(p.kind)]} provider. Clients call its models as {p.name}/model.
-      </p>
-      <ProviderEditCard key={`${p.name}:${p.keys?.map((k) => k.name).join(",") ?? ""}`} provider={p} />
+      <PageHeader
+        before={backLink}
+        title={
+          <Title icon={p.type ?? p.name} name={p.name}>
+            <span className="truncate font-mono">{p.name}</span>
+            <StatusChip status={p.status} />
+          </Title>
+        }
+        description={`${GROUP_LABELS[displayGroup(p.kind)]} provider. Clients call its models as ${p.name}/model.`}
+        actions={
+          <>
+            <Button
+              size="sm"
+              variant="secondary"
+              isPending={test.isPending}
+              onPress={() => test.mutate({ path: { name: p.name } })}
+            >
+              <PlugConnection aria-hidden="true" />
+              Test
+            </Button>
+            <Button size="sm" variant="secondary" onPress={() => setEdit(true)}>
+              <PencilToSquare aria-hidden="true" />
+              Edit
+            </Button>
+            <Button
+              size="sm"
+              variant="danger-soft"
+              onPress={() => {
+                remove.reset();
+                setDeleting(true);
+              }}
+            >
+              <TrashBin aria-hidden="true" />
+              Delete
+            </Button>
+          </>
+        }
+      />
+
+      <SpecSheet>
+        <SpecSheet.Item label="Kind">{KIND_LABELS[p.kind]}</SpecSheet.Item>
+        <SpecSheet.Item label="Group">{GROUP_LABELS[displayGroup(p.kind)]}</SpecSheet.Item>
+        {p.kind === "builtin" ? (
+          <SpecSheet.Item label="Type">{p.type ? getProviderLabel(p.type) : "—"}</SpecSheet.Item>
+        ) : null}
+        {p.base_url ? (
+          <SpecSheet.Item label="Base URL" mono wide>
+            <span title={p.base_url}>{p.base_url}</span>
+          </SpecSheet.Item>
+        ) : null}
+        <SpecSheet.Item label="Keys" mono>
+          {p.key_count}
+        </SpecSheet.Item>
+        <SpecSheet.Item label="Last test" mono>
+          {lastTest}
+        </SpecSheet.Item>
+        <SpecSheet.Item label="Call as" mono>
+          {p.name}/model
+        </SpecSheet.Item>
+      </SpecSheet>
+
+      <ProviderTraffic name={p.name} />
+
+      <section className="bg-surface border-border flex flex-col gap-3 rounded-sm border p-4">
+        <SectionLabel
+          aside={
+            <Button size="sm" variant="ghost" onPress={() => setEdit(true)}>
+              Manage keys
+            </Button>
+          }
+        >
+          Keys
+        </SectionLabel>
+        {keys.length === 0 ? (
+          <p className="text-muted text-sm">No key is stored. Add one to authenticate requests to this provider.</p>
+        ) : (
+          <ul className="divide-separator flex flex-col divide-y">
+            {keys.map((k) => (
+              <li key={k.name} className="flex items-center justify-between gap-3 py-2">
+                <span className="truncate font-mono text-[13px]">{k.name}</span>
+                <span className="text-muted font-mono text-xs tracking-widest">
+                  <span aria-hidden="true">••••••••</span>
+                  <span className="sr-only">Value hidden</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <ProviderEditorDrawer
+        isOpen={search.edit === "1"}
+        provider={p}
+        editorKey={`${p.name}:${keys.map((k) => k.name).join(",")}`}
+        onClose={() => setEdit(false)}
+      />
+
+      <ConfirmDelete
+        title={`Delete ${p.name}?`}
+        body={
+          <div className="flex flex-col gap-3">
+            <p>Clients can no longer reach its models. Aliases that use it must be changed first.</p>
+            {remove.error ? (
+              <Alert status="danger" role="alert">
+                <Alert.Indicator />
+                <Alert.Content>
+                  <Alert.Description>{errorMessage(remove.error)}</Alert.Description>
+                </Alert.Content>
+              </Alert>
+            ) : null}
+          </div>
+        }
+        isOpen={deleting}
+        isPending={remove.isPending}
+        onConfirm={() => remove.mutate({ path: { name: p.name } })}
+        onCancel={() => setDeleting(false)}
+      />
     </>
   );
 }

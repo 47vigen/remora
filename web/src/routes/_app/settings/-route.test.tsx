@@ -8,7 +8,7 @@ afterEach(() => client.setConfig({ baseUrl: "", fetch: undefined }));
 
 const token = { id: "t1", name: "ci", prefix: "rt-ab", created_at: "2026-10-14T09:00:00Z" };
 
-test("the password tab sends current and new", async () => {
+test("the password section sends current and new", async () => {
   const { requests } = renderRoute("/settings", (req, url) => {
     if (url.pathname === "/api/settings/password" && req.method === "PUT") return new Response(null, { status: 204 });
   });
@@ -22,7 +22,7 @@ test("the password tab sends current and new", async () => {
 });
 
 test("a created token's value is shown once and kept nowhere else", async () => {
-  const { queryClient, requests } = renderRoute("/settings?tab=tokens", async (req, url) => {
+  const { queryClient, requests } = renderRoute("/settings", async (req, url) => {
     if (url.pathname === "/api/settings/tokens" && req.method === "GET")
       return Response.json({ items: [token], total: 1 });
     if (url.pathname === "/api/settings/tokens" && req.method === "POST")
@@ -55,7 +55,7 @@ test("a created token's value is shown once and kept nowhere else", async () => 
 
 test("import reviews the dry run, then applies the same document", async () => {
   const yaml = "aliases:\n  - name: fast\n";
-  const { requests } = renderRoute("/settings?tab=backup", (_req, url) => {
+  const { requests } = renderRoute("/settings", (_req, url) => {
     if (url.pathname === "/api/config/plan")
       return Response.json({
         changes: [
@@ -88,7 +88,7 @@ async function importFile(yaml: string) {
 const planned = () => Response.json({ changes: [{ op: "create", kind: "key", name: "gen", fields: [] }] });
 
 test("apply shows each generated key value once and keeps it out of the caches", async () => {
-  const { queryClient } = renderRoute("/settings?tab=backup", (_req, url) => {
+  const { queryClient } = renderRoute("/settings", (_req, url) => {
     if (url.pathname === "/api/config/plan") return planned();
     if (url.pathname === "/api/config/apply")
       return Response.json({
@@ -112,7 +112,7 @@ test("apply shows each generated key value once and keeps it out of the caches",
 });
 
 test("a partly failed apply shows committed key values and refetches", async () => {
-  const { queryClient } = renderRoute("/settings?tab=backup", (_req, url) => {
+  const { queryClient } = renderRoute("/settings", (_req, url) => {
     if (url.pathname === "/api/config/plan") return planned();
     if (url.pathname === "/api/config/apply")
       return Response.json(
@@ -141,7 +141,7 @@ test("export downloads the YAML text", async () => {
   URL.createObjectURL = createObjectURL;
   URL.revokeObjectURL = () => {};
   const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-  renderRoute("/settings?tab=backup", (_req, url) => {
+  renderRoute("/settings", (_req, url) => {
     if (url.pathname === "/api/config/export")
       return new Response("providers: []\n", { headers: { "Content-Type": "application/yaml" } });
   });
@@ -152,10 +152,19 @@ test("export downloads the YAML text", async () => {
 });
 
 test("about lists versions and credits", async () => {
-  renderRoute("/settings?tab=about", (_req, url) => {
+  renderRoute("/settings", (_req, url) => {
     if (url.pathname === "/api/system/version")
       return Response.json({ remora: "0.1.0", engines: [{ name: "router", version: "v1" }] });
   });
   expect(await screen.findByText("router")).toBeInTheDocument();
   expect(screen.getByText(/Apache-2\.0/)).toBeInTheDocument();
+});
+
+test("the page is one column of titled sections with an in-page nav", async () => {
+  renderRoute("/settings", () => undefined);
+  const nav = await screen.findByRole("navigation", { name: "Settings sections" });
+  const links = within(nav).getAllByRole("link");
+  expect(links.map((a) => a.getAttribute("href"))).toEqual(["#password", "#tokens", "#backup", "#about"]);
+  for (const name of ["Password", "API tokens", "Import / export", "About"])
+    expect(screen.getByRole("region", { name })).toBeInTheDocument();
 });

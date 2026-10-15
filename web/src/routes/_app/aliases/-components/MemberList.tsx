@@ -1,4 +1,4 @@
-import { Grip, Xmark } from "@gravity-ui/icons";
+import { ArrowDown, ArrowUp, Grip, Xmark } from "@gravity-ui/icons";
 import { Button, Chip, ListBox } from "@heroui/react";
 import { useDragAndDrop } from "react-aria-components";
 
@@ -16,8 +16,8 @@ function reorder(members: string[], moved: Set<string>, target: string, position
 }
 
 /**
- * The alias's members in fallback order. Items reorder by drag or by keyboard (Enter to pick up, arrows to move,
- * Enter to drop), through React Aria's drag and drop.
+ * The alias's members in fallback order. Items reorder with the move buttons, by drag, or by keyboard (Enter to
+ * pick up, arrows to move, Enter to drop) through React Aria's drag and drop.
  */
 export function MemberList({
   members,
@@ -40,36 +40,67 @@ export function MemberList({
     },
   });
 
+  const move = (from: number, to: number) => {
+    const next = [...members];
+    [next[from], next[to]] = [next[to]!, next[from]!];
+    onReorder(next);
+  };
+
   return (
     <ListBox
       aria-label="Members"
       selectionMode="none"
       dragAndDropHooks={dragAndDropHooks}
       items={members.map((ref) => ({ id: ref }))}
-      renderEmptyState={() => <p className="text-muted p-3 text-sm">No members yet.</p>}
+      className="border-border divide-separator divide-y rounded-sm border p-0"
+      renderEmptyState={() => (
+        <p className="text-muted p-3 text-sm">No members yet. Add an alias or a provider model below.</p>
+      )}
     >
       {({ id: ref }) => {
-        const position = members.indexOf(ref) + 1;
+        const index = members.indexOf(ref);
         return (
-          <ListBox.Item id={ref} textValue={ref} className="flex items-center gap-3">
-            <Grip aria-hidden="true" className="text-muted size-4 shrink-0" />
-            <span className="text-muted w-5 text-right text-sm tabular-nums">{position}</span>
+          <ListBox.Item id={ref} textValue={ref} className="flex items-center gap-2.5 rounded-none px-2 py-1.5">
+            <Grip aria-hidden="true" className="text-muted size-4 shrink-0 cursor-grab" />
+            <span className="text-muted w-4 text-right font-mono text-xs tabular-nums">{index + 1}</span>
             {memberKind(ref) === "alias" ? (
-              <Chip size="sm" variant="soft" color="accent">
-                <Chip.Label>alias</Chip.Label>
+              <Chip size="sm" variant="soft">
+                <Chip.Label className="text-[11px]">alias</Chip.Label>
               </Chip>
             ) : (
               <ProviderIcon type={ref.slice(0, ref.indexOf("/"))} size="sm" />
             )}
-            <span className="min-w-0 flex-1 truncate font-mono text-sm">{ref}</span>
+            <span className="min-w-0 flex-1 truncate font-mono text-[13px]">{ref}</span>
             {cooling.has(ref) ? (
               <Chip size="sm" variant="soft" color="warning">
-                <Chip.Label>cooling</Chip.Label>
+                <Chip.Label className="text-[11px]">cooling</Chip.Label>
               </Chip>
             ) : null}
-            <Button isIconOnly size="sm" variant="ghost" aria-label={`Remove ${ref}`} onPress={() => onRemove(ref)}>
-              <Xmark aria-hidden="true" />
-            </Button>
+            <span className="flex shrink-0 items-center">
+              <Button
+                isIconOnly
+                size="sm"
+                variant="ghost"
+                aria-label={`Move ${ref} up`}
+                isDisabled={index === 0}
+                onPress={() => move(index, index - 1)}
+              >
+                <ArrowUp aria-hidden="true" className="size-4" />
+              </Button>
+              <Button
+                isIconOnly
+                size="sm"
+                variant="ghost"
+                aria-label={`Move ${ref} down`}
+                isDisabled={index === members.length - 1}
+                onPress={() => move(index, index + 1)}
+              >
+                <ArrowDown aria-hidden="true" className="size-4" />
+              </Button>
+              <Button isIconOnly size="sm" variant="ghost" aria-label={`Remove ${ref}`} onPress={() => onRemove(ref)}>
+                <Xmark aria-hidden="true" className="size-4" />
+              </Button>
+            </span>
           </ListBox.Item>
         );
       }}

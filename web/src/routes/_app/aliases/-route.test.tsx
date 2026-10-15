@@ -44,9 +44,14 @@ test("the editor loads the alias, previews the chain and saves the draft", async
       return Response.json({ targets: [{ provider: "or", model: "x", cooling_until: "2026-10-14T10:30:00Z" }] });
   });
   expect(await screen.findByRole("heading", { name: "fast" })).toBeInTheDocument();
-  const preview = screen.getByRole("heading", { name: "Compiled chain" }).closest<HTMLElement>('[data-slot="card"]')!;
-  await waitFor(() => expect(within(preview).getByRole("listitem")).toHaveTextContent("or/x"));
+  const preview = screen.getByRole("heading", { name: "Fallback chain" }).closest("section")!;
+  await waitFor(() => expect(within(preview).getByText("Compiles to 1 target")).toBeInTheDocument());
+  const nodes = within(preview).getAllByRole("listitem");
+  expect(nodes.map((n) => n.textContent)).toEqual([expect.stringContaining("or/x"), expect.stringContaining("free")]);
+  expect(nodes[0]).toHaveTextContent("Cooling");
+  expect(nodes[1]).toHaveTextContent("Unresolved");
   expect(requests.filter((r) => r.url.endsWith("/api/aliases/compile"))).toHaveLength(1);
+  expect(screen.queryByText("Unsaved changes")).toBeNull();
   const members = screen.getByRole("listbox", { name: "Members" });
   expect(
     within(members)
@@ -56,6 +61,7 @@ test("the editor loads the alias, previews the chain and saves the draft", async
   expect(within(within(members).getAllByRole("option")[0]!).getByText("cooling")).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole("button", { name: "Remove free" }));
+  expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(requests.some((r) => r.method === "PUT")).toBe(true));
   const put = requests.find((r) => r.method === "PUT")!;

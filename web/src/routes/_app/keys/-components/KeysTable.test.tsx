@@ -62,6 +62,7 @@ test("rows show name, prefix, allowlist chips, enabled switch, created time and 
     "Requests 24h",
     "Actions",
   ]);
+  expect(screen.getByRole("columnheader", { name: "Actions" }).querySelector(".sr-only")).not.toBeNull();
   expect(row1).toHaveTextContent("ci");
   expect(row1).toHaveTextContent("sk-ab…");
   for (const p of ["fast", "or/*", "cp/*"]) expect(within(row1).getByText(p)).toBeInTheDocument();
@@ -83,6 +84,13 @@ test("the row actions report the key", async () => {
   expect(handlers.onToggle).toHaveBeenCalledWith(k2, true);
   await userEvent.click(within(row2).getByRole("button", { name: "Delete laptop" }));
   expect(handlers.onDelete).toHaveBeenCalledWith(k2);
+  expect(handlers.onOpen).toHaveBeenCalledTimes(1);
+});
+
+test("clicking anywhere on a row opens the key", async () => {
+  const { handlers, row2 } = setup();
+  await userEvent.click(within(row2).getByText("2d ago"));
+  expect(handlers.onOpen).toHaveBeenCalledWith(k2);
 });
 
 test("usage that arrives after the rows replaces the loading placeholder", () => {

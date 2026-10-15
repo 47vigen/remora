@@ -13,6 +13,7 @@ test("shows the value once and removes it from the DOM on close", async () => {
   expect(screen.getByText("Copy it now. You will not see it again.")).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Copy" }));
   expect(writeText).toHaveBeenCalledWith("sk-test-123");
+  expect(await screen.findByRole("button", { name: "Copied" })).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Done" }));
   expect(onClose).toHaveBeenCalled();
   rerender(<SecretOnce title="Key created" value={null} onClose={onClose} />);
@@ -26,4 +27,10 @@ test("is not dismissed by Escape", async () => {
   await userEvent.keyboard("{Escape}");
   expect(onClose).not.toHaveBeenCalled();
   expect(screen.getByRole("dialog", { name: "Key created" })).toBeInTheDocument();
+});
+
+test("shows a usage example when given one", () => {
+  render(<SecretOnce title="Key created" value="sk-test-123" example="curl /v1/models" onClose={() => {}} />);
+  expect(screen.getByText("Use it like this")).toBeInTheDocument();
+  expect(screen.getByText("curl /v1/models")).toBeInTheDocument();
 });

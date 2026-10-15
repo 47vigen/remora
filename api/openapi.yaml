@@ -728,10 +728,12 @@ paths:
         - name: group_by
           in: query
           required: false
-          description: With a value other than `none`, `groups` holds one summary per key, alias or provider.
+          description: >-
+            With a value other than `none`, `groups` holds one summary per key, alias, provider or model. A model
+            group is named `<provider>/<model>` and lists the 100 busiest models of the range.
           schema:
             type: string
-            enum: [none, key, alias, provider]
+            enum: [none, key, alias, provider, model]
             default: none
         - $ref: "#/components/parameters/KeyFilter"
         - $ref: "#/components/parameters/AliasFilter"
@@ -1494,15 +1496,37 @@ components:
           format: double
     StatsPoint:
       type: object
-      required: [time, requests, errors]
+      description: >-
+        One time bucket of the series. The bucket size follows the range: a minute under 2 hours, 10 minutes under
+        24 hours, an hour under 3 days, then 8 hours, a day, 3 days, a week and 30 days. Requests and errors count
+        every attempt of a fallback chain; tokens and cost cover every finished attempt.
+      required: [time, requests, errors, prompt_tokens, completion_tokens, total_tokens, cost_usd]
       properties:
         time:
           type: string
           format: date-time
+          description: The start of the bucket.
         requests:
           type: integer
         errors:
           type: integer
+        prompt_tokens:
+          type: integer
+        completion_tokens:
+          type: integer
+        total_tokens:
+          type: integer
+        cost_usd:
+          type: number
+          format: double
+        latency_p50_ms:
+          type: [number, "null"]
+          format: double
+          description: Over the successful attempts in the bucket, by nearest rank. Null when there are none.
+        latency_p95_ms:
+          type: [number, "null"]
+          format: double
+          description: Over the successful attempts in the bucket, interpolated. Null when there are none.
     StatsGroup:
       type: object
       required: [name, summary]

@@ -253,3 +253,70 @@ func TestStatsSubscriptionProvidersSplitByModel(t *testing.T) {
 		t.Fatalf("a subscription provider that served nothing = %d %s", code, body)
 	}
 }
+
+func TestStatsSeries(t *testing.T) {
+	env := newTestEnv(t)
+	t0 := time.Date(2026, 10, 14, 10, 0, 0, 0, time.UTC)
+	t1 := t0.Add(time.Hour)
+	env.server.now = func() time.Time { return t1.Add(30 * time.Minute) }
+	env.logs.histogram = []bifrost.HistogramBucket{{Timestamp: t0, Count: 4, Success: 3, Error: 1}, {Timestamp: t1}}
+	env.logs.tokens = []bifrost.TokenBucket{{Timestamp: t0, PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}, {Timestamp: t1}}
+	env.logs.costs = []bifrost.CostBucket{{Timestamp: t0, TotalCost: 0.25}, {Timestamp: t1}}
+	env.logs.latency = []bifrost.LatencyBucket{{Timestamp: t0, P95Latency: 120, TotalRequests: 3}, {Timestamp: t1}}
+	for i, ms := range []float64{80, 40, 60} {
+		env.logs.add(bifrost.Log{ID: string(rune('a' + i)), Timestamp: t0.Add(5 * time.Minute), Status: "success", Latency: ptr(ms)})
+	}
+	// Before the first bucket: a p50 over the whole range would read 40, not 60.
+	env.logs.add(bifrost.Log{ID: "early", Timestamp: t0.Add(-time.Hour), Status: "success", Latency: ptr(1.0)})
+
+	s, raw := getStats(t, env, "/api/stats")
+	if len(s.Series) != 2 {
+		t.Fatalf("series = %s", raw)
+	}
+	want := map[string]any{
+		"requests": 4.0, "errors": 1.0, "prompt_tokens": 10.0, "completion_tokens": 5.0, "total_tokens": 15.0,
+		"cost_usd": 0.25, "latency_p50_ms": 60.0, "latency_p95_ms": 120.0,
+	}
+	for k, v := range want {
+		if s.Series[0][k] != v {
+			t.Errorf("series[0].%s = %v, want %v", k, s.Series[0][k], v)
+		}
+	}
+	for _, k := range []string{"requests", "errors", "prompt_tokens", "completion_tokens", "total_tokens", "cost_usd"} {
+		if v, ok := s.Series[1][k]; !ok || v != 0.0 {
+			t.Errorf("series[1].%s = %v (present %v), want 0", k, v, ok)
+		}
+	}
+	if s.Series[1]["latency_p50_ms"] != nil || s.Series[1]["latency_p95_ms"] != nil {
+		t.Errorf("empty bucket percentiles = %s", raw)
+	}
+	if f := env.logs.latCalls[0]; !slices.Equal(f.Status, []string{"success"}) || f.Start == nil {
+		t.Errorf("latency filter = %+v", f)
+	}
+}
+
+func TestStatsGroupByModel(t *testing.T) {
+	env := newTestEnv(t)
+	env.names.targets = map[[2]string]alias.Target{{"fd-or", "gpt-x"}: {Provider: "or", Model: "gpt-x"}}
+	env.logs.usage = []bifrost.ModelUsage{
+		{Provider: "fd-or", Model: "gpt-x", TotalRequests: 4},
+		{Provider: bifrost.OAuthProvider, Model: "codex/c-1", TotalRequests: 2},
+	}
+	env.logs.stats = func(f bifrost.LogFilter) bifrost.LogStats {
+		switch {
+		case slices.Equal(f.Models, []string{"gpt-x"}) && slices.Equal(f.Providers, []string{"fd-or"}):
+			return bifrost.LogStats{UserFacingTotalRequests: 4, UserFacingSuccessRate: 100}
+		case slices.Equal(f.Models, []string{"codex/c-1"}) && slices.Equal(f.Providers, []string{bifrost.OAuthProvider}):
+			return bifrost.LogStats{UserFacingTotalRequests: 2, UserFacingSuccessRate: 50}
+		}
+		return bifrost.LogStats{}
+	}
+	s, raw := getStats(t, env, "/api/stats?group_by=model")
+	if len(s.Groups) != 2 || s.Groups[0].Name != "or/gpt-x" || s.Groups[1].Name != "codex/c-1" ||
+		s.Groups[0].Summary["requests"] != 4.0 || s.Groups[1].Summary["errors"] != 1.0 {
+		t.Fatalf("groups = %s", raw)
+	}
+	if f := env.logs.usageCalls[0]; f.Start == nil || !f.Start.Equal(s.From) {
+		t.Errorf("model usage filter = %+v", f)
+	}
+}

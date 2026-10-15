@@ -1,4 +1,5 @@
-import { Button, Chip, Label, Meter, Switch, Table } from "@heroui/react";
+import { ArrowRotateLeft, Ellipsis, TrashBin } from "@gravity-ui/icons";
+import { Button, Chip, Dropdown, Label, Meter, Switch, Table } from "@heroui/react";
 
 import { accountHealth, isCooling } from "../-lib/accounts";
 import type { Account } from "../../../../client/types.gen";
@@ -77,7 +78,7 @@ export function AccountsTable({
               return (
                 <Table.Row key={a.id} id={a.id}>
                   <Table.Cell>
-                    <span className="font-medium">{name}</span>
+                    <span className="font-mono text-[13px]">{name}</span>
                   </Table.Cell>
                   <Table.Cell>
                     <span className="flex flex-col items-start gap-1">
@@ -105,18 +106,28 @@ export function AccountsTable({
                     </Switch>
                   </Table.Cell>
                   <Table.Cell>
-                    <span className="flex justify-end gap-2">
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        isDisabled={!isCooling(a)}
-                        onPress={() => onResetCooldown(a)}
-                      >
-                        Reset cooldown
-                      </Button>
-                      <Button size="sm" variant="danger-soft" onPress={() => onDelete(a)}>
-                        Delete
-                      </Button>
+                    <span className="flex justify-end">
+                      <Dropdown>
+                        <Button isIconOnly size="sm" variant="ghost" aria-label={`Actions for ${name}`}>
+                          <Ellipsis aria-hidden="true" className="size-4" />
+                        </Button>
+                        <Dropdown.Popover placement="bottom end">
+                          <Dropdown.Menu
+                            aria-label={`Actions for ${name}`}
+                            disabledKeys={isCooling(a) ? [] : ["reset"]}
+                            onAction={(key) => (key === "reset" ? onResetCooldown(a) : onDelete(a))}
+                          >
+                            <Dropdown.Item id="reset" textValue="Reset cooldown">
+                              <ArrowRotateLeft aria-hidden="true" className="text-muted size-4 shrink-0" />
+                              <Label>Reset cooldown</Label>
+                            </Dropdown.Item>
+                            <Dropdown.Item id="delete" textValue="Delete" variant="danger">
+                              <TrashBin aria-hidden="true" className="text-danger size-4 shrink-0" />
+                              <Label>Delete</Label>
+                            </Dropdown.Item>
+                          </Dropdown.Menu>
+                        </Dropdown.Popover>
+                      </Dropdown>
                     </span>
                   </Table.Cell>
                 </Table.Row>

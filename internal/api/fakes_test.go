@@ -506,11 +506,17 @@ type fakeLogs struct {
 	rows      []bifrost.Log
 	stats     func(bifrost.LogFilter) bifrost.LogStats // nil answers zeros
 	histogram []bifrost.HistogramBucket
+	tokens    []bifrost.TokenBucket
+	costs     []bifrost.CostBucket
+	latency   []bifrost.LatencyBucket
+	usage     []bifrost.ModelUsage
 	models    []string // the distinct models LogModels searches
 
 	searches   []bifrost.LogFilter
 	statsCalls []bifrost.LogFilter
 	histCalls  []bifrost.LogFilter
+	latCalls   []bifrost.LogFilter
+	usageCalls []bifrost.LogFilter
 }
 
 func (f *fakeLogs) add(rows ...bifrost.Log) {
@@ -543,7 +549,8 @@ func (f *fakeLogs) SearchLogs(_ context.Context, fl bifrost.LogFilter) (bifrost.
 	for _, l := range f.rows {
 		if len(fl.Status) > 0 && !slices.Contains(fl.Status, l.Status) ||
 			fl.ParentRequestID != "" && (l.ParentRequestID == nil || *l.ParentRequestID != fl.ParentRequestID) ||
-			!anyOf(fl.VirtualKeyIDs, l.VirtualKeyID) || !anyOf(fl.RoutingRuleIDs, l.RoutingRuleID) {
+			!anyOf(fl.VirtualKeyIDs, l.VirtualKeyID) || !anyOf(fl.RoutingRuleIDs, l.RoutingRuleID) ||
+			fl.Start != nil && l.Timestamp.Before(*fl.Start) || fl.End != nil && l.Timestamp.After(*fl.End) {
 			continue
 		}
 		l.ErrorDetails, l.InputHistory, l.OutputMessage, l.Params = nil, nil, nil, nil
@@ -630,4 +637,30 @@ func (f *fakeLogs) Histogram(_ context.Context, fl bifrost.LogFilter) ([]bifrost
 	defer f.mu.Unlock()
 	f.histCalls = append(f.histCalls, fl)
 	return slices.Clone(f.histogram), nil
+}
+
+func (f *fakeLogs) TokenHistogram(context.Context, bifrost.LogFilter) ([]bifrost.TokenBucket, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.tokens), nil
+}
+
+func (f *fakeLogs) CostHistogram(context.Context, bifrost.LogFilter) ([]bifrost.CostBucket, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.costs), nil
+}
+
+func (f *fakeLogs) LatencyHistogram(_ context.Context, fl bifrost.LogFilter) ([]bifrost.LatencyBucket, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.latCalls = append(f.latCalls, fl)
+	return slices.Clone(f.latency), nil
+}
+
+func (f *fakeLogs) ModelUsage(_ context.Context, fl bifrost.LogFilter) ([]bifrost.ModelUsage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.usageCalls = append(f.usageCalls, fl)
+	return slices.Clone(f.usage), nil
 }

@@ -1,16 +1,21 @@
 import { Plus } from "@gravity-ui/icons";
-import { buttonVariants, Label, Link, ListBox, Select, Switch } from "@heroui/react";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { buttonVariants, cn, Link } from "@heroui/react";
+import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import {
+  deleteAliasMutation,
   getAliasChainOptions,
   listAliasesOptions,
   listCoolingOptions,
 } from "../../../client/@tanstack/react-query.gen";
+import { ConfirmDelete } from "../../../components/confirm-delete/ConfirmDelete";
 import { DataList } from "../../../components/data-list/DataList";
+import { PageHeader } from "../../../components/page-header/PageHeader";
+import { errorMessage } from "../../../lib/api";
 import { type ListSearch, parseEnum, parseListSearch } from "../../../lib/list-search";
+import { invalidateOps } from "../../../lib/query";
 import { AliasesTable } from "./-components/AliasesTable";
 import { ALIAS_KINDS, type AliasDraft } from "./-lib/alias-form";
 
@@ -33,6 +38,15 @@ function AliasesPage() {
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
   const { page, pageSize, q, kind, cooling } = search;
+  const queryClient = Route.useRouteContext({ select: (c) => c.queryClient });
+  const [deleting, setDeleting] = useState<string>();
+  const remove = useMutation({
+    ...deleteAliasMutation(),
+    onSuccess: async () => {
+      setDeleting(undefined);
+      await invalidateOps(queryClient, "listAliases", "getAlias", "getAliasChain", "listCooling");
+    },
+  });
   const update = (next: Partial<AliasesSearch>) =>
     void navigate({ search: (prev) => ({ ...prev, page: 1, ...next }), replace: true });
 
@@ -63,64 +77,89 @@ function AliasesPage() {
     if (data) chainLength.set(a.name, data.targets.length);
   });
 
+  const newAlias = (
+    <Link
+      href="/aliases/new"
+      className={cn(buttonVariants({ variant: "primary", size: "sm" }), "gap-1.5 no-underline")}
+    >
+      <Plus aria-hidden="true" className="size-4" />
+      New alias
+    </Link>
+  );
+  const filtering = Boolean(q || kind || cooling);
+
   return (
-    <DataList.Root>
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold">Aliases</h1>
-        <Link href="/aliases/new" className={buttonVariants({ variant: "primary" })}>
-          <Plus aria-hidden="true" />
-          New alias
-        </Link>
-      </div>
-      <DataList.Toolbar>
-        <DataList.Search value={q} onChange={(next) => update({ q: next })} placeholder="Search aliases" />
-        <DataList.Filters>
-          <Select
-            className="w-44"
-            value={kind ?? "all"}
-            onChange={(key) => update({ kind: parseEnum(key, ALIAS_KINDS) })}
-          >
-            <Label>Kind</Label>
-            <Select.Trigger>
-              <Select.Value />
-              <Select.Indicator />
-            </Select.Trigger>
-            <Select.Popover>
-              <ListBox aria-label="Kind">
-                {["all", ...ALIAS_KINDS].map((k) => (
-                  <ListBox.Item key={k} id={k} textValue={k === "all" ? "All kinds" : k}>
-                    {k === "all" ? "All kinds" : k}
-                    <ListBox.ItemIndicator />
-                  </ListBox.Item>
-                ))}
-              </ListBox>
-            </Select.Popover>
-          </Select>
-          <Switch isSelected={cooling === true} onChange={(on) => update({ cooling: on ? true : undefined })}>
-            <Switch.Content>
-              <Switch.Control>
-                <Switch.Thumb />
-              </Switch.Control>
-              <Label>Cooling only</Label>
-            </Switch.Content>
-          </Switch>
-        </DataList.Filters>
-      </DataList.Toolbar>
-      <DataList.State
-        isLoading={list.isPending}
-        error={list.error ?? undefined}
-        isEmpty={items.length === 0}
-        emptyText={q || kind || cooling ? "No aliases match these filters." : "No aliases yet."}
-      >
-        <AliasesTable items={items} chainLength={chainLength} cooling={coolingByAlias} />
-      </DataList.State>
-      <DataList.Pagination
-        page={page}
-        pageSize={pageSize}
-        total={total}
-        onPageChange={(n) => void navigate({ search: (prev) => ({ ...prev, page: n }) })}
-        onPageSizeChange={(n) => update({ pageSize: n as ListSearch["pageSize"] })}
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        title="Aliases"
+        description="A named model that clients call. Each one walks its members in order, falling back past any that fail or are cooling."
+        actions={newAlias}
       />
-    </DataList.Root>
+      <DataList.Root>
+        <DataList.Toolbar>
+          <DataList.Search value={q} onChange={(next) => update({ q: next })} placeholder="Search aliases" />
+          <DataList.Filters>
+            <DataList.Filter
+              label="Kind"
+              value={kind}
+              options={ALIAS_KINDS.map((k) => ({ id: k, label: k }))}
+              onChange={(k) => update({ kind: k })}
+            />
+            <DataList.Filter
+              label="Status"
+              allLabel="Any"
+              value={cooling ? "cooling" : undefined}
+              options={[{ id: "cooling", label: "Cooling" }]}
+              onChange={(v) => update({ cooling: v ? true : undefined })}
+            />
+          </DataList.Filters>
+        </DataList.Toolbar>
+        <DataList.State
+          isLoading={list.isPending}
+          error={list.error ?? undefined}
+          isEmpty={items.length === 0}
+          emptyText={
+            filtering
+              ? "No aliases match these filters. Clear them to see every alias."
+              : "No aliases yet. Create one to give clients a stable model name with fallbacks."
+          }
+          emptyAction={filtering ? undefined : newAlias}
+        >
+          <AliasesTable
+            items={items}
+            chainLength={chainLength}
+            cooling={coolingByAlias}
+            onOpen={(name) => void navigate({ to: "/aliases/$name", params: { name } })}
+            onDelete={setDeleting}
+          />
+        </DataList.State>
+        <DataList.Pagination
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          onPageChange={(n) => void navigate({ search: (prev) => ({ ...prev, page: n }) })}
+          onPageSizeChange={(n) => update({ pageSize: n as ListSearch["pageSize"] })}
+        />
+      </DataList.Root>
+      <ConfirmDelete
+        title={`Delete ${deleting ?? ""}?`}
+        isOpen={deleting !== undefined}
+        isPending={remove.isPending}
+        onCancel={() => {
+          setDeleting(undefined);
+          remove.reset();
+        }}
+        onConfirm={() => deleting && remove.mutate({ path: { name: deleting } })}
+        body={
+          remove.error ? (
+            <p role="alert" className="text-danger">
+              {errorMessage(remove.error)}
+            </p>
+          ) : (
+            <p>Requests for this alias will fail. Keys and aliases that use it must be changed first.</p>
+          )
+        }
+      />
+    </div>
   );
 }

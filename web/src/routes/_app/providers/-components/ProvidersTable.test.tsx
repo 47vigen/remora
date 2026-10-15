@@ -16,6 +16,7 @@ function setup(testing?: string) {
   const handlers = {
     onOpen: vi.fn<(name: string) => void>(),
     onTest: vi.fn<(p: Provider) => void>(),
+    onEdit: vi.fn<(p: Provider) => void>(),
     onDelete: vi.fn<(p: Provider) => void>(),
   };
   render(<ProvidersTable items={items} subscriptions={subscriptions} testing={testing} {...handlers} />);
@@ -33,21 +34,33 @@ test("one row per provider with its display group, and one per subscription prov
   const codex = rowOf("Codex");
   expect(within(codex).getByText("Subscription")).toBeInTheDocument();
   expect(within(codex).getByText("3 accounts")).toBeInTheDocument();
-  expect(within(codex).queryByRole("button", { name: "Test" })).toBeNull();
+  expect(within(codex).queryByRole("button", { name: /Actions/ })).toBeNull();
 });
 
-test("pressing Test calls onTest, and the row being tested shows a pending button", async () => {
+test("a provider row shows its target under the name", () => {
+  setup();
+  expect(rowOf("openrouter")).toHaveTextContent("OpenRouter");
+  expect(within(rowOf("local")).getByText("http://h")).toBeInTheDocument();
+});
+
+const choose = async (row: string, action: string) => {
+  await userEvent.click(within(rowOf(row)).getByRole("button", { name: `Actions for ${row}` }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: action }));
+};
+
+test("the row menu tests, edits and deletes without opening the row; the row being tested shows a pending menu", async () => {
   const h = setup("local");
-  await userEvent.click(within(rowOf("openrouter")).getByRole("button", { name: "Test" }));
+  await choose("openrouter", "Test");
   expect(h.onTest).toHaveBeenCalledWith(items[0]);
-  expect(h.onOpen).not.toHaveBeenCalled();
-  expect(within(rowOf("local")).getByRole("button", { name: /Test/ })).toHaveAttribute("data-pending", "true");
-});
-
-test("pressing Delete calls onDelete", async () => {
-  const h = setup();
-  await userEvent.click(within(rowOf("decide")).getByRole("button", { name: "Delete" }));
+  await choose("soniox", "Edit");
+  expect(h.onEdit).toHaveBeenCalledWith(items[3]);
+  await choose("decide", "Delete");
   expect(h.onDelete).toHaveBeenCalledWith(items[2]);
+  expect(h.onOpen).not.toHaveBeenCalled();
+  expect(within(rowOf("local")).getByRole("button", { name: "Actions for local" })).toHaveAttribute(
+    "data-pending",
+    "true",
+  );
 });
 
 test("pressing a row calls onOpen with the provider name", async () => {

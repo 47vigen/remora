@@ -110,10 +110,27 @@ test("?key= opens the drawer with the allowlist and usage", async () => {
   const { requests } = renderRoute("/keys?key=k1", api());
   const dialog = await screen.findByRole("dialog");
   expect(await within(dialog).findByRole("textbox", { name: "Name" })).toHaveValue("ci");
-  expect(within(dialog).getByText("Matches 1: fast")).toBeInTheDocument();
+  expect(within(within(dialog).getByRole("list", { name: "Matches 1" })).getByText("fast")).toBeInTheDocument();
   expect(await within(dialog).findByText("7")).toBeInTheDocument();
   expect(within(dialog).getByRole("link", { name: "View this key's logs" })).toHaveAttribute("href", "/logs?keyId=k1");
   await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
   await waitFor(() => expect(requests.some((r) => r.method === "PATCH")).toBe(true));
   expect(await requests.find((r) => r.method === "PATCH")!.json()).toEqual({ name: "ci", allow: ["fast"] });
+});
+
+test("?create=true opens the new key dialog and closing it clears the parameter", async () => {
+  const { router } = renderRoute("/keys?create=true", api());
+  const dialog = await screen.findByRole("dialog");
+  expect(within(dialog).getByRole("heading", { name: "New key" })).toBeInTheDocument();
+  await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(router.state.location.search).not.toHaveProperty("create");
+});
+
+test("an empty list offers to create the first key", async () => {
+  renderRoute("/keys", (_req, url) => {
+    if (url.pathname.startsWith("/api/")) return Response.json({ items: [], total: 0 });
+  });
+  expect(await screen.findByText("No keys yet. Create one for each client.")).toBeInTheDocument();
+  expect(screen.getAllByRole("button", { name: "New key" })).toHaveLength(2);
 });

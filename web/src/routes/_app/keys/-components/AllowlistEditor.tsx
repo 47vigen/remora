@@ -1,5 +1,5 @@
 import { Alert, Label, Tag, TagGroup } from "@heroui/react";
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import { previewMatches, validatePattern } from "../-lib/glob";
 import { AddCombo } from "../../../../components/add-combo/AddCombo";
@@ -23,6 +23,7 @@ export function AllowlistEditor({
   onChange(v: string[]): void;
 }) {
   const [error, setError] = useState<string>();
+  const listId = useId();
   const matches = previewMatches(value, candidates);
   const more = matches.length - PREVIEW_NAMES;
 
@@ -43,7 +44,7 @@ export function AllowlistEditor({
           renderEmptyState={() => <span className="text-muted text-sm">Nothing allowed yet.</span>}
         >
           {(item) => (
-            <Tag id={item.id} textValue={item.id} className="font-mono">
+            <Tag id={item.id} textValue={item.id} className="font-mono text-xs">
               {item.id}
             </Tag>
           )}
@@ -67,11 +68,26 @@ export function AllowlistEditor({
         onInputChange={() => setError(undefined)}
       />
       {value.length > 0 ? (
-        <p className="text-muted text-sm">
-          {matches.length === 0
-            ? "Matches no alias or model known today."
-            : `Matches ${matches.length}: ${matches.slice(0, PREVIEW_NAMES).join(", ")}${more > 0 ? ` and ${more} more` : ""}`}
-        </p>
+        matches.length === 0 ? (
+          <p className="text-muted text-sm">Matches no alias or model known today.</p>
+        ) : (
+          <div className="border-border overflow-hidden rounded-sm border">
+            <div className="bg-surface-secondary border-border flex items-center justify-between border-b px-3 py-1.5">
+              <span id={listId} className="label-caps text-muted">
+                Matches {matches.length}
+              </span>
+              <span className="text-muted text-xs">what this key can call today</span>
+            </div>
+            <ul aria-labelledby={listId} className="divide-separator flex flex-col divide-y">
+              {matches.slice(0, PREVIEW_NAMES).map((m) => (
+                <li key={m} className="truncate px-3 py-1.5 font-mono text-[13px]">
+                  {m}
+                </li>
+              ))}
+              {more > 0 ? <li className="text-muted px-3 py-1.5 text-xs">and {more} more</li> : null}
+            </ul>
+          </div>
+        )
       ) : null}
     </div>
   );

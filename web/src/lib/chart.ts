@@ -32,6 +32,7 @@ export function formatCost(cost: number): string {
   if (cost === 0) {
     return `$0`;
   }
+  if (cost < 0.0001) return "<$0.0001";
   if (cost < 0.01) {
     return `$${cost.toFixed(4)}`;
   }
@@ -44,15 +45,18 @@ export function formatLatency(ms: number): string {
   return `${ms.toFixed(0)}ms`;
 }
 
-// Semantic and token colours, as HeroUI theme variables only. Status hues are never reused for a measure.
+// Measures use the accent and its deep ink; status hues are kept for outcomes only.
 export const CHART_COLORS = {
-  success: "var(--success)",
+  success: "var(--accent)",
   error: "var(--danger)",
   promptTokens: "var(--accent)",
-  completionTokens: "var(--warning)",
+  completionTokens: "var(--ink-strong)",
   cost: "var(--accent)",
   p50: "var(--accent)",
-  p95: "var(--warning)",
-  grid: "var(--border)",
+  p95: "var(--ink-strong)",
+  grid: "var(--separator)",
   axis: "var(--muted)",
 } as const;
+
+/** Axis tick text: the mono label voice at a size that stays legible. */
+export const AXIS_TICK = { fontSize: 10.5, fill: "var(--muted)", fontFamily: "var(--font-mono)" } as const;

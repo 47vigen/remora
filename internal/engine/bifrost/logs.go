@@ -163,16 +163,77 @@ func (c *Client) LogStats(ctx context.Context, f LogFilter) (LogStats, error) {
 	return out, nil
 }
 
-// Histogram calls GET /api/logs/histogram; the engine chooses the bucket size from the time range. Paging and
-// sorting fields of f are ignored.
-func (c *Client) Histogram(ctx context.Context, f LogFilter) ([]HistogramBucket, error) {
+// TokenBucket is one time bucket of GET /api/logs/histogram/tokens.
+type TokenBucket struct {
+	Timestamp        time.Time `json:"timestamp"`
+	PromptTokens     int64     `json:"prompt_tokens"`
+	CompletionTokens int64     `json:"completion_tokens"`
+	TotalTokens      int64     `json:"total_tokens"`
+}
+
+// CostBucket is one time bucket of GET /api/logs/histogram/cost, in dollars.
+type CostBucket struct {
+	Timestamp time.Time `json:"timestamp"`
+	TotalCost float64   `json:"total_cost"`
+}
+
+// LatencyBucket is one time bucket of GET /api/logs/histogram/latency, in milliseconds. P95Latency is 0 when
+// TotalRequests is.
+type LatencyBucket struct {
+	Timestamp     time.Time `json:"timestamp"`
+	P95Latency    float64   `json:"p95_latency"`
+	TotalRequests int64     `json:"total_requests"`
+}
+
+// ModelUsage is one row of GET /api/logs/rankings: a front-door provider and model that served requests.
+type ModelUsage struct {
+	Provider      string `json:"provider"`
+	Model         string `json:"model"`
+	TotalRequests int64  `json:"total_requests"`
+}
+
+// histogram reads the buckets of one of the engine's histograms, which all choose the bucket size from the time
+// range the same way. Paging and sorting fields of f are ignored.
+func histogram[B any](ctx context.Context, c *Client, path string, f LogFilter) ([]B, error) {
 	var out struct {
-		Buckets []HistogramBucket `json:"buckets"`
+		Buckets []B `json:"buckets"`
 	}
-	if err := c.do(ctx, http.MethodGet, withQuery("/api/logs/histogram", f.query(false)), nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, withQuery(path, f.query(false)), nil, &out); err != nil {
 		return nil, err
 	}
 	return out.Buckets, nil
+}
+
+// Histogram calls GET /api/logs/histogram: request counts by outcome.
+func (c *Client) Histogram(ctx context.Context, f LogFilter) ([]HistogramBucket, error) {
+	return histogram[HistogramBucket](ctx, c, "/api/logs/histogram", f)
+}
+
+// TokenHistogram calls GET /api/logs/histogram/tokens.
+func (c *Client) TokenHistogram(ctx context.Context, f LogFilter) ([]TokenBucket, error) {
+	return histogram[TokenBucket](ctx, c, "/api/logs/histogram/tokens", f)
+}
+
+// CostHistogram calls GET /api/logs/histogram/cost.
+func (c *Client) CostHistogram(ctx context.Context, f LogFilter) ([]CostBucket, error) {
+	return histogram[CostBucket](ctx, c, "/api/logs/histogram/cost", f)
+}
+
+// LatencyHistogram calls GET /api/logs/histogram/latency.
+func (c *Client) LatencyHistogram(ctx context.Context, f LogFilter) ([]LatencyBucket, error) {
+	return histogram[LatencyBucket](ctx, c, "/api/logs/histogram/latency", f)
+}
+
+// ModelUsage calls GET /api/logs/rankings: the provider and model pairs that served requests matching f, busiest
+// first, at most the engine's ranking cap (100).
+func (c *Client) ModelUsage(ctx context.Context, f LogFilter) ([]ModelUsage, error) {
+	var out struct {
+		Rankings []ModelUsage `json:"rankings"`
+	}
+	if err := c.do(ctx, http.MethodGet, withQuery("/api/logs/rankings", f.query(false)), nil, &out); err != nil {
+		return nil, err
+	}
+	return out.Rankings, nil
 }
 
 // KeyStatus is what listing models with one provider key found: Status "success", "list_models_failed", or
