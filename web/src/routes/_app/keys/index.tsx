@@ -2,20 +2,19 @@ import { Plus } from "@gravity-ui/icons";
 import {
   Alert,
   Button,
+  Description,
   Drawer,
   FieldError,
   Form,
   Input,
   Label,
-  ListBox,
   Modal,
-  Select,
-  Spinner,
+  Skeleton,
   TextField,
 } from "@heroui/react";
 import { type MutationFunctionContext, useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 
 import type { CreateKeyData, Key, Options } from "../../../client";
 import {
@@ -32,6 +31,7 @@ import {
 } from "../../../client/@tanstack/react-query.gen";
 import { ConfirmDelete } from "../../../components/confirm-delete/ConfirmDelete";
 import { DataList } from "../../../components/data-list/DataList";
+import { PageHeader } from "../../../components/page-header/PageHeader";
 import { SecretOnce } from "../../../components/secret-once/SecretOnce";
 import { errorMessage } from "../../../lib/api";
 import { type ListSearch, parseEnum, parseListSearch } from "../../../lib/list-search";
@@ -41,7 +41,11 @@ import { KeysTable } from "./-components/KeysTable";
 import { KeyUsage } from "./-components/KeyUsage";
 
 const ENABLED = ["yes", "no"] as const;
-type KeysSearch = ListSearch & { enabled?: (typeof ENABLED)[number]; key?: string };
+type KeysSearch = ListSearch & { enabled?: (typeof ENABLED)[number]; key?: string; create?: true };
+const STATES = [
+  { id: "yes", label: "Enabled" },
+  { id: "no", label: "Disabled" },
+] as const;
 
 /** The API caps a page at 200; the enabled filter has no server side, so it filters one 200-row page here. */
 const MAX_LIMIT = 200;
@@ -52,6 +56,7 @@ export const Route = createFileRoute("/_app/keys/")({
     ...parseListSearch(raw),
     enabled: parseEnum(raw.enabled, ENABLED),
     key: typeof raw.key === "string" && raw.key !== "" ? raw.key : undefined,
+    create: raw.create === true || raw.create === "true" ? true : undefined,
   }),
   component: KeysPage,
 });
@@ -108,7 +113,8 @@ function KeysPage() {
     if (g) usage.set(k.id, g);
   }
 
-  const [creating, setCreating] = useState(false);
+  const setCreating = (create: boolean) =>
+    void navigate({ search: (prev) => ({ ...prev, create: create || undefined }), replace: !create });
   const [secret, setSecret] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<Key | null>(null);
 
@@ -124,76 +130,58 @@ function KeysPage() {
     },
   });
 
+  const newKey = (
+    <Button variant="primary" onPress={() => setCreating(true)}>
+      <Plus aria-hidden="true" />
+      New key
+    </Button>
+  );
+
   return (
-    <DataList.Root>
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold">Keys</h1>
-        <Button variant="primary" onPress={() => setCreating(true)}>
-          <Plus aria-hidden="true" />
-          New key
-        </Button>
-      </div>
-      <DataList.Toolbar>
-        <DataList.Search value={q} onChange={(next) => update({ q: next })} placeholder="Search keys" />
-        <DataList.Filters>
-          <Select
-            className="w-40"
-            value={enabled ?? "all"}
-            onChange={(v) => update({ enabled: parseEnum(v, ENABLED) })}
-          >
-            <Label>State</Label>
-            <Select.Trigger>
-              <Select.Value />
-              <Select.Indicator />
-            </Select.Trigger>
-            <Select.Popover>
-              <ListBox aria-label="State">
-                <ListBox.Item id="all" textValue="All keys">
-                  All keys
-                  <ListBox.ItemIndicator />
-                </ListBox.Item>
-                <ListBox.Item id="yes" textValue="Enabled">
-                  Enabled
-                  <ListBox.ItemIndicator />
-                </ListBox.Item>
-                <ListBox.Item id="no" textValue="Disabled">
-                  Disabled
-                  <ListBox.ItemIndicator />
-                </ListBox.Item>
-              </ListBox>
-            </Select.Popover>
-          </Select>
-        </DataList.Filters>
-      </DataList.Toolbar>
-      {toggle.error ? <ErrorAlert title="Could not change the key" error={toggle.error} /> : null}
-      <DataList.State
-        isLoading={list.isPending}
-        error={list.error ?? undefined}
-        isEmpty={items.length === 0}
-        emptyText={q || enabled ? "No keys match these filters." : "No keys yet."}
-      >
-        <KeysTable
-          items={items}
-          usage={stats.isPending ? undefined : usage}
-          now={now}
-          onOpen={(k) => openKey(k.id)}
-          onToggle={(k, on) => toggle.mutate({ path: { id: k.id }, body: { enabled: on } })}
-          onDelete={(k) => {
-            remove.reset();
-            setDeleting(k);
-          }}
-        />
-      </DataList.State>
-      <DataList.Pagination
-        page={page}
-        pageSize={pageSize}
-        total={total}
-        onPageChange={(n) => void navigate({ search: (prev) => ({ ...prev, page: n }) })}
-        onPageSizeChange={(n) => update({ pageSize: n as ListSearch["pageSize"] })}
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        title="Keys"
+        description="A key lets one client call the gateway, limited to the models its allowlist names."
+        actions={newKey}
       />
+      <DataList.Root>
+        <DataList.Toolbar>
+          <DataList.Search value={q} onChange={(next) => update({ q: next })} placeholder="Search keys" />
+          <DataList.Filters>
+            <DataList.Filter label="State" value={enabled} options={STATES} onChange={(v) => update({ enabled: v })} />
+          </DataList.Filters>
+        </DataList.Toolbar>
+        {toggle.error ? <ErrorAlert title="Could not change the key" error={toggle.error} /> : null}
+        <DataList.State
+          isLoading={list.isPending}
+          error={list.error ?? undefined}
+          isEmpty={items.length === 0}
+          emptyText={q || enabled ? "No keys match these filters." : "No keys yet. Create one for each client."}
+          emptyAction={q || enabled ? undefined : newKey}
+        >
+          <KeysTable
+            items={items}
+            usage={stats.isPending ? undefined : usage}
+            now={now}
+            onOpen={(k) => openKey(k.id)}
+            onToggle={(k, on) => toggle.mutate({ path: { id: k.id }, body: { enabled: on } })}
+            onDelete={(k) => {
+              remove.reset();
+              setDeleting(k);
+            }}
+          />
+        </DataList.State>
+        <DataList.Pagination
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          onPageChange={(n) => void navigate({ search: (prev) => ({ ...prev, page: n }) })}
+          onPageSizeChange={(n) => update({ pageSize: n as ListSearch["pageSize"] })}
+        />
+      </DataList.Root>
 
       <CreateKeyModal
-        isOpen={creating}
+        isOpen={search.create === true}
         suggestions={options.suggestions}
         candidates={options.candidates}
         onClose={() => setCreating(false)}
@@ -202,7 +190,12 @@ function KeysPage() {
           setSecret(value);
         }}
       />
-      <SecretOnce title="Key created" value={secret} onClose={() => setSecret(null)} />
+      <SecretOnce
+        title="Key created"
+        value={secret}
+        example={`curl ${window.location.origin}/v1/models \\\n  -H "Authorization: Bearer $REMORA_KEY"`}
+        onClose={() => setSecret(null)}
+      />
       <EditKeyDrawer
         id={search.key}
         from={from}
@@ -226,7 +219,7 @@ function KeysPage() {
           )
         }
       />
-    </DataList.Root>
+    </div>
   );
 }
 
@@ -291,7 +284,7 @@ function CreateKeyModal({
       <Modal.Container size="lg">
         <Modal.Dialog>
           <Form
-            className="flex flex-col gap-4"
+            className="flex flex-col"
             onSubmit={(e) => {
               e.preventDefault();
               setSubmitted(true);
@@ -301,18 +294,20 @@ function CreateKeyModal({
           >
             <Modal.Header>
               <Modal.Heading>New key</Modal.Heading>
+              <p className="text-muted text-sm">The secret is shown once, right after you create it.</p>
             </Modal.Header>
-            <Modal.Body className="flex flex-col gap-4">
+            <Modal.Body className="flex flex-col gap-5">
               <TextField value={name} onChange={setName} isRequired isInvalid={nameError !== undefined}>
                 <Label>Name</Label>
                 <Input placeholder="ci" />
+                <Description>Name it after the client that will use it.</Description>
                 <FieldError>{nameError}</FieldError>
               </TextField>
               <AllowlistEditor value={allow} suggestions={suggestions} candidates={candidates} onChange={setAllow} />
               {create.error ? <ErrorAlert title="Could not create the key" error={create.error} /> : null}
             </Modal.Body>
             <Modal.Footer>
-              <Button variant="tertiary" onPress={close} isDisabled={create.isPending}>
+              <Button variant="secondary" onPress={close} isDisabled={create.isPending}>
                 Cancel
               </Button>
               <Button type="submit" variant="primary" isPending={create.isPending}>
@@ -350,45 +345,55 @@ function EditKeyDrawer({
     <Drawer.Backdrop isOpen={id !== undefined} onOpenChange={(open) => !open && onClose()}>
       <Drawer.Content placement="right">
         <Drawer.Dialog>
-          <Drawer.Header>
+          <Drawer.Header className="border-border border-b pb-4">
             <Drawer.Heading>{keyQuery.data?.name ?? "Key"}</Drawer.Heading>
+            {keyQuery.data ? <p className="text-muted font-mono text-xs">{keyQuery.data.prefix}…</p> : null}
           </Drawer.Header>
-          <Drawer.Body className="flex flex-col gap-6">
-            {keyQuery.isPending ? (
-              <Spinner />
-            ) : keyQuery.isError ? (
-              <ErrorAlert title="Could not load this key" error={keyQuery.error} />
-            ) : (
-              <KeyForm
-                key={keyQuery.data.id}
-                value={keyQuery.data}
-                suggestions={suggestions}
-                candidates={candidates}
-                onDone={onClose}
+          {keyQuery.isPending || keyQuery.isError ? (
+            <Drawer.Body className="flex flex-col gap-3 py-5">
+              {keyQuery.isError ? (
+                <ErrorAlert title="Could not load this key" error={keyQuery.error} />
+              ) : (
+                <>
+                  <Skeleton className="h-9 w-full" />
+                  <Skeleton className="h-24 w-full" />
+                </>
+              )}
+            </Drawer.Body>
+          ) : (
+            <KeyForm
+              key={keyQuery.data.id}
+              value={keyQuery.data}
+              suggestions={suggestions}
+              candidates={candidates}
+              onDone={onClose}
+            >
+              <KeyUsage
+                totals={usage.data?.summary}
+                isLoading={usage.isPending}
+                logsHref={`/logs?keyId=${encodeURIComponent(keyQuery.data.id)}`}
               />
-            )}
-            <KeyUsage
-              totals={usage.data?.summary}
-              isLoading={usage.isPending && id !== undefined}
-              logsHref={`/logs?keyId=${encodeURIComponent(id ?? "")}`}
-            />
-          </Drawer.Body>
+            </KeyForm>
+          )}
         </Drawer.Dialog>
       </Drawer.Content>
     </Drawer.Backdrop>
   );
 }
 
+/** The drawer's body and footer: name and allowlist, then `children` (the usage) under a hairline. */
 function KeyForm({
   value,
   suggestions,
   candidates,
   onDone,
+  children,
 }: {
   value: Key;
   suggestions: string[];
   candidates: string[];
   onDone(): void;
+  children: ReactNode;
 }) {
   const queryClient = Route.useRouteContext({ select: (c) => c.queryClient });
   const [name, setName] = useState(value.name);
@@ -404,29 +409,31 @@ function KeyForm({
 
   return (
     <Form
-      className="flex flex-col gap-4"
+      className="flex min-h-0 flex-1 flex-col"
       onSubmit={(e) => {
         e.preventDefault();
         if (nameError) return;
         save.mutate({ path: { id: value.id }, body: { name: name.trim(), allow } });
       }}
     >
-      <TextField value={name} onChange={setName} isRequired isInvalid={nameError !== undefined}>
-        <Label>Name</Label>
-        <Input />
-        <FieldError>{nameError}</FieldError>
-      </TextField>
-      <p className="text-muted font-mono text-sm">{value.prefix}…</p>
-      <AllowlistEditor value={allow} suggestions={suggestions} candidates={candidates} onChange={setAllow} />
-      {save.error ? <ErrorAlert title="Could not save the key" error={save.error} /> : null}
-      <div className="flex gap-2">
-        <Button type="submit" variant="primary" isPending={save.isPending}>
-          Save
-        </Button>
-        <Button variant="tertiary" onPress={onDone}>
+      <Drawer.Body className="flex flex-col gap-5 py-5">
+        <TextField value={name} onChange={setName} isRequired isInvalid={nameError !== undefined}>
+          <Label>Name</Label>
+          <Input />
+          <FieldError>{nameError}</FieldError>
+        </TextField>
+        <AllowlistEditor value={allow} suggestions={suggestions} candidates={candidates} onChange={setAllow} />
+        {save.error ? <ErrorAlert title="Could not save the key" error={save.error} /> : null}
+        <div className="border-border border-t pt-5">{children}</div>
+      </Drawer.Body>
+      <Drawer.Footer className="border-border border-t">
+        <Button size="sm" variant="secondary" onPress={onDone}>
           Cancel
         </Button>
-      </div>
+        <Button size="sm" type="submit" variant="primary" isPending={save.isPending}>
+          Save
+        </Button>
+      </Drawer.Footer>
     </Form>
   );
 }

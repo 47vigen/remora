@@ -34,9 +34,11 @@ test("a cooling account shows its end time and can reset the cooldown; an active
   const h = setup();
   const one = rowOf("one@example.com");
   expect(within(one).getByText(/Cooling until/)).toBeInTheDocument();
-  await userEvent.click(within(one).getByRole("button", { name: "Reset cooldown" }));
+  await userEvent.click(within(one).getByRole("button", { name: "Actions for one@example.com" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: "Reset cooldown" }));
   expect(h.onResetCooldown).toHaveBeenCalledWith(items[0]);
-  expect(within(rowOf("two@example.com")).getByRole("button", { name: "Reset cooldown" })).toBeDisabled();
+  await userEvent.click(within(rowOf("two@example.com")).getByRole("button", { name: "Actions for two@example.com" }));
+  expect(await screen.findByRole("menuitem", { name: "Reset cooldown" })).toHaveAttribute("aria-disabled", "true");
 });
 
 test("quota renders a meter of the remaining share", () => {
@@ -58,6 +60,7 @@ test("toggling the switch calls onToggle and deleting calls onDelete", async () 
   const h = setup();
   await userEvent.click(within(rowOf("two@example.com")).getByRole("switch"));
   expect(h.onToggle).toHaveBeenCalledWith(items[1], false);
-  await userEvent.click(within(rowOf("two@example.com")).getByRole("button", { name: "Delete" }));
+  await userEvent.click(within(rowOf("two@example.com")).getByRole("button", { name: "Actions for two@example.com" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
   expect(h.onDelete).toHaveBeenCalledWith(items[1]);
 });

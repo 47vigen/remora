@@ -1,4 +1,6 @@
 import {
+  Button,
+  cn,
   ComboBox,
   DateField,
   DateRangePicker,
@@ -6,12 +8,12 @@ import {
   Label,
   ListBox,
   RangeCalendar,
-  Select,
   TextField,
 } from "@heroui/react";
-import { type Key, useState } from "react";
+import { useState } from "react";
 
 import { type LogSearch, RANGES } from "../-lib/filters";
+import { DataList } from "../../../../components/data-list/DataList";
 
 const RANGE_LABELS: Record<(typeof RANGES)[number], string> = {
   "15m": "Last 15 minutes",
@@ -21,48 +23,8 @@ const RANGE_LABELS: Record<(typeof RANGES)[number], string> = {
   custom: "Custom",
 };
 
-const ALL = "__all__";
-
+const COMPACT = "h-8 min-h-8 text-[13px]";
 type Option = { id: string; label: string };
-
-function FilterSelect({
-  label,
-  value,
-  options,
-  allLabel,
-  onChange,
-}: {
-  label: string;
-  value: string | undefined;
-  options: Option[];
-  allLabel?: string;
-  onChange(v: string | undefined): void;
-}) {
-  const items = allLabel ? [{ id: ALL, label: allLabel }, ...options] : options;
-  return (
-    <Select
-      className="w-44"
-      value={value ?? ALL}
-      onChange={(k: Key | null) => onChange(k === null || k === ALL ? undefined : String(k))}
-    >
-      <Label>{label}</Label>
-      <Select.Trigger>
-        <Select.Value />
-        <Select.Indicator />
-      </Select.Trigger>
-      <Select.Popover>
-        <ListBox aria-label={label}>
-          {items.map((o) => (
-            <ListBox.Item key={o.id} id={o.id} textValue={o.label}>
-              {o.label}
-              <ListBox.ItemIndicator />
-            </ListBox.Item>
-          ))}
-        </ListBox>
-      </Select.Popover>
-    </Select>
-  );
-}
 
 /** A pick-one box over `options`; typing filters (and reports the text, so the caller can search the server). */
 function FilterCombo({
@@ -80,7 +42,8 @@ function FilterCombo({
 }) {
   return (
     <ComboBox
-      className="w-48"
+      aria-label={label}
+      className="w-40"
       selectedKey={value ?? null}
       onSelectionChange={(k) => onChange(k === null ? undefined : String(k))}
       onInputChange={(q) => {
@@ -89,9 +52,9 @@ function FilterCombo({
       }}
       allowsEmptyCollection
     >
-      <Label>{label}</Label>
-      <ComboBox.InputGroup>
-        <Input placeholder="Any" />
+      <Label className="sr-only">{label}</Label>
+      <ComboBox.InputGroup className={cn(COMPACT, value !== undefined && "border-ink-faint")}>
+        <Input placeholder={label} className={cn(COMPACT, "py-0")} />
         <ComboBox.Trigger />
       </ComboBox.InputGroup>
       <ComboBox.Popover>
@@ -120,11 +83,11 @@ function ServedModel({ value, onChange }: { value: string | undefined; onChange(
     if (v !== value) onChange(v);
   };
   return (
-    <TextField className="w-48" value={text} onChange={setText} onBlur={commit}>
-      <Label>Served model</Label>
+    <TextField className="w-44" value={text} onChange={setText} onBlur={commit}>
+      <Label className="sr-only">Served model</Label>
       <Input
         placeholder="provider/model"
-        className="font-mono"
+        className={cn(COMPACT, "font-mono", value !== undefined && "border-ink-faint")}
         onKeyDown={(e) => {
           if (e.key === "Enter") commit();
         }}
@@ -137,15 +100,15 @@ function CustomRange({ onChange }: { onChange(from: string, to: string): void })
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   return (
     <DateRangePicker
-      className="w-72"
+      className="w-64"
       onChange={(range) => {
         // Whole days in the viewer's zone; the end day is included.
         if (range)
           onChange(range.start.toDate(zone).toISOString(), range.end.add({ days: 1 }).toDate(zone).toISOString());
       }}
     >
-      <Label>Dates</Label>
-      <DateField.Group>
+      <Label className="sr-only">Dates</Label>
+      <DateField.Group className={COMPACT}>
         <DateField.Input slot="start">{(segment) => <DateField.Segment segment={segment} />}</DateField.Input>
         <DateRangePicker.RangeSeparator />
         <DateField.Input slot="end">{(segment) => <DateField.Segment segment={segment} />}</DateField.Input>
@@ -189,6 +152,9 @@ export function LogFilters({
   onKeyQuery(q: string): void;
   onChange(patch: Partial<LogSearch>): void;
 }) {
+  const isFiltered =
+    [value.q, value.keyId, value.alias, value.provider, value.status, value.servedModel].some((v) => v) ||
+    value.range !== "24h";
   return (
     <>
       <FilterCombo
@@ -204,34 +170,56 @@ export function LogFilters({
         options={aliases.map((a) => ({ id: a, label: a }))}
         onChange={(alias) => onChange({ alias })}
       />
-      <FilterSelect
+      <DataList.Filter
         label="Provider"
         value={value.provider}
-        allLabel="All providers"
         options={providers.map((p) => ({ id: p, label: p }))}
         onChange={(provider) => onChange({ provider })}
       />
-      <FilterSelect
+      <DataList.Filter
         label="Status"
         value={value.status}
-        allLabel="Any status"
+        allLabel="Any"
         options={[
           { id: "success", label: "Success" },
           { id: "error", label: "Error" },
         ]}
-        onChange={(s) => onChange({ status: s === "success" || s === "error" ? s : undefined })}
+        onChange={(status) => onChange({ status })}
       />
       <ServedModel value={value.servedModel} onChange={(servedModel) => onChange({ servedModel })} />
-      <FilterSelect
+      {/* The default range stands in for "all", so it is the unfiltered choice of the compact filter. */}
+      <DataList.Filter
         label="Range"
-        value={value.range}
-        options={RANGES.map((r) => ({ id: r, label: RANGE_LABELS[r] }))}
-        onChange={(r) => {
-          const range = RANGES.find((x) => x === r) ?? "24h";
-          onChange(range === "custom" ? { range } : { range, from: undefined, to: undefined });
-        }}
+        value={value.range === "24h" ? undefined : value.range}
+        allLabel={RANGE_LABELS["24h"]}
+        options={RANGES.filter((r) => r !== "24h").map((r) => ({ id: r, label: RANGE_LABELS[r] }))}
+        onChange={(r) =>
+          onChange(r === "custom" ? { range: r } : { range: r ?? "24h", from: undefined, to: undefined })
+        }
       />
       {value.range === "custom" ? <CustomRange onChange={(from, to) => onChange({ from, to })} /> : null}
+      {isFiltered ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="text-link"
+          onPress={() =>
+            onChange({
+              q: "",
+              keyId: undefined,
+              alias: undefined,
+              provider: undefined,
+              status: undefined,
+              servedModel: undefined,
+              range: "24h",
+              from: undefined,
+              to: undefined,
+            })
+          }
+        >
+          Clear
+        </Button>
+      ) : null}
     </>
   );
 }

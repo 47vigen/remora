@@ -14,11 +14,11 @@ function latency(ms: number | null | undefined): string {
 export function summarize(t: StatsSummary): Summary {
   const traffic = t.requests > 0;
   return {
-    requests: formatCompactNumber(t.requests),
+    requests: formatCompactNumber(t.requests, 1),
     errorRate: traffic ? `${((t.errors / t.requests) * 100).toFixed(1)}%` : DASH,
     p50: traffic ? latency(t.latency_p50_ms) : DASH,
     p95: traffic ? latency(t.latency_p95_ms) : DASH,
-    tokens: formatCompactNumber(t.total_tokens),
+    tokens: formatCompactNumber(t.total_tokens, 1),
     cost: formatCost(t.cost_usd),
   };
 }
@@ -77,4 +77,53 @@ export function providerRows(groups: StatsGroup[]): ProviderRow[] {
       p95: s.latency_p95_ms ?? undefined,
     }))
     .sort((a, b) => b.totalTokens - a.totalTokens || a.name.localeCompare(b.name));
+}
+
+export type SeriesRow = {
+  index: number;
+  time: string;
+  label: string;
+  promptTokens: number;
+  completionTokens: number;
+  cost: number;
+  p50?: number;
+  p95?: number;
+};
+
+/** One row per bucket with tokens, cost and latency, for the charts over time. */
+export function seriesRows(series: StatsPoint[]): SeriesRow[] {
+  const size = bucketSeconds(series);
+  return series.map((p, index) => ({
+    index,
+    time: p.time,
+    label: formatTimestamp(p.time, size),
+    promptTokens: p.prompt_tokens ?? 0,
+    completionTokens: p.completion_tokens ?? 0,
+    cost: p.cost_usd ?? 0,
+    p50: p.latency_p50_ms ?? undefined,
+    p95: p.latency_p95_ms ?? undefined,
+  }));
+}
+
+export type BreakdownRow = {
+  name: string;
+  requests: number;
+  errorRate: number;
+  totalTokens: number;
+  cost: number;
+  p95?: number;
+};
+
+/** One row per group, busiest first, for the breakdown table. */
+export function breakdownRows(groups: StatsGroup[]): BreakdownRow[] {
+  return groups
+    .map(({ name, summary: s }) => ({
+      name,
+      requests: s.requests,
+      errorRate: s.requests > 0 ? s.errors / s.requests : 0,
+      totalTokens: s.total_tokens,
+      cost: s.cost_usd,
+      p95: s.latency_p95_ms ?? undefined,
+    }))
+    .sort((a, b) => b.requests - a.requests || a.name.localeCompare(b.name));
 }

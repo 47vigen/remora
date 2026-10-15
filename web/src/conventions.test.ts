@@ -6,10 +6,10 @@ const files = (dir: string): string[] =>
   readdirSync(dir).flatMap((n) => (statSync(join(dir, n)).isDirectory() ? files(join(dir, n)) : [join(dir, n)]));
 const own = files(SRC).filter((f) => !f.includes("/client/") && !f.endsWith("routeTree.gen.ts"));
 
-test("the only CSS is the HeroUI entry", () => {
+test("the only CSS is the HeroUI entry and the theme", () => {
   const css = own.filter((f) => f.endsWith(".css")).map((f) => relative(SRC, f));
-  expect(css).toEqual(["index.css"]);
-  expect(readFileSync(join(SRC, "index.css"), "utf8").trim()).toBe('@import "tailwindcss";\n@import "@heroui/styles";');
+  expect(css.sort()).toEqual(["index.css", "theme.css"]);
+  expect(readFileSync(join(SRC, "index.css"), "utf8")).toMatch(/^@import "tailwindcss";\n@import "@heroui\/styles";\n/);
 });
 test("no inline styles", () => {
   for (const f of own.filter((f) => f.endsWith(".tsx"))) expect(readFileSync(f, "utf8"), f).not.toMatch(/\sstyle=\{/);

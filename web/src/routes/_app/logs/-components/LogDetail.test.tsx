@@ -63,15 +63,15 @@ test("the fallback path lists attempts in order and marks the served one", async
   expect(items[1]).toHaveTextContent("Served");
 });
 
-test("bodies render with dir=auto and keep Persian text", async () => {
+test("bodies render left to right as code and keep Persian text", async () => {
   render(<LogDetail log={log} isLoading={false} onClose={() => {}} />);
   await userEvent.click(screen.getByRole("tab", { name: "Request" }));
   const req = within(screen.getByRole("tabpanel")).getByText((_, el) => el?.tagName === "PRE");
-  expect(req).toHaveAttribute("dir", "auto");
+  expect(req).toHaveAttribute("dir", "ltr");
   expect(req.textContent).toContain(`می${ZWNJ}خواهم`);
   await userEvent.click(screen.getByRole("tab", { name: "Response" }));
   const res = within(screen.getByRole("tabpanel")).getByText((_, el) => el?.tagName === "PRE");
-  expect(res).toHaveAttribute("dir", "auto");
+  expect(res).toHaveAttribute("dir", "ltr");
   expect(res.textContent).toContain("سلام");
 });
 
@@ -95,4 +95,15 @@ test("the overview names the key, falling back to its id", () => {
   expect(within(screen.getByRole("dialog")).getByText("ci")).toBeInTheDocument();
   rerender(<LogDetail log={log} isLoading={false} onClose={() => {}} />);
   expect(within(screen.getByRole("dialog")).getByText("k1")).toBeInTheDocument();
+});
+
+test("an error shows in an alert above the tabs, and a body can be unwrapped", async () => {
+  render(<LogDetail log={{ ...log, status: "error", error: "upstream 500" }} isLoading={false} onClose={() => {}} />);
+  expect(within(screen.getByRole("dialog")).getByText("upstream 500")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("tab", { name: "Request" }));
+  const pre = within(screen.getByRole("tabpanel")).getByText((_, el) => el?.tagName === "PRE");
+  expect(pre).toHaveClass("whitespace-pre-wrap");
+  await userEvent.click(screen.getByRole("button", { name: "Wrap" }));
+  expect(pre).toHaveClass("whitespace-pre");
+  expect(pre).not.toHaveClass("whitespace-pre-wrap");
 });

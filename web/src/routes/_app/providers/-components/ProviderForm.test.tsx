@@ -31,19 +31,17 @@ function Harness({
 
 test("choosing a kind shows its fields", async () => {
   render(<Harness initial={emptyDraft("builtin")} />);
-  expect(screen.getByRole("button", { name: /Provider type/ })).toBeInTheDocument();
+  expect(screen.getByRole("radiogroup", { name: "Provider type" })).toBeInTheDocument();
   expect(screen.queryByRole("textbox", { name: "Base URL" })).toBeNull();
 
-  await userEvent.click(screen.getByRole("button", { name: /Kind/ }));
-  await userEvent.click(screen.getByRole("option", { name: "OpenAI-compatible" }));
-  expect(screen.queryByRole("button", { name: /Provider type/ })).toBeNull();
+  await userEvent.click(screen.getByRole("radio", { name: "OpenAI-compatible" }));
+  expect(screen.queryByRole("radiogroup", { name: "Provider type" })).toBeNull();
   expect(screen.getByRole("textbox", { name: "Base URL" })).toBeInTheDocument();
 
-  await userEvent.click(screen.getByRole("button", { name: /Kind/ }));
-  await userEvent.click(screen.getByRole("option", { name: "Built-in" }));
-  expect(screen.getByRole("button", { name: /Provider type/ })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("radio", { name: "Built-in" }));
+  expect(screen.getByRole("radiogroup", { name: "Provider type" })).toBeInTheDocument();
   expect(screen.queryByRole("textbox", { name: "Base URL" })).toBeNull();
-}, 15_000); // opens two popovers; slow when the suite runs in parallel
+});
 
 test("in edit mode key hints are shown and a blank key keeps its value", () => {
   render(
@@ -58,14 +56,24 @@ test("in edit mode key hints are shown and a blank key keeps its value", () => {
       }}
     />,
   );
-  expect(screen.getByText("Stored keys: main, backup")).toBeInTheDocument();
+  expect(screen.getByText(/Stored keys/)).toHaveTextContent("Stored keys: main, backup");
   expect(screen.getByLabelText("Key 1 value")).toHaveAttribute("placeholder", "Leave blank to keep");
   expect(screen.getByRole("textbox", { name: "Name" })).toBeDisabled();
 });
 
 test("a builtin's name follows its type", async () => {
   render(<Harness initial={emptyDraft("builtin")} />);
-  await userEvent.click(screen.getByRole("button", { name: /Provider type/ }));
-  await userEvent.click(screen.getByRole("option", { name: "OpenRouter" }));
+  await userEvent.type(screen.getByRole("searchbox", { name: "Filter provider types" }), "router");
+  expect(screen.queryByRole("radio", { name: "OpenAI" })).toBeNull();
+  await userEvent.click(screen.getByRole("radio", { name: "OpenRouter" }));
+  expect(screen.getByRole("radio", { name: "OpenRouter" })).toBeChecked();
   expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("openrouter");
+});
+
+test("a key value is hidden until revealed", async () => {
+  render(<Harness initial={emptyDraft("builtin")} />);
+  const value = screen.getByLabelText("Key 1 value");
+  expect(value).toHaveAttribute("type", "password");
+  await userEvent.click(screen.getByRole("button", { name: "Show key 1 value" }));
+  expect(value).toHaveAttribute("type", "text");
 });

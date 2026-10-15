@@ -133,3 +133,12 @@ test("a custom range shows the date picker", async () => {
   renderRoute("/logs?range=custom", api);
   expect(await screen.findByText("Dates")).toBeInTheDocument();
 });
+
+test("Clear drops every filter and the search", async () => {
+  const { router } = renderRoute("/logs?status=error&alias=fast&range=1h&q=fa", api);
+  await findRow("or/x");
+  await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+  await waitFor(() => expect(router.state.location.search).toMatchObject({ q: "", range: "24h" }));
+  expect(router.state.location.search).not.toHaveProperty("status");
+  expect(router.state.location.search).not.toHaveProperty("alias");
+});

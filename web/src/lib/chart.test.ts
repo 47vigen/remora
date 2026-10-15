@@ -1,8 +1,8 @@
 import { CHART_COLORS, formatCost, formatLatency } from "./chart";
 
-test("chart colours are HeroUI variables only", () => {
+test("chart colours are theme variables only", () => {
   for (const v of Object.values(CHART_COLORS))
-    expect(v).toMatch(/^var\(--(accent|success|danger|warning|muted|border)\)$/);
+    expect(v).toMatch(/^var\(--(accent|ink-strong|success|danger|warning|muted|separator)\)$/);
 });
 
 test("formatters", () => {

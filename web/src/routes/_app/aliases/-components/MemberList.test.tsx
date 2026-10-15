@@ -36,3 +36,14 @@ test("the remove button reports the member", async () => {
   await userEvent.click(screen.getByRole("button", { name: "Remove free" }));
   expect(onRemove).toHaveBeenCalledWith("free");
 });
+
+test("the move buttons swap a member with its neighbour and stop at the ends", async () => {
+  const onReorder = vi.fn<(next: string[]) => void>();
+  render(<MemberList members={["a/1", "b/2", "c/3"]} cooling={new Set()} onReorder={onReorder} onRemove={() => {}} />);
+  expect(screen.getByRole("button", { name: "Move a/1 up" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Move c/3 down" })).toBeDisabled();
+  await userEvent.click(screen.getByRole("button", { name: "Move b/2 up" }));
+  expect(onReorder).toHaveBeenLastCalledWith(["b/2", "a/1", "c/3"]);
+  await userEvent.click(screen.getByRole("button", { name: "Move b/2 down" }));
+  expect(onReorder).toHaveBeenLastCalledWith(["a/1", "c/3", "b/2"]);
+});

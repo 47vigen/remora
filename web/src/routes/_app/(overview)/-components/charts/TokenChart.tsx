@@ -2,63 +2,69 @@
 import { memo } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-import type { ProviderRow } from "../../-lib/overview";
-import { CHART_COLORS } from "../../../../../lib/chart";
+import type { SeriesRow } from "../../-lib/overview";
+import { AXIS_TICK, CHART_COLORS, formatFullTimestamp } from "../../../../../lib/chart";
 import { formatCompactNumber } from "../../../../../lib/numbers";
 import { CappedBarStack } from "./barShape";
-import { ChartCard } from "./ChartCard";
+import { ChartCard, LegendItem } from "./ChartCard";
 import { ChartTooltip } from "./ChartTooltip";
 
-// Tokens per provider over the window: prompt and completion stacked.
-function TokenChartImpl({ rows }: { rows: ProviderRow[] }) {
+// Tokens per bucket over the window: input and output stacked.
+function TokenChartImpl({ rows, total }: { rows: SeriesRow[]; total?: string }) {
+  const used = rows.some((r) => r.promptTokens + r.completionTokens > 0);
   return (
-    <ChartCard title="Tokens by provider" isEmpty={rows.length === 0}>
+    <ChartCard
+      title="Tokens"
+      value={total}
+      legend={
+        <>
+          <LegendItem className="bg-accent">Input</LegendItem>
+          <LegendItem className="bg-ink-strong">Output</LegendItem>
+        </>
+      }
+      isEmpty={!used}
+    >
       <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
-        <BarChart data={rows} margin={{ top: 6, right: 4, left: 4, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={CHART_COLORS.grid} />
+        <BarChart data={rows} margin={{ top: 6, right: 4, left: 4, bottom: 0 }} barCategoryGap={1}>
+          <CartesianGrid vertical={false} stroke={CHART_COLORS.grid} />
           <XAxis
-            dataKey="name"
-            tick={{ fontSize: 11, fill: CHART_COLORS.axis, dy: 5 }}
+            dataKey="index"
+            type="number"
+            domain={[-0.5, rows.length - 0.5]}
+            tick={{ ...AXIS_TICK, dy: 5 }}
             tickLine={false}
             axisLine={false}
+            tickFormatter={(idx: number) => rows[Math.round(idx)]?.label ?? ""}
             interval="preserveStartEnd"
           />
           <YAxis
-            tick={{ fontSize: 11, fill: CHART_COLORS.axis }}
+            tick={AXIS_TICK}
             tickLine={false}
             axisLine={false}
-            width={50}
-            tickFormatter={(v: number) => formatCompactNumber(v)}
+            width={48}
+            tickFormatter={(v: number) => formatCompactNumber(v, 1)}
             domain={[0, (dataMax: number) => Math.max(dataMax, 1)]}
-            allowDataOverflow={false}
           />
           <Tooltip
-            cursor={{ fill: CHART_COLORS.axis, fillOpacity: 0.15 }}
+            cursor={{ fill: "var(--surface-tertiary)", fillOpacity: 0.7 }}
             content={({ active, payload }) => {
-              const row = active ? (payload?.[0]?.payload as ProviderRow | undefined) : undefined;
+              const row = active ? (payload?.[0]?.payload as SeriesRow | undefined) : undefined;
               if (!row) return null;
               return (
-                <ChartTooltip title={row.name}>
+                <ChartTooltip title={formatFullTimestamp(row.time)}>
                   <ChartTooltip.Row tone="accent" label="Input" value={row.promptTokens.toLocaleString()} />
-                  <ChartTooltip.Row tone="warning" label="Output" value={row.completionTokens.toLocaleString()} />
-                  <ChartTooltip.Row label="Total" value={row.totalTokens.toLocaleString()} />
+                  <ChartTooltip.Row tone="ink" label="Output" value={row.completionTokens.toLocaleString()} />
+                  <ChartTooltip.Row label="Total" value={(row.promptTokens + row.completionTokens).toLocaleString()} />
                 </ChartTooltip>
               );
             }}
           />
           <CappedBarStack buckets={rows.length}>
-            <Bar
-              isAnimationActive={false}
-              dataKey="promptTokens"
-              fill={CHART_COLORS.promptTokens}
-              fillOpacity={0.9}
-              barSize={30}
-            />
+            <Bar isAnimationActive={false} dataKey="promptTokens" fill={CHART_COLORS.promptTokens} barSize={30} />
             <Bar
               isAnimationActive={false}
               dataKey="completionTokens"
               fill={CHART_COLORS.completionTokens}
-              fillOpacity={0.9}
               barSize={30}
             />
           </CappedBarStack>

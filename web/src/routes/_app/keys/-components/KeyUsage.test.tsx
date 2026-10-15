@@ -19,7 +19,8 @@ test("shows the last day's totals and links to the key's logs", () => {
     />,
   );
   expect(screen.getByText("1.23K")).toBeInTheDocument();
-  expect(screen.getByText("12 (1.0%)")).toBeInTheDocument();
+  expect(screen.getByText("12")).toBeInTheDocument();
+  expect(screen.getByText("1.0%")).toBeInTheDocument();
   expect(screen.getByText("1.5K")).toBeInTheDocument();
   expect(screen.getByText("$0.0040")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "View this key's logs" })).toHaveAttribute("href", "/logs?keyId=k1");

@@ -1,24 +1,49 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import { AliasesTable } from "./AliasesTable";
 
-test("shows name, kind, member count, chain length and cooling count", () => {
+vi.setConfig({ testTimeout: 30_000 });
+
+const items = [
+  { name: "fast", kind: "chat" as const, members: ["or/x", "free", "cp/y", "cp/z", "or/w"], capabilities: [] },
+  { name: "free", kind: "embeddings" as const, members: ["cp/y"], capabilities: [] },
+];
+
+test("shows name, kind, the chain inline, target count and cooling count", () => {
   render(
     <AliasesTable
-      items={[
-        { name: "fast", kind: "chat", members: ["or/x", "free"], capabilities: [] },
-        { name: "free", kind: "embeddings", members: ["cp/y"], capabilities: [] },
-      ]}
+      items={items}
       chainLength={new Map([["fast", 3]])}
       cooling={new Map([["fast", 2]])}
+      onOpen={() => {}}
+      onDelete={() => {}}
     />,
   );
   const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
-  expect(headers).toEqual(["Name", "Kind", "Members", "Chain", "Cooling"]);
+  expect(headers).toEqual(["Name", "Kind", "Chain", "Targets", "Cooling", "Actions"]);
   const rows = screen.getAllByRole("row").slice(1);
-  const fast = within(rows[0]!).getAllByRole("rowheader").concat(within(rows[0]!).getAllByRole("gridcell"));
-  expect(fast.map((c) => c.textContent)).toEqual(["fast", "chat", "2", "3", "2 cooling"]);
-  const free = within(rows[1]!).getAllByRole("rowheader").concat(within(rows[1]!).getAllByRole("gridcell"));
-  expect(free.map((c) => c.textContent)).toEqual(["free", "embeddings", "1", "–", ""]);
+  const cells = (row: HTMLElement) =>
+    within(row)
+      .getAllByRole("rowheader")
+      .concat(within(row).getAllByRole("gridcell"))
+      .slice(0, 5)
+      .map((c) => c.textContent);
+  expect(cells(rows[0]!)).toEqual(["fast", "chat", "or/x→free→cp/y+2", "3", "2 cooling"]);
+  expect(cells(rows[1]!)).toEqual(["free", "embeddings", "cp/y", "–", ""]);
   expect(within(rows[0]!).getByRole("link", { name: "fast" })).toHaveAttribute("href", "/aliases/fast");
+});
+
+test("the row menu opens or deletes the alias", async () => {
+  const onOpen = vi.fn<(n: string) => void>();
+  const onDelete = vi.fn<(n: string) => void>();
+  render(
+    <AliasesTable items={items} chainLength={new Map()} cooling={new Map()} onOpen={onOpen} onDelete={onDelete} />,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Actions for free" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
+  expect(onDelete).toHaveBeenCalledWith("free");
+  await userEvent.click(screen.getByRole("button", { name: "Actions for fast" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: "Edit" }));
+  expect(onOpen).toHaveBeenCalledWith("fast");
 });

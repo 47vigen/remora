@@ -1,6 +1,7 @@
 import {
   type AliasDraft,
   aliasFromDraft,
+  chainNodes,
   draftFromAlias,
   memberKind,
   memberOptions,
@@ -59,5 +60,26 @@ test("toAliasTargets marks cooling targets", () => {
   ).toEqual([
     { provider: "or", model: "x", cooling: false },
     { provider: "cp", model: "y", cooling: true, coolingUntil: "2026-10-14T10:30:00Z" },
+  ]);
+});
+
+test("chainNodes expands nested aliases, numbers models and marks the first one not cooling", () => {
+  const nodes = chainNodes(
+    ["or/a", "free", "loop", "ghost"],
+    new Map([
+      ["free", ["cp/b", "or/c"]],
+      ["loop", ["fast"]],
+    ]),
+    new Map([["or/a", "2026-10-14T10:30:00Z"]]),
+    "fast",
+  );
+  expect(nodes).toEqual([
+    { ref: "or/a", depth: 0, kind: "model", position: 1, serving: false, coolingUntil: "2026-10-14T10:30:00Z" },
+    { ref: "free", depth: 0, kind: "alias" },
+    { ref: "cp/b", depth: 1, kind: "model", position: 2, serving: true },
+    { ref: "or/c", depth: 1, kind: "model", position: 3, serving: false },
+    { ref: "loop", depth: 0, kind: "alias" },
+    { ref: "fast", depth: 1, kind: "alias", problem: "cycle" },
+    { ref: "ghost", depth: 0, kind: "alias", problem: "unknown" },
   ]);
 });

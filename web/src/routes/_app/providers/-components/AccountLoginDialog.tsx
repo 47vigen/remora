@@ -1,6 +1,6 @@
-import { Copy } from "@gravity-ui/icons";
-import { Alert, Button, Form, Input, Label, Link, Modal, Spinner, TextField } from "@heroui/react";
-import { useState } from "react";
+import { ArrowUpRightFromSquare, Copy } from "@gravity-ui/icons";
+import { Alert, Button, cn, Description, Form, Input, Label, Link, Modal, Spinner, TextField } from "@heroui/react";
+import { type ReactNode, useState } from "react";
 
 import type { LoginPhase } from "../-hooks/useAccountLogin";
 
@@ -10,6 +10,36 @@ function Waiting({ text }: { text: string }) {
       <Spinner size="sm" />
       {text}
     </p>
+  );
+}
+
+/** Steps numbered by their position: a mono index on a hairline rail, the instruction beside it. */
+function Steps({ children }: { children: ReactNode[] }) {
+  return (
+    <ol className="flex flex-col">
+      {children.map((step, i) => (
+        <li key={i} className="grid grid-cols-[1.75rem_1fr] gap-x-3">
+          <span className="flex flex-col items-center">
+            <span className="border-border bg-surface-secondary text-muted flex size-6 items-center justify-center rounded-sm border font-mono text-[11px] tabular-nums">
+              {i + 1}
+            </span>
+            {i < children.length - 1 ? <span aria-hidden="true" className="bg-border w-px flex-1" /> : null}
+          </span>
+          <div className={cn("flex min-w-0 flex-col gap-2 pt-0.5 text-sm", i < children.length - 1 && "pb-5")}>
+            {step}
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function OpenLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <Link href={href} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 self-start">
+      {children}
+      <ArrowUpRightFromSquare aria-hidden="true" className="size-3.5" />
+    </Link>
   );
 }
 
@@ -30,21 +60,27 @@ function RedirectStep({
         onSubmitRedirect(pasted);
       }}
     >
-      <ol className="flex list-decimal flex-col gap-3 pl-5 text-sm">
-        <li>
-          <Link href={login.authUrl} target="_blank" rel="noopener noreferrer">
+      <Steps>
+        {[
+          <OpenLink key="open" href={login.authUrl}>
             Open the sign-in page
-          </Link>
-        </li>
-        <li>
-          After signing in, your browser lands on a page that does not load. Copy that page's full address and paste it
-          here.
-        </li>
-      </ol>
-      <TextField value={pasted} onChange={setPasted} isInvalid={login.error !== undefined} autoComplete="off">
-        <Label>Address after sign-in</Label>
-        <Input className="font-mono" placeholder="http://localhost:…/callback?code=…" />
-      </TextField>
+          </OpenLink>,
+          <TextField
+            key="paste"
+            value={pasted}
+            onChange={setPasted}
+            isInvalid={login.error !== undefined}
+            autoComplete="off"
+          >
+            <Label>Address after sign-in</Label>
+            <Description>
+              After signing in, your browser lands on a page that does not load. Copy that page's full address and paste
+              it here.
+            </Description>
+            <Input className="font-mono text-[13px]" placeholder="http://localhost:…/callback?code=…" />
+          </TextField>,
+        ]}
+      </Steps>
       {login.error ? (
         <Alert status="danger" role="alert">
           <Alert.Indicator />
@@ -59,24 +95,29 @@ function RedirectStep({
 
 function DeviceStep({ login }: { login: Extract<LoginPhase, { phase: "device" }> }) {
   return (
-    <div className="flex flex-col gap-4 text-sm">
-      <p>
-        <Link href={login.verificationUrl} target="_blank" rel="noopener noreferrer">
-          Open the verification page
-        </Link>{" "}
-        and enter this code:
-      </p>
-      <div className="flex items-center gap-3">
-        <code className="font-mono text-3xl font-semibold tracking-widest">{login.userCode}</code>
-        <Button
-          isIconOnly
-          variant="ghost"
-          aria-label="Copy code"
-          onPress={() => void navigator.clipboard?.writeText(login.userCode)}
-        >
-          <Copy aria-hidden="true" />
-        </Button>
-      </div>
+    <div className="flex flex-col gap-4">
+      <Steps>
+        {[
+          <OpenLink key="open" href={login.verificationUrl}>
+            Open the verification page
+          </OpenLink>,
+          <div key="code" className="flex flex-col gap-2">
+            <p>Enter this code there:</p>
+            <div className="bg-surface-secondary border-border flex items-center justify-between gap-3 rounded-sm border px-3 py-2">
+              <code className="font-mono text-2xl font-medium tracking-widest">{login.userCode}</code>
+              <Button
+                isIconOnly
+                size="sm"
+                variant="ghost"
+                aria-label="Copy code"
+                onPress={() => void navigator.clipboard?.writeText(login.userCode)}
+              >
+                <Copy aria-hidden="true" className="size-4" />
+              </Button>
+            </div>
+          </div>,
+        ]}
+      </Steps>
       <Waiting text="Waiting for you to approve…" />
     </div>
   );

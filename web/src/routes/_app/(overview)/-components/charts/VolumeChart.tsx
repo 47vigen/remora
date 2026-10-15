@@ -3,30 +3,41 @@ import { memo } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import type { VolumeRow } from "../../-lib/overview";
-import { CHART_COLORS, formatFullTimestamp } from "../../../../../lib/chart";
+import { AXIS_TICK, CHART_COLORS, formatFullTimestamp } from "../../../../../lib/chart";
 import { formatCompactNumber } from "../../../../../lib/numbers";
 import { CappedBarStack } from "./barShape";
-import { ChartCard } from "./ChartCard";
+import { ChartCard, LegendItem } from "./ChartCard";
 import { ChartTooltip } from "./ChartTooltip";
 
-function VolumeChartImpl({ rows }: { rows: VolumeRow[] }) {
+function VolumeChartImpl({ rows, total, className }: { rows: VolumeRow[]; total?: string; className?: string }) {
   return (
-    <ChartCard title="Requests" isEmpty={rows.length === 0}>
+    <ChartCard
+      title="Requests"
+      value={total}
+      className={className}
+      legend={
+        <>
+          <LegendItem className="bg-accent">Success</LegendItem>
+          <LegendItem className="bg-danger">Errors</LegendItem>
+        </>
+      }
+      isEmpty={rows.length === 0}
+    >
       <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
         <BarChart data={rows} margin={{ top: 6, right: 4, left: 12, bottom: 0 }} barCategoryGap={1}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={CHART_COLORS.grid} />
+          <CartesianGrid vertical={false} stroke={CHART_COLORS.grid} />
           <XAxis
             dataKey="index"
             type="number"
             domain={[-0.5, rows.length - 0.5]}
-            tick={{ fontSize: 11, fill: CHART_COLORS.axis, dy: 5 }}
+            tick={{ ...AXIS_TICK, dy: 5 }}
             tickLine={false}
             axisLine={false}
             tickFormatter={(idx: number) => rows[Math.round(idx)]?.label ?? ""}
             interval="preserveStartEnd"
           />
           <YAxis
-            tick={{ fontSize: 11, fill: CHART_COLORS.axis }}
+            tick={AXIS_TICK}
             tickLine={false}
             axisLine={false}
             width={44}
@@ -35,7 +46,7 @@ function VolumeChartImpl({ rows }: { rows: VolumeRow[] }) {
             allowDataOverflow={false}
           />
           <Tooltip
-            cursor={{ fill: CHART_COLORS.axis, fillOpacity: 0.15 }}
+            cursor={{ fill: "var(--surface-tertiary)", fillOpacity: 0.7 }}
             content={({ active, payload }) => {
               const row = active ? (payload?.[0]?.payload as VolumeRow | undefined) : undefined;
               if (!row) return null;

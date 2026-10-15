@@ -1,4 +1,4 @@
-import { Chip, Label, Switch } from "@heroui/react";
+import { cn, ToggleButton } from "@heroui/react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
@@ -12,6 +12,7 @@ import {
   listProvidersOptions,
 } from "../../../client/@tanstack/react-query.gen";
 import { DataList } from "../../../components/data-list/DataList";
+import { PageHeader } from "../../../components/page-header/PageHeader";
 import type { ListSearch } from "../../../lib/list-search";
 import { invalidateOps } from "../../../lib/query";
 import { LogDetail } from "./-components/LogDetail";
@@ -116,30 +117,33 @@ function LogsPage() {
 
   return (
     <DataList.Root>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold">Logs</h1>
-        <div className="flex items-center gap-3">
-          {live ? (
-            <Chip size="sm" variant="soft" color={isConnected ? "success" : "warning"}>
-              <Chip.Label>{isConnected ? "Connected" : "Reconnecting…"}</Chip.Label>
-            </Chip>
-          ) : null}
-          <Switch
-            isSelected={live === true}
-            onChange={(on) => {
-              if (!on) void invalidateOps(queryClient, "listLogs");
-              update({ live: on ? true : undefined });
-            }}
-          >
-            <Switch.Content>
-              <Switch.Control>
-                <Switch.Thumb />
-              </Switch.Control>
-              <Label>Live</Label>
-            </Switch.Content>
-          </Switch>
-        </div>
-      </div>
+      <PageHeader
+        title="Logs"
+        actions={
+          <>
+            {live ? (
+              <output className="text-muted font-mono text-xs">{isConnected ? "Connected" : "Reconnecting…"}</output>
+            ) : null}
+            <ToggleButton
+              size="sm"
+              isSelected={live === true}
+              onChange={(on) => {
+                if (!on) void invalidateOps(queryClient, "listLogs");
+                update({ live: on ? true : undefined });
+              }}
+            >
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "size-1.5 rounded-full",
+                  !live ? "bg-muted" : isConnected ? "bg-accent motion-safe:animate-pulse" : "bg-warning",
+                )}
+              />
+              Live
+            </ToggleButton>
+          </>
+        }
+      />
       <DataList.Toolbar>
         <DataList.Search value={q} onChange={(next) => update({ q: next })} placeholder="Search logs" />
         <DataList.Filters>
@@ -162,6 +166,7 @@ function LogsPage() {
         <LogsTable
           items={rows}
           now={clock.now}
+          highlightNew={live === true}
           onOpen={(id) => void navigate({ search: (prev) => ({ ...prev, log: id }) })}
         />
       </DataList.State>

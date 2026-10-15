@@ -1,13 +1,13 @@
-import { TrashBin } from "@gravity-ui/icons";
+import { ArrowLeft, TrashBin } from "@gravity-ui/icons";
 import {
   Alert,
   Button,
-  Card,
   Description,
   FieldError,
   Form,
   Input,
   Label,
+  Link,
   ListBox,
   NumberField,
   Select,
@@ -32,6 +32,7 @@ import {
 } from "../../../client/@tanstack/react-query.gen";
 import { AddCombo } from "../../../components/add-combo/AddCombo";
 import { ConfirmDelete } from "../../../components/confirm-delete/ConfirmDelete";
+import { PageHeader } from "../../../components/page-header/PageHeader";
 import { errorMessage } from "../../../lib/api";
 import { parseListSearch } from "../../../lib/list-search";
 import { invalidateOps } from "../../../lib/query";
@@ -43,6 +44,7 @@ import {
   type AliasDraft,
   aliasFromDraft,
   CAPABILITY_SUGGESTIONS,
+  chainNodes,
   draftFromAlias,
   EMPTY_DRAFT,
   memberOptions,
@@ -113,10 +115,23 @@ function AliasEditor({ initial, original }: { initial: AliasDraft; original: str
       { title: "Provider models", items: all.models.filter((m) => !taken.has(m)) },
     ];
   }, [aliases.data, providers.data, accounts.data, draft.members, draft.name]);
-  const coolingRefs = useMemo(
-    () => new Set((cooling.data?.items ?? []).map((c) => `${c.provider}/${c.model}`)),
-    [cooling.data],
+  const coolingUntil = useMemo(() => {
+    const until = new Map((cooling.data?.items ?? []).map((c) => [`${c.provider}/${c.model}`, c.until]));
+    for (const t of preview.chain ?? []) if (t.coolingUntil) until.set(`${t.provider}/${t.model}`, t.coolingUntil);
+    return until;
+  }, [cooling.data, preview.chain]);
+  const coolingRefs = useMemo(() => new Set(coolingUntil.keys()), [coolingUntil]);
+  const nodes = useMemo(
+    () =>
+      chainNodes(
+        draft.members,
+        new Map((aliases.data?.items ?? []).map((a) => [a.name, a.members])),
+        coolingUntil,
+        draft.name.trim(),
+      ),
+    [draft.members, draft.name, aliases.data, coolingUntil],
   );
+  const isDirty = JSON.stringify(draft) !== JSON.stringify(initial);
 
   const errors = validateAliasDraft(draft);
   const shown = submitted ? errors : {};
@@ -161,30 +176,63 @@ function AliasEditor({ initial, original }: { initial: AliasDraft; original: str
     return true;
   };
 
+  const legend = "label-caps text-muted pt-4 pb-3";
+
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold">{original === undefined ? "New alias" : original}</h1>
-        {original !== undefined ? (
-          <Button variant="danger-soft" onPress={() => setConfirmDelete(true)}>
-            <TrashBin aria-hidden="true" />
-            Delete
-          </Button>
-        ) : null}
-      </div>
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card>
-          <Card.Header>
-            <Card.Title>Definition</Card.Title>
-          </Card.Header>
-          <Card.Content>
-            <Form
-              className="flex flex-col gap-5"
-              onSubmit={(e) => {
-                e.preventDefault();
-                save();
-              }}
-            >
+      <PageHeader
+        before={
+          <Link href="/aliases" className="text-muted hover:text-foreground w-fit gap-1.5 text-sm no-underline">
+            <ArrowLeft aria-hidden="true" className="size-4" />
+            Aliases
+          </Link>
+        }
+        title={<span className="font-mono">{original ?? "New alias"}</span>}
+        description={
+          original === undefined
+            ? "Name it, choose its kind, and list the members to try in order."
+            : "Requests walk the members in order and fall back past any that fail or are cooling."
+        }
+        actions={
+          <>
+            {isDirty ? (
+              <output className="label-caps text-warning flex items-center gap-1.5">
+                <span aria-hidden="true" className="bg-warning size-1.5 rounded-full" />
+                Unsaved changes
+              </output>
+            ) : null}
+            {original !== undefined ? (
+              <Button size="sm" variant="danger-soft" onPress={() => setConfirmDelete(true)}>
+                <TrashBin aria-hidden="true" className="size-4" />
+                Delete
+              </Button>
+            ) : null}
+            <Button size="sm" variant="primary" isPending={isSaving} onPress={save}>
+              {original === undefined ? "Create alias" : "Save"}
+            </Button>
+          </>
+        }
+      />
+      {saveError ? (
+        <Alert status="danger" role="alert">
+          <Alert.Indicator />
+          <Alert.Content>
+            <Alert.Title>Could not save this alias</Alert.Title>
+            <Alert.Description>{errorMessage(saveError)}</Alert.Description>
+          </Alert.Content>
+        </Alert>
+      ) : null}
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]">
+        <Form
+          className="bg-surface border-border divide-separator flex flex-col divide-y rounded-sm border"
+          onSubmit={(e) => {
+            e.preventDefault();
+            save();
+          }}
+        >
+          <fieldset className="min-w-0 px-4 pb-4">
+            <legend className={legend}>Identity</legend>
+            <div className="grid gap-4 sm:grid-cols-2">
               <TextField
                 value={draft.name}
                 onChange={(name) => set({ name })}
@@ -219,39 +267,50 @@ function AliasEditor({ initial, original }: { initial: AliasDraft; original: str
                   </ListBox>
                 </Select.Popover>
               </Select>
-              <div className="flex flex-col gap-2">
-                <span className="text-sm font-medium">Members, in fallback order</span>
-                <MemberList
-                  members={draft.members}
-                  cooling={coolingRefs}
-                  onReorder={(members) => set({ members })}
-                  onRemove={(ref) => set({ members: draft.members.filter((m) => m !== ref) })}
-                />
-                {shown.members !== undefined ? (
-                  <p role="alert" className="text-danger text-sm">
-                    {shown.members}
-                  </p>
-                ) : null}
-                <AddCombo
-                  label="Add member"
-                  placeholder="An alias, or provider/model"
-                  sections={options}
-                  onAdd={addMember}
-                  error={memberError}
-                  onInputChange={() => setMemberError(undefined)}
-                />
-              </div>
+            </div>
+          </fieldset>
+          <fieldset className="min-w-0 px-4 pb-4">
+            <legend className={legend}>Members, in fallback order</legend>
+            <div className="flex flex-col gap-3">
+              <MemberList
+                members={draft.members}
+                cooling={coolingRefs}
+                onReorder={(members) => set({ members })}
+                onRemove={(ref) => set({ members: draft.members.filter((m) => m !== ref) })}
+              />
+              {shown.members !== undefined ? (
+                <p role="alert" className="text-danger text-sm">
+                  {shown.members}
+                </p>
+              ) : null}
+              <AddCombo
+                label="Add member"
+                placeholder="An alias, or provider/model"
+                sections={options}
+                onAdd={addMember}
+                error={memberError}
+                onInputChange={() => setMemberError(undefined)}
+              />
+            </div>
+          </fieldset>
+          <fieldset className="min-w-0 px-4 pb-4">
+            <legend className={legend}>Capabilities</legend>
+            <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-2">
                 <TagGroup
                   aria-label="Capabilities"
                   onRemove={(keys) => set({ capabilities: draft.capabilities.filter((c) => !keys.has(c)) })}
                 >
-                  <Label>Capabilities</Label>
+                  <Label>Advertised</Label>
                   <TagGroup.List
                     items={draft.capabilities.map((c) => ({ id: c }))}
                     renderEmptyState={() => <span className="text-muted text-sm">None advertised.</span>}
                   >
-                    {(c) => <Tag id={c.id}>{c.id}</Tag>}
+                    {(c) => (
+                      <Tag id={c.id} className="font-mono text-xs">
+                        {c.id}
+                      </Tag>
+                    )}
                   </TagGroup.List>
                 </TagGroup>
                 <AddCombo
@@ -277,36 +336,21 @@ function AliasEditor({ initial, original }: { initial: AliasDraft; original: str
               >
                 <Label>Context window</Label>
                 <NumberField.Group>
-                  <NumberField.Input placeholder="From the models" />
+                  <NumberField.Input className="font-mono" placeholder="From the models" />
                 </NumberField.Group>
                 <Description>Tokens. Leave empty to use what the members report.</Description>
                 <FieldError>{shown.contextWindow}</FieldError>
               </NumberField>
-              {saveError ? (
-                <Alert status="danger" role="alert">
-                  <Alert.Indicator />
-                  <Alert.Content>
-                    <Alert.Title>Could not save this alias</Alert.Title>
-                    <Alert.Description>{errorMessage(saveError)}</Alert.Description>
-                  </Alert.Content>
-                </Alert>
-              ) : null}
-              <div className="flex gap-2">
-                <Button type="submit" variant="primary" isPending={isSaving}>
-                  {original === undefined ? "Create alias" : "Save"}
-                </Button>
-                <Button
-                  variant="tertiary"
-                  onPress={() => void navigate({ to: "/aliases", search: parseListSearch({}) })}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </Form>
-          </Card.Content>
-        </Card>
-        <div className="lg:sticky lg:top-4 lg:self-start">
-          <ChainPreview chain={preview.chain} error={preview.error} isLoading={preview.isLoading} />
+            </div>
+          </fieldset>
+        </Form>
+        <div className="lg:sticky lg:top-4">
+          <ChainPreview
+            nodes={nodes}
+            targets={preview.chain?.length}
+            error={preview.error}
+            isLoading={preview.isLoading}
+          />
         </div>
       </div>
       {original !== undefined ? (

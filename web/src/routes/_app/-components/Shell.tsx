@@ -2,6 +2,8 @@ import { BranchesRight, ChartColumn, Gear, Key, ListUl, Server } from "@gravity-
 import { cn, Link } from "@heroui/react";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 
+import { Brand } from "../../../components/brand/Brand";
+
 export type NavLinkProps = {
   href: string;
   className?: string;
@@ -11,14 +13,25 @@ export type NavLinkProps = {
 
 type NavItem = { href: string; label: string; icon: ComponentType<SVGProps<SVGSVGElement>> };
 
-const SECTIONS: readonly NavItem[] = [
-  { href: "/", label: "Overview", icon: ChartColumn },
-  { href: "/providers", label: "Providers", icon: Server },
-  { href: "/aliases", label: "Aliases", icon: BranchesRight },
-  { href: "/keys", label: "Keys", icon: Key },
-  { href: "/logs", label: "Logs", icon: ListUl },
-  { href: "/settings", label: "Settings", icon: Gear },
+const GROUPS: readonly { label: string; items: readonly NavItem[] }[] = [
+  {
+    label: "Monitor",
+    items: [
+      { href: "/", label: "Overview", icon: ChartColumn },
+      { href: "/logs", label: "Logs", icon: ListUl },
+    ],
+  },
+  {
+    label: "Route",
+    items: [
+      { href: "/providers", label: "Providers", icon: Server },
+      { href: "/aliases", label: "Aliases", icon: BranchesRight },
+    ],
+  },
+  { label: "Access", items: [{ href: "/keys", label: "Keys", icon: Key }] },
 ];
+
+const SETTINGS: NavItem = { href: "/settings", label: "Settings", icon: Gear };
 
 function isCurrent(href: string, current: string): boolean {
   if (href === "/") return current === "/";
@@ -32,9 +45,47 @@ const defaultLink = ({ href, className, children, ...rest }: NavLinkProps) => (
 );
 
 function Root({ children }: { children: ReactNode }) {
-  return <div className="flex min-h-dvh flex-col md:flex-row">{children}</div>;
+  return <div className="bg-background flex min-h-dvh">{children}</div>;
 }
 
+function NavLink({
+  item,
+  current,
+  renderLink,
+}: {
+  item: NavItem;
+  current: string;
+  renderLink: (p: NavLinkProps) => ReactNode;
+}) {
+  const active = isCurrent(item.href, current);
+  const Icon = item.icon;
+  return renderLink({
+    href: item.href,
+    "aria-current": active ? "page" : undefined,
+    className: cn(
+      "group relative flex h-8 w-full items-center gap-2.5 rounded-sm px-2.5 text-[13px] no-underline transition-colors duration-150",
+      active ? "bg-default text-foreground font-medium" : "text-muted hover:bg-surface-secondary hover:text-foreground",
+    ),
+    children: (
+      <>
+        <span
+          aria-hidden="true"
+          className={cn(
+            "bg-accent absolute top-1.5 bottom-1.5 -left-3 w-0.5 transition-opacity duration-150",
+            active ? "opacity-100" : "opacity-0",
+          )}
+        />
+        <Icon
+          aria-hidden="true"
+          className={cn("size-4 shrink-0", active ? "text-ink-strong" : "text-muted group-hover:text-foreground")}
+        />
+        {item.label}
+      </>
+    ),
+  });
+}
+
+/** The section links, grouped by what the operator is doing; Settings sits apart at the end. */
 function Nav({
   current,
   renderLink = defaultLink,
@@ -46,49 +97,60 @@ function Nav({
   footer?: ReactNode;
 }) {
   return (
-    <aside className="border-border flex shrink-0 flex-col gap-4 border-b p-4 md:w-56 md:border-r md:border-b-0">
-      <span className="text-lg font-semibold">remora</span>
-      <nav aria-label="Main">
-        <ul className="flex flex-row flex-wrap gap-1 md:flex-col">
-          {SECTIONS.map(({ href, label, icon: Icon }) => {
-            const active = isCurrent(href, current);
-            return (
-              <li key={href}>
-                {renderLink({
-                  href,
-                  "aria-current": active ? "page" : undefined,
-                  className: cn(
-                    "flex items-center gap-2 rounded-lg px-3 py-2 text-sm no-underline",
-                    active ? "bg-default text-foreground font-medium" : "text-muted hover:text-foreground",
-                  ),
-                  children: (
-                    <>
-                      <Icon aria-hidden="true" className="size-4" />
-                      {label}
-                    </>
-                  ),
-                })}
-              </li>
-            );
-          })}
+    <div className="flex h-full flex-col">
+      <nav aria-label="Main" className="flex flex-1 flex-col gap-5 px-3 py-4">
+        {GROUPS.map((group) => (
+          <div key={group.label} className="flex flex-col gap-1">
+            <span className="label-caps text-muted px-2.5 pb-1">{group.label}</span>
+            <ul className="flex flex-col gap-0.5">
+              {group.items.map((item) => (
+                <li key={item.href}>
+                  <NavLink item={item} current={current} renderLink={renderLink} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+        <ul className="mt-auto flex flex-col gap-0.5">
+          <li>
+            <NavLink item={SETTINGS} current={current} renderLink={renderLink} />
+          </li>
         </ul>
       </nav>
-      {footer ? <div className="text-muted mt-auto text-xs">{footer}</div> : null}
+      {footer ? <div className="border-border border-t px-3 py-3">{footer}</div> : null}
+    </div>
+  );
+}
+
+/** The fixed sidebar on wide screens. */
+function Sidebar({ search, children }: { search?: ReactNode; children: ReactNode }) {
+  return (
+    <aside className="border-border bg-surface sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-r md:flex">
+      <div className="border-border flex h-14 items-center border-b px-5">
+        <Brand />
+      </div>
+      {search ? <div className="px-3 pt-3">{search}</div> : null}
+      <div className="min-h-0 flex-1">{children}</div>
     </aside>
   );
 }
 
-function Header({ title, children }: { title?: ReactNode; children?: ReactNode }) {
+/** The top bar on narrow screens: the brand and whatever opens the menu. */
+function MobileBar({ children }: { children: ReactNode }) {
   return (
-    <header className="flex items-center justify-between gap-4 px-6 pt-6">
-      {title ? <h1 className="text-xl font-semibold">{title}</h1> : <span />}
-      <div className="flex items-center gap-2">{children}</div>
+    <header className="border-border bg-surface sticky top-0 z-30 flex h-14 items-center justify-between border-b px-4 md:hidden">
+      <Brand />
+      <div className="flex items-center gap-1">{children}</div>
     </header>
   );
 }
 
 function Content({ children }: { children: ReactNode }) {
-  return <main className="flex min-w-0 flex-1 flex-col gap-6 p-6">{children}</main>;
+  return (
+    <main className="mx-auto flex w-full max-w-[1320px] min-w-0 flex-1 flex-col gap-6 px-4 py-6 md:px-8 md:py-8">
+      {children}
+    </main>
+  );
 }
 
-export const Shell = Object.assign(Root, { Root, Nav, Header, Content });
+export const Shell = Object.assign(Root, { Root, Nav, Sidebar, MobileBar, Content });

@@ -1,5 +1,5 @@
 import { Plus } from "@gravity-ui/icons";
-import { Alert, Button, Drawer, Label, ListBox, Select, toast } from "@heroui/react";
+import { Alert, Button, toast } from "@heroui/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, stripSearchParams, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
@@ -13,20 +13,13 @@ import {
 import type { Provider } from "../../../client/types.gen";
 import { ConfirmDelete } from "../../../components/confirm-delete/ConfirmDelete";
 import { DataList } from "../../../components/data-list/DataList";
+import { PageHeader } from "../../../components/page-header/PageHeader";
 import { errorMessage } from "../../../lib/api";
 import { type ListSearch, parseEnum, parseListSearch } from "../../../lib/list-search";
 import { invalidateOps } from "../../../lib/query";
-import { ProviderForm } from "./-components/ProviderForm";
+import { ProviderEditorDrawer } from "./-components/ProviderEditorDrawer";
 import { ProvidersTable } from "./-components/ProvidersTable";
-import { useProviderEditor } from "./-hooks/useProviderEditor";
-import {
-  DISPLAY_GROUPS,
-  type DisplayGroup,
-  emptyDraft,
-  fromProvider,
-  GROUP_LABELS,
-  PROVIDER_STATUSES,
-} from "./-lib/provider-form";
+import { DISPLAY_GROUPS, type DisplayGroup, GROUP_LABELS, PROVIDER_STATUSES } from "./-lib/provider-form";
 import { FETCH_LIMIT, providerListRows } from "./-lib/providers-list";
 
 type ProvidersSearch = ListSearch & { group?: DisplayGroup; status?: Provider["status"]; edit?: string };
@@ -48,63 +41,6 @@ const STATUS_LABELS: Record<Provider["status"], string> = {
   down: "Down",
   unknown: "Not tested",
 };
-
-function FilterSelect<T extends string>({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: T | undefined;
-  options: readonly { id: T; label: string }[];
-  onChange(v: T | undefined): void;
-}) {
-  return (
-    <Select className="w-44" value={value ?? "all"} onChange={(key) => onChange(options.find((o) => o.id === key)?.id)}>
-      <Label>{label}</Label>
-      <Select.Trigger>
-        <Select.Value />
-        <Select.Indicator />
-      </Select.Trigger>
-      <Select.Popover>
-        <ListBox aria-label={label}>
-          {[{ id: "all", label: "All" }, ...options].map((o) => (
-            <ListBox.Item key={o.id} id={o.id} textValue={o.label}>
-              {o.label}
-              <ListBox.ItemIndicator />
-            </ListBox.Item>
-          ))}
-        </ListBox>
-      </Select.Popover>
-    </Select>
-  );
-}
-
-function ProviderEditor({ provider, onClose }: { provider?: Provider; onClose(): void }) {
-  const isEdit = provider !== undefined;
-  const editor = useProviderEditor({
-    initial: provider ? fromProvider(provider) : emptyDraft("builtin"),
-    isEdit,
-    onSaved: (p) => {
-      toast.success(isEdit ? `Saved ${p.name}` : `Added ${p.name}`);
-      onClose();
-    },
-  });
-  return (
-    <ProviderForm
-      draft={editor.draft}
-      errors={editor.errors}
-      isEdit={isEdit}
-      keyHints={provider?.keys?.map((k) => k.name) ?? []}
-      isPending={editor.isPending}
-      error={editor.error}
-      onChange={editor.setDraft}
-      onSubmit={editor.submit}
-      onCancel={onClose}
-    />
-  );
-}
 
 function ProvidersPage() {
   const search = Route.useSearch();
@@ -146,28 +82,33 @@ function ProvidersPage() {
   const editing =
     search.edit && search.edit !== "new" ? providers.data?.items.find((p) => p.name === search.edit) : undefined;
   const editorOpen = search.edit === "new" || editing !== undefined;
+  const filtered = Boolean(search.q || search.group || search.status);
+  const addButton = (
+    <Button variant="primary" onPress={() => setSearch({ edit: "new" })}>
+      <Plus aria-hidden="true" />
+      Add provider
+    </Button>
+  );
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-xl font-semibold">Providers</h1>
-        <Button variant="primary" onPress={() => setSearch({ edit: "new" })}>
-          <Plus aria-hidden="true" />
-          Add provider
-        </Button>
-      </div>
+      <PageHeader
+        title="Providers"
+        description="The upstreams this gateway forwards to: an API with its keys, or a subscription with signed-in accounts."
+        actions={addButton}
+      />
 
       <DataList>
         <DataList.Toolbar>
           <DataList.Search value={search.q} onChange={(q) => setSearch({ q })} placeholder="Search providers" />
           <DataList.Filters>
-            <FilterSelect
+            <DataList.Filter
               label="Group"
               value={search.group}
               options={DISPLAY_GROUPS.map((id) => ({ id, label: GROUP_LABELS[id] }))}
               onChange={(group) => setSearch({ group })}
             />
-            <FilterSelect
+            <DataList.Filter
               label="Status"
               value={search.status}
               options={PROVIDER_STATUSES.map((id) => ({ id, label: STATUS_LABELS[id] }))}
@@ -189,7 +130,12 @@ function ProvidersPage() {
           isLoading={providers.isLoading}
           error={providers.error ?? accounts.error}
           isEmpty={rows.total === 0}
-          emptyText={search.q || search.group || search.status ? "No provider matches." : "No providers yet."}
+          emptyText={
+            filtered
+              ? "No provider matches. Clear the search or the filters."
+              : "No providers yet. Add one to start routing requests."
+          }
+          emptyAction={filtered ? undefined : addButton}
         >
           <ProvidersTable
             items={rows.items}
@@ -203,6 +149,7 @@ function ProvidersPage() {
               })
             }
             onTest={(p) => test.mutate({ path: { name: p.name } })}
+            onEdit={(p) => void navigate({ search: (prev) => ({ ...prev, edit: p.name }) })}
             onDelete={(p) => {
               remove.reset();
               setDeleting(p);
@@ -218,23 +165,12 @@ function ProvidersPage() {
         />
       </DataList>
 
-      <Drawer.Backdrop
+      <ProviderEditorDrawer
         isOpen={editorOpen}
-        onOpenChange={(open) => {
-          if (!open) closeEditor();
-        }}
-      >
-        <Drawer.Content placement="right">
-          <Drawer.Dialog>
-            <Drawer.Header>
-              <Drawer.Heading>{editing ? `Edit ${editing.name}` : "Add provider"}</Drawer.Heading>
-            </Drawer.Header>
-            <Drawer.Body>
-              {editorOpen ? <ProviderEditor key={search.edit} provider={editing} onClose={closeEditor} /> : null}
-            </Drawer.Body>
-          </Drawer.Dialog>
-        </Drawer.Content>
-      </Drawer.Backdrop>
+        provider={editing}
+        editorKey={search.edit ?? ""}
+        onClose={closeEditor}
+      />
 
       <ConfirmDelete
         title={`Delete ${deleting?.name ?? "provider"}?`}
