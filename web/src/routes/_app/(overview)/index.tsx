@@ -10,6 +10,7 @@ import {
   listProvidersOptions,
   testProviderMutation,
 } from "../../../client/@tanstack/react-query.gen";
+import { listProviders } from "../../../client/sdk.gen";
 import type { Stats } from "../../../client/types.gen";
 import { PageHeader } from "../../../components/page-header/PageHeader";
 import { errorMessage } from "../../../lib/api";
@@ -86,7 +87,15 @@ function OverviewPage() {
   const test = useMutation(testProviderMutation());
   const testAll = useMutation({
     // One at a time: a burst of probes against every upstream at once helps nobody.
-    mutationFn: async (names: string[]) => {
+    mutationFn: async () => {
+      // The overview loads one page of providers; testing all of them means walking every page.
+      const names: string[] = [];
+      for (let offset = 0; ;) {
+        const { data } = await listProviders({ query: { limit: 100, offset }, throwOnError: true });
+        names.push(...data.items.map((p) => p.name));
+        offset += data.items.length;
+        if (data.items.length === 0 || offset >= data.total) break;
+      }
       for (const name of names) await test.mutateAsync({ path: { name } }).catch(() => undefined);
     },
     onSettled: () => invalidateOps(qc, "listProviders", "getProvider"),
@@ -176,12 +185,7 @@ function OverviewPage() {
             counts={healthCounts(providers.data.items)}
             action={
               providers.data.items.length > 0 ? (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  isPending={testAll.isPending}
-                  onPress={() => testAll.mutate(providers.data.items.map((p) => p.name))}
-                >
+                <Button size="sm" variant="secondary" isPending={testAll.isPending} onPress={() => testAll.mutate()}>
                   Test all
                 </Button>
               ) : null
@@ -201,7 +205,11 @@ function OverviewPage() {
       ) : null}
 
       {stats.data ? (
-        <Breakdown models={breakdownRows(byModel.data?.groups ?? [])} providers={breakdownRows(stats.data.groups)} />
+        <Breakdown
+          models={byModel.data ? breakdownRows(byModel.data.groups) : undefined}
+          modelsError={byModel.error && !byModel.data ? errorMessage(byModel.error) : undefined}
+          providers={breakdownRows(stats.data.groups)}
+        />
       ) : null}
 
       {cooling.data ? <CoolingList items={cooling.data.items} total={cooling.data.total} /> : null}

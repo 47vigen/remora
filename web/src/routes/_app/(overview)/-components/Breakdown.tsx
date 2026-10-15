@@ -1,10 +1,19 @@
-import { cn, Table, Tabs } from "@heroui/react";
+import { cn, Skeleton, Table, Tabs } from "@heroui/react";
 
 import type { BreakdownRow } from "../-lib/overview";
 import { formatCost, formatLatency } from "../../../../lib/chart";
 import { formatCompactNumber } from "../../../../lib/numbers";
 
-function Rows({ label, rows }: { label: string; rows: BreakdownRow[] }) {
+function Rows({ label, rows, error }: { label: string; rows?: BreakdownRow[]; error?: string }) {
+  if (error) return <p className="text-danger py-10 text-center text-sm">Could not load this breakdown: {error}</p>;
+  if (!rows)
+    return (
+      <div className="flex flex-col gap-2 p-4">
+        <Skeleton className="h-8 w-full" />
+        <Skeleton className="h-8 w-full" />
+        <Skeleton className="h-8 w-full" />
+      </div>
+    );
   if (rows.length === 0) return <p className="text-muted py-10 text-center text-sm">No traffic in this window.</p>;
   const peak = Math.max(...rows.map((r) => r.requests), 1);
   return (
@@ -67,7 +76,16 @@ function Rows({ label, rows }: { label: string; rows: BreakdownRow[] }) {
 }
 
 /** Who carried the traffic: the busiest models and providers in the window, side by side in tabs. */
-export function Breakdown({ models, providers }: { models: BreakdownRow[]; providers: BreakdownRow[] }) {
+export function Breakdown({
+  models,
+  modelsError,
+  providers,
+}: {
+  /** Undefined while the separate model query loads. */
+  models?: BreakdownRow[];
+  modelsError?: string;
+  providers: BreakdownRow[];
+}) {
   return (
     <section className="bg-surface border-border overflow-hidden rounded-sm border">
       <Tabs defaultSelectedKey="models">
@@ -87,7 +105,7 @@ export function Breakdown({ models, providers }: { models: BreakdownRow[]; provi
           </Tabs.ListContainer>
         </div>
         <Tabs.Panel id="models">
-          <Rows label="Model" rows={models} />
+          <Rows label="Model" rows={models} error={modelsError} />
         </Tabs.Panel>
         <Tabs.Panel id="providers">
           <Rows label="Provider" rows={providers} />
