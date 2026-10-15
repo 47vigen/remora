@@ -7,6 +7,8 @@ import (
 	"slices"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/47vigen/remora/internal/api/gen"
 	"github.com/47vigen/remora/internal/engine/bifrost"
 )
@@ -68,6 +70,9 @@ func finite(v float64) float64 {
 	return v
 }
 
+// groupReads is how many group summaries are read from the engine at once.
+const groupReads = 8
+
 // group is one member of a group_by set and the filter that narrows to it.
 type group struct {
 	name   string
@@ -93,17 +98,27 @@ func (s *Server) stats(ctx context.Context, f bifrost.LogFilter, groupBy string)
 	if err != nil {
 		return gen.Stats{}, err
 	}
-	for _, m := range members {
+	// Each summary is several engine reads, so the members are read side by side.
+	sums := make([]gen.StatsSummary, len(members))
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(groupReads)
+	for i, m := range members {
 		gf := f
 		if !m.narrow(&gf) {
 			continue
 		}
-		sum, err := s.summary(ctx, gf)
-		if err != nil {
-			return gen.Stats{}, err
-		}
-		if sum.Requests > 0 {
-			out.Groups = append(out.Groups, gen.StatsGroup{Name: m.name, Summary: sum})
+		g.Go(func() error {
+			var err error
+			sums[i], err = s.summary(gctx, gf)
+			return err
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return gen.Stats{}, err
+	}
+	for i, m := range members {
+		if sums[i].Requests > 0 {
+			out.Groups = append(out.Groups, gen.StatsGroup{Name: m.name, Summary: sums[i]})
 		}
 	}
 	return out, nil
@@ -156,13 +171,28 @@ func (s *Server) groups(ctx context.Context, groupBy string) ([]group, error) {
 			return nil, err
 		}
 		for _, name := range names {
+			var ms []string
+			if isSubscription(name) {
+				if ms, err = s.subscriptionModels(ctx, name); err != nil {
+					return nil, err
+				}
+				if len(ms) == 0 {
+					continue
+				}
+			}
 			out = append(out, group{name, func(f *bifrost.LogFilter) bool {
-				ps, ms := s.d.Names.EngineFilter(ctx, name, "")
+				ps, _ := s.d.Names.EngineFilter(ctx, name, "")
 				if len(f.Providers) > 0 && len(ps) > 0 && !slices.Contains(f.Providers, ps[0]) {
 					return false
 				}
 				f.Providers = ps
 				if len(ms) > 0 {
+					if len(f.Models) > 0 {
+						ms = slices.DeleteFunc(slices.Clone(ms), func(m string) bool { return !slices.Contains(f.Models, m) })
+						if len(ms) == 0 {
+							return false
+						}
+					}
 					f.Models = ms
 				}
 				return true

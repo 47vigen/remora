@@ -224,3 +224,32 @@ func TestKeyUsage(t *testing.T) {
 		t.Errorf("unknown key = %d %s", code, body)
 	}
 }
+
+// The front door logs every subscription provider under one provider, so each is told apart by its models.
+func TestStatsSubscriptionProvidersSplitByModel(t *testing.T) {
+	env := newTestEnv(t)
+	env.accounts.accounts = []Account{{ID: "1", Provider: "antigravity"}, {ID: "2", Provider: "codex"}, {ID: "3", Provider: "grok"}}
+	env.logs.models = []string{"antigravity/g-1", "antigravity/g-2(8192)", "codex/c-1", "or/antigravity/x"}
+	env.logs.stats = func(f bifrost.LogFilter) bifrost.LogStats {
+		return bifrost.LogStats{UserFacingTotalRequests: int64(len(f.Models)), UserFacingSuccessRate: 100}
+	}
+	s, raw := getStats(t, env, "/api/stats?group_by=provider")
+	got := map[string]float64{}
+	for _, g := range s.Groups {
+		got[g.Name] = g.Summary["requests"].(float64)
+	}
+	if len(got) != 2 || got["antigravity"] != 2 || got["codex"] != 1 {
+		t.Fatalf("groups = %s", raw)
+	}
+
+	if code, body := env.do(t, env.client, http.MethodGet, "/api/logs?provider=antigravity", ""); code != http.StatusOK {
+		t.Fatalf("logs = %d %s", code, body)
+	}
+	if f, _ := env.logs.lastSearch(); !slices.Equal(f.Models, []string{"antigravity/g-1", "antigravity/g-2(8192)"}) {
+		t.Fatalf("logs filter models = %v", f.Models)
+	}
+	code, body := env.do(t, env.client, http.MethodGet, "/api/logs?provider=grok", "")
+	if code != http.StatusOK || strings.TrimSpace(string(body)) != `{"items":[],"total":0}` {
+		t.Fatalf("a subscription provider that served nothing = %d %s", code, body)
+	}
+}
