@@ -24,7 +24,7 @@ func TestOAuthProviderSpec(t *testing.T) {
 		t.Errorf("provider = %+v", p)
 	}
 	got := slices.Sorted(slices.Values(p.AllowedRequests))
-	want := []string{"chat_completion", "chat_completion_stream", "list_models", "responses", "responses_stream"}
+	want := []string{"chat_completion", "chat_completion_stream", "responses", "responses_stream"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("allowed = %q, want %q", got, want)
 	}
