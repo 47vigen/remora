@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/47vigen/remora/compare/v0.1.1...v0.1.2) (2026-10-15)
+
+
+### Bug Fixes
+
+* **import:** opencode-go is a front-door builtin ([#25](https://github.com/47vigen/remora/issues/25)) ([7e3490a](https://github.com/47vigen/remora/commit/7e3490a1bc5d88bfdf1bfee19997272957795c4e))
+
 ## [0.1.1](https://github.com/47vigen/remora/compare/v0.1.0...v0.1.1) (2026-10-15)
 
 
