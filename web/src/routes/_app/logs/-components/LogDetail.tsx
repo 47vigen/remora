@@ -54,7 +54,7 @@ function Body({ value, streamed }: { value: unknown; streamed: boolean }) {
   );
 }
 
-function Overview({ log }: { log: Detail }) {
+function Overview({ log, keyName }: { log: Detail; keyName?: string }) {
   const fallback = log.attempt > 1 || log.parent_id !== undefined;
   const prompt = excerpt(log.request, "request");
   const reply = excerpt(log.response, "response");
@@ -80,7 +80,7 @@ function Overview({ log }: { log: Detail }) {
           ) : null}
         </span>
       </Field>
-      <Field label="Key">{log.key ?? "–"}</Field>
+      <Field label="Key">{keyName ?? log.key ?? "–"}</Field>
       <Field label="Latency">{log.latency_ms !== undefined ? formatLatency(log.latency_ms) : "–"}</Field>
       <Field label="Tokens">{formatTokens(log.tokens.prompt, log.tokens.completion)}</Field>
       <Field label="Cost">{log.cost_usd !== undefined ? formatCost(log.cost_usd) : "–"}</Field>
@@ -154,17 +154,19 @@ function FallbackPath({ attempts }: { attempts: LogEntry[] }) {
 /** The `?log=<id>` drawer: overview, request and response bodies, and every attempt of the request. */
 export function LogDetail({
   log,
+  keyName,
   isLoading,
   onClose,
 }: {
   log: Detail | undefined;
+  keyName?: string;
   isLoading: boolean;
   onClose(): void;
 }) {
   return (
     <Drawer.Backdrop isOpen onOpenChange={(open) => !open && onClose()}>
-      <Drawer.Content placement="right" className="sm:max-w-2xl">
-        <Drawer.Dialog>
+      <Drawer.Content placement="right">
+        <Drawer.Dialog className="sm:w-2xl">
           <Drawer.Header>
             <Drawer.Heading>Request</Drawer.Heading>
           </Drawer.Header>
@@ -201,7 +203,7 @@ export function LogDetail({
                   </Tabs.List>
                 </Tabs.ListContainer>
                 <Tabs.Panel id="overview" className="pt-4">
-                  <Overview log={log} />
+                  <Overview log={log} keyName={keyName} />
                 </Tabs.Panel>
                 <Tabs.Panel id="request" className="pt-4">
                   <Body value={log.request} streamed={false} />

@@ -18,7 +18,7 @@ export function KeysTable({
 }: {
   items: Key[];
   /** Last-24-hour stats per key id. */
-  usage: Map<string, StatsGroup>;
+  usage?: Map<string, StatsGroup>; // undefined while loading
   onOpen(k: Key): void;
   onToggle(k: Key, enabled: boolean): void;
   onDelete(k: Key): void;
@@ -36,7 +36,7 @@ export function KeysTable({
             <Table.Column>Requests 24h</Table.Column>
             <Table.Column>Actions</Table.Column>
           </Table.Header>
-          <Table.Body items={items}>
+          <Table.Body items={items} dependencies={[usage, now]}>
             {(k) => {
               const hidden = k.allow.length - SHOWN_PATTERNS;
               return (
@@ -77,7 +77,7 @@ export function KeysTable({
                     <time dateTime={k.created_at}>{formatRelative(k.created_at, now)}</time>
                   </Table.Cell>
                   <Table.Cell className="tabular-nums">
-                    {formatCompactNumber(usage.get(k.id)?.summary.requests ?? 0)}
+                    {usage ? formatCompactNumber(usage.get(k.id)?.summary.requests ?? 0) : "–"}
                   </Table.Cell>
                   <Table.Cell>
                     <Button

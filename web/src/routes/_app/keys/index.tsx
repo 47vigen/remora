@@ -174,7 +174,7 @@ function KeysPage() {
       >
         <KeysTable
           items={items}
-          usage={usage}
+          usage={stats.isPending ? undefined : usage}
           now={now}
           onOpen={(k) => openKey(k.id)}
           onToggle={(k, on) => toggle.mutate({ path: { id: k.id }, body: { enabled: on } })}
