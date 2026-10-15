@@ -28,7 +28,7 @@ func TestReadFixture(t *testing.T) {
 	for _, c := range s.Connections {
 		conns[c.ID] = c
 	}
-	if len(s.Connections) != 7 || s.Connections[0].ID != "c1" {
+	if len(s.Connections) != 10 || s.Connections[0].ID != "c1" {
 		t.Fatalf("connections: %+v", s.Connections)
 	}
 	if c := conns["c1"]; c.APIKey != fxORKey1 || c.Provider != "openrouter" || c.AuthType != "apikey" || !c.Active {
