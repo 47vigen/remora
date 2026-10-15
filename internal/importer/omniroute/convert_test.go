@@ -36,14 +36,22 @@ func TestConvertProviders(t *testing.T) {
 		{Name: "oc", Kind: "openai-compatible", BaseURL: "https://llm.example.com/v1", Keys: []config.FileSecretKey{
 			{Name: "key-1", Value: "env:REMORA_PROVIDER_OC_KEY_1"},
 		}},
+		{Name: "opencode-go", Kind: "openai-compatible", BaseURL: "https://opencode.ai/zen/go/v1", Keys: []config.FileSecretKey{
+			{Name: "key-1", Value: "env:REMORA_PROVIDER_OPENCODE_GO_KEY_1"},
+		}},
+		{Name: "soniox", Kind: "soniox", Keys: []config.FileSecretKey{
+			{Name: "key-1", Value: "env:REMORA_PROVIDER_SONIOX_KEY_1"},
+		}},
 	}
 	if !reflect.DeepEqual(r.Doc.Providers, want) {
 		t.Fatalf("providers:\n got %+v\nwant %+v", r.Doc.Providers, want)
 	}
 	for name, v := range map[string]string{
-		"REMORA_PROVIDER_OPENROUTER_KEY_1": fxORKey1,
-		"REMORA_PROVIDER_OPENROUTER_KEY_2": fxORKey2,
-		"REMORA_PROVIDER_OC_KEY_1":         fxOCKey,
+		"REMORA_PROVIDER_OPENROUTER_KEY_1":  fxORKey1,
+		"REMORA_PROVIDER_OPENROUTER_KEY_2":  fxORKey2,
+		"REMORA_PROVIDER_OC_KEY_1":          fxOCKey,
+		"REMORA_PROVIDER_OPENCODE_GO_KEY_1": fxGoKey,
+		"REMORA_PROVIDER_SONIOX_KEY_1":      fxSXKey,
 	} {
 		if r.Secrets[name] != v {
 			t.Errorf("Secrets[%s] = %q, want %q", name, r.Secrets[name], v)
@@ -51,6 +59,9 @@ func TestConvertProviders(t *testing.T) {
 	}
 	if slices.ContainsFunc(mapValues(r.Secrets), func(v string) bool { return v == "sk-or-off" }) {
 		t.Error("an inactive connection's key was imported")
+	}
+	if !hasWarning(r, "skipped mystery connection mx: not supported") {
+		t.Errorf("an unknown provider was not skipped: %q", r.Warnings)
 	}
 	if !hasWarning(r, "skipped qwen account b@example.com: not supported") {
 		t.Errorf("warnings: %q", r.Warnings)
