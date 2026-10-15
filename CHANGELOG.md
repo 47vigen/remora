@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/47vigen/remora/compare/v0.1.4...v0.1.5) (2026-10-15)
+
+
+### Bug Fixes
+
+* panel walkthrough against a real deployment ([#35](https://github.com/47vigen/remora/issues/35)) ([6eb735a](https://github.com/47vigen/remora/commit/6eb735aba5d5145751f719175b379f610251ef0a))
+
 ## [0.1.4](https://github.com/47vigen/remora/compare/v0.1.3...v0.1.4) (2026-10-15)
 
 
