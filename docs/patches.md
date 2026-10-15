@@ -7,4 +7,4 @@ removes the row. `pending` in the `upstream PR` column means the upstream pull r
 
 | engine | file | change | why | fork commit | upstream PR | base tag | remove when |
 |---|---|---|---|---|---|---|---|
-| bifrost | core/schemas/transcriptions.go | add `speaker` to `TranscriptionSegment` | Soniox verbose_json segments carry speakers | 179c29b6265e5b2bbd9d34fc60a6e77bc1264214 | pending | transports/v2.3.0 | the PR is in a release tag |
+| bifrost | core/schemas/transcriptions.go | add `speaker` to `TranscriptionSegment` | Soniox verbose_json segments carry speakers | 179c29b6265e5b2bbd9d34fc60a6e77bc1264214 | https://github.com/maximhq/bifrost/pull/8578 | transports/v2.3.0 | the PR is in a release tag |

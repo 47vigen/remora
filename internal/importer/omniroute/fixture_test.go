@@ -58,6 +58,8 @@ const ts = "2026-10-01T00:00:00.000Z"
 // Plain values the fixture stores encrypted; tests compare against them.
 const (
 	fxORKey1     = "sk-or-fixture-1"
+	fxGoKey      = "sk-go-fixture"
+	fxSXKey      = "sx-fixture"
 	fxORKey2     = "sk-or-fixture-2"
 	fxOCKey      = "oc-fixture-key"
 	fxAGAccess   = "ag-access-fixture"
@@ -176,6 +178,9 @@ func buildFixture(t *testing.T, dir string) {
 	exec(t, db, conn, "c6", "qwen", "oauth", "qw", "b@example.com", 1, 1, nil,
 		encrypt(t, s, "qw-access"), nil, nil, nil, nil, nil, nil, ts, ts)
 	exec(t, db, conn, "c7", "openrouter", "apikey", "or off", nil, 3, 0, encrypt(t, s, "sk-or-off"), nil, nil, nil, nil, nil, nil, nil, ts, ts)
+	exec(t, db, conn, "c8", "opencode-go", "apikey", "go", nil, 1, 1, encrypt(t, s, fxGoKey), nil, nil, nil, nil, nil, nil, nil, ts, ts)
+	exec(t, db, conn, "c9", "soniox", "apikey", "sx", nil, 1, 1, encrypt(t, s, fxSXKey), nil, nil, nil, nil, nil, nil, nil, ts, ts)
+	exec(t, db, conn, "c10", "mystery", "apikey", "mx", nil, 1, 1, encrypt(t, s, "sk-mystery"), nil, nil, nil, nil, nil, nil, nil, ts, ts)
 
 	key := `INSERT INTO api_keys (id, name, key, created_at, revoked_at, expires_at, is_active, allowed_models,
 		allowed_combos, model_access_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`

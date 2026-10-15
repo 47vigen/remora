@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/47vigen/remora/internal/config"
+	"github.com/47vigen/remora/internal/engine/bifrost"
 )
 
 // Result is what an OmniRoute snapshot becomes: a remora.yaml document whose secrets are env: references, the
@@ -17,6 +18,14 @@ type Result struct {
 	Secrets     config.Secrets
 	Credentials []Credential
 	Warnings    []string
+}
+
+// apiKeyProviders maps OmniRoute's API-key providers that are not front-door builtins to their remora shape. The base
+// URLs are the ones OmniRoute calls (its provider registry); every other provider must be a front-door builtin.
+var apiKeyProviders = map[string]config.FileProvider{
+	"opencode":    {Kind: "openai-compatible", BaseURL: "https://opencode.ai/zen/v1"},
+	"opencode-go": {Kind: "openai-compatible", BaseURL: "https://opencode.ai/zen/go/v1"},
+	"soniox":      {Kind: "soniox"},
 }
 
 // compatPrefix starts the id of an OmniRoute custom OpenAI-compatible node (src/app/api/provider-nodes/route.ts).
@@ -75,12 +84,18 @@ func (c *converter) providers() {
 			continue
 		}
 		p := config.FileProvider{Name: conn.Provider, Kind: "builtin", Type: conn.Provider}
-		if node, ok := c.nodes[conn.Provider]; ok || strings.HasPrefix(conn.Provider, compatPrefix) {
+		if known, ok := apiKeyProviders[conn.Provider]; ok {
+			known.Name = conn.Provider
+			p = known
+		} else if node, ok := c.nodes[conn.Provider]; ok || strings.HasPrefix(conn.Provider, compatPrefix) {
 			if !ok || !strings.HasPrefix(node.ID, compatPrefix) || node.Prefix == "" || node.BaseURL == "" {
 				c.warn("skipped %s connection %s: not supported (only OpenAI-compatible nodes with a prefix and a base URL are)", conn.Provider, label)
 				continue
 			}
 			p = config.FileProvider{Name: node.Prefix, Kind: "openai-compatible", BaseURL: node.BaseURL}
+		} else if !bifrost.IsStandardProvider(conn.Provider) {
+			c.warn("skipped %s connection %s: not supported (no front-door builtin of that name)", conn.Provider, label)
+			continue
 		}
 		i, ok := index[p.Name]
 		if !ok {
