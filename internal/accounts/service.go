@@ -31,6 +31,8 @@ type Service struct {
 	log    *slog.Logger
 	now    func() time.Time
 
+	modelWait time.Duration // how long an imported credential's models are awaited per round
+
 	mu      sync.Mutex
 	pending map[string]*pending // by login state
 
@@ -51,5 +53,5 @@ func New(engine *cliproxyapi.Client, st *store.Store, log *slog.Logger) *Service
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Service{engine: engine, store: st, log: log, now: time.Now, pending: map[string]*pending{}}
+	return &Service{engine: engine, store: st, log: log, now: time.Now, modelWait: 2 * time.Second, pending: map[string]*pending{}}
 }

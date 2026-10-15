@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -407,5 +408,55 @@ func TestErrorNeverNamesEngine(t *testing.T) {
 		if !strings.HasPrefix(err.Error(), "oauth engine: ") {
 			t.Errorf("error %q lacks the neutral prefix", err.Error())
 		}
+	}
+}
+
+// registrationEngine serves a credential whose models appear only after patchesNeeded fields patches, like the
+// engine after it dropped the registration of a fresh upload. patches reports how many it received.
+func registrationEngine(t *testing.T, patchesNeeded int) (c *cliproxyapi.Client, patches func() int) {
+	t.Helper()
+	var mu sync.Mutex
+	n := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch r.Method + " " + r.URL.Path {
+		case "PATCH /v8/management/credentials/fields":
+			n++
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		case "GET /v8/management/credentials/models":
+			if n >= patchesNeeded {
+				_, _ = w.Write([]byte(`{"models":[{"id":"gpt-x"}]}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"models":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return cliproxyapi.New(srv.URL, secret, nil), func() int { mu.Lock(); defer mu.Unlock(); return n }
+}
+
+func TestAwaitCredentialModels(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name          string
+		patchesNeeded int
+		want          []string
+		wantPatches   int
+	}{
+		{"registered at once", 0, []string{"gpt-x"}, 0},
+		{"registration dropped", 1, []string{"gpt-x"}, 1},
+		{"never registered", 100, []string{}, 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, patches := registrationEngine(t, tt.patchesNeeded)
+			got, err := c.AwaitCredentialModels(ctx, "codex-a.json", "codex", 20*time.Millisecond)
+			if err != nil || !slices.Equal(got, tt.want) || patches() != tt.wantPatches {
+				t.Errorf("models %v, err %v, patches %d; want %v, %d patches", got, err, patches(), tt.want, tt.wantPatches)
+			}
+		})
 	}
 }

@@ -290,19 +290,8 @@ func TestContractCredentials(t *testing.T) {
 		t.Errorf("listed credential = %+v", c)
 	}
 
-	// The engine registers an uploaded credential's models when its file watcher picks the file up, a moment after
-	// the upload answers, so the first reads may still be empty.
-	var (
-		models []string
-		err    error
-	)
-	for deadline := time.Now().Add(5 * time.Second); ; {
-		models, err = e.client.CredentialModels(ctx, name)
-		if err != nil || len(models) > 0 || time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
+	// The engine can drop an uploaded credential's model registration; AwaitCredentialModels nudges it as remora does.
+	models, err := e.client.AwaitCredentialModels(ctx, name, "codex", 5*time.Second)
 	if err != nil || len(models) == 0 {
 		t.Errorf("CredentialModels = %v, %v, want some", models, err)
 	}

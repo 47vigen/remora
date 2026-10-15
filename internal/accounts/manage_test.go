@@ -279,6 +279,10 @@ func TestImport(t *testing.T) {
 	if !ok || prefix != "codex" || c.Provider != "codex" {
 		t.Errorf("engine credential = %+v prefix %q ok %v", c, prefix, ok)
 	}
+	// The fake never registers models, so the prefix is set once and then re-set twice to nudge the engine.
+	if n := e.fake.Calls("/credentials/fields"); n != 3 {
+		t.Errorf("fields calls = %d, want 3", n)
+	}
 	if rows := e.rows(t); len(rows) != 1 || rows[0].Provider != "codex" || rows[0].Credential != a.Credential {
 		t.Errorf("store = %+v", rows)
 	}

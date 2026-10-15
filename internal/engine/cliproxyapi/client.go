@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // basePath is the v8 management prefix.
@@ -95,6 +96,42 @@ func (c *Client) CredentialModels(ctx context.Context, name string) ([]string, e
 		ids = append(ids, m.ID)
 	}
 	return ids, nil
+}
+
+// modelRounds is how many times AwaitCredentialModels waits for a credential's models, nudging between rounds.
+const modelRounds = 3
+
+// AwaitCredentialModels waits up to wait for a just-written credential to list models and returns them. The engine
+// can drop the model registration of a credential it is still busy with (its upload handler races its file
+// watcher), leaving it with none until it next changes. Setting the prefix again, to the same value, makes the
+// engine register the credential anew, so an empty round is followed by that nudge. After modelRounds rounds the
+// list is returned empty.
+func (c *Client) AwaitCredentialModels(ctx context.Context, name, prefix string, wait time.Duration) ([]string, error) {
+	for round := 1; ; round++ {
+		models, err := c.pollCredentialModels(ctx, name, wait)
+		if err != nil || len(models) > 0 || round == modelRounds {
+			return models, err
+		}
+		if err := c.SetCredentialPrefix(ctx, name, prefix); err != nil {
+			return nil, err
+		}
+	}
+}
+
+// pollCredentialModels reads a credential's models until it has some or wait has passed.
+func (c *Client) pollCredentialModels(ctx context.Context, name string, wait time.Duration) ([]string, error) {
+	interval := min(100*time.Millisecond, wait)
+	for deadline := time.Now().Add(wait); ; {
+		models, err := c.CredentialModels(ctx, name)
+		if err != nil || len(models) > 0 || time.Now().After(deadline) {
+			return models, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(interval):
+		}
+	}
 }
 
 // SetCredentialDisabled disables or enables a credential.
