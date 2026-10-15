@@ -295,6 +295,7 @@ func (p *Proxy) rewrite(pr *httputil.ProxyRequest) {
 	pr.Out.Host = u.Host
 
 	setUpstreamHeaders(pr.Out.Header, info.vk)
+	pr.Out.Header.Set(headerForwardSession, opencodeSession(pr.In.Header, info.body))
 }
 
 // setUpstreamHeaders replaces every client credential and engine control header in h with remora's own.
