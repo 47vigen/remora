@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.0](https://github.com/47vigen/remora/compare/v0.1.5...v0.2.0) (2026-10-15)
+
+
+### Features
+
+* **alias:** round-robin strategy; warn on imported members no account serves ([#41](https://github.com/47vigen/remora/issues/41)) ([6401355](https://github.com/47vigen/remora/commit/6401355ecda98e97e5c1dcce394b31e09f4431ac))
+* redesign the console ([#37](https://github.com/47vigen/remora/issues/37)) ([f731f56](https://github.com/47vigen/remora/commit/f731f56a3899e775427f3d6fb41c6c9cbfedbe5e))
+
+
+### Bug Fixes
+
+* **accounts:** nudge the engine when an imported credential lists no models ([#40](https://github.com/47vigen/remora/issues/40)) ([c8d0bf5](https://github.com/47vigen/remora/commit/c8d0bf51884a3e9d2ccb5fc1da4b7fd04094c8f1))
+* **config:** apply a remora.yaml in one transaction ([#39](https://github.com/47vigen/remora/issues/39)) ([45ddd6b](https://github.com/47vigen/remora/commit/45ddd6b2125347ba6662b198ab80175b8c361b0d))
+* **cooling:** keep log-tail rows for slow subscribers and long requests ([#38](https://github.com/47vigen/remora/issues/38)) ([a7f56ad](https://github.com/47vigen/remora/commit/a7f56ad173099e13aab5932bd90c996d7ca19b90)), closes [#12](https://github.com/47vigen/remora/issues/12) [#13](https://github.com/47vigen/remora/issues/13)
+
 ## [0.1.5](https://github.com/47vigen/remora/compare/v0.1.4...v0.1.5) (2026-10-15)
 
 
