@@ -209,13 +209,19 @@ func (s *Service) Import(ctx context.Context, provider string, credential []byte
 	}
 	s.log.Info("accounts: account imported", "provider", p.Name, "id", row.ID)
 
+	models, err := s.engine.AwaitCredentialModels(ctx, name, p.Name, s.modelWait)
+	if err != nil {
+		s.log.Warn("accounts: read imported credential's models", "provider", p.Name, "id", row.ID, "err", err)
+	} else if len(models) == 0 {
+		s.log.Warn("accounts: imported account lists no models yet", "provider", p.Name, "id", row.ID)
+	}
 	creds, err := s.credentials(ctx)
 	if err != nil {
 		s.log.Warn("accounts: read imported credential", "provider", p.Name, "err", err)
 		return Account{Account: row}, nil
 	}
 	if c, ok := creds[name]; ok {
-		return accountFrom(row, &c, nil), nil
+		return accountFrom(row, &c, models), nil
 	}
 	return accountFrom(row, nil, nil), nil
 }

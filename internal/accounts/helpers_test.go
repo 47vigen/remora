@@ -52,6 +52,7 @@ func newEnvAt(t *testing.T, fake *cliproxyapitest.Fake, engineURL string) *env {
 	c := &clock{t: time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)}
 	svc := New(cliproxyapi.New(engineURL, testSecret, nil), st, slog.New(slog.DiscardHandler))
 	svc.now = c.now
+	svc.modelWait = time.Millisecond
 	return &env{svc: svc, fake: fake, store: st, clock: c}
 }
 
