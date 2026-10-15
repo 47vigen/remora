@@ -13,12 +13,13 @@ import (
 )
 
 // Deps are the services the management API runs on. A nil port answers 501 not_implemented for the operations
-// that need it (remora.yaml export, plan and apply need Providers, Aliases and Keys; logs and stats need Logs).
+// that need it (remora.yaml export, plan and apply need Providers, Aliases, Keys and Batch; logs and stats need Logs).
 type Deps struct {
 	Providers Providers
 	Accounts  Accounts // plan 03's accounts.Service, through NewAccounts
 	Aliases   Aliases
 	Keys      Keys
+	Batch     config.Batch // joins the writes of one remora.yaml apply; reconcile.Reconciler.Batch
 	System    System
 	Names     EngineNames
 	Logs      LogSource     // the front door's request log
@@ -30,7 +31,7 @@ type Deps struct {
 // Server implements the management API's strict server interface.
 type Server struct {
 	d     Deps
-	cfg   *config.Service  // remora.yaml over Providers, Aliases and Keys; nil while one is missing
+	cfg   *config.Service  // remora.yaml over Providers, Aliases, Keys and Batch; nil while one is missing
 	tests providerTests    // each provider's last test result
 	now   func() time.Time // the clock for default time ranges
 }
@@ -40,8 +41,8 @@ var _ gen.StrictServerInterface = (*Server)(nil)
 // New returns a Server over d.
 func New(d Deps) *Server {
 	s := &Server{d: d, now: time.Now}
-	if d.Providers != nil && d.Aliases != nil && d.Keys != nil {
-		s.cfg = config.NewService(d.Providers, d.Aliases, d.Keys)
+	if d.Providers != nil && d.Aliases != nil && d.Keys != nil && d.Batch != nil {
+		s.cfg = config.NewService(d.Providers, d.Aliases, d.Keys, d.Batch)
 	}
 	return s
 }

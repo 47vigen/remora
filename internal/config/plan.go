@@ -26,13 +26,16 @@ type Change struct {
 
 // Service plans and applies remora.yaml documents and exports the store as one, through the management ports.
 type Service struct {
-	p Providers
-	a Aliases
-	k Keys
+	p     Providers
+	a     Aliases
+	k     Keys
+	batch Batch
 }
 
-// NewService returns a Service over the provider, alias and client key ports.
-func NewService(p Providers, a Aliases, k Keys) *Service { return &Service{p: p, a: a, k: k} }
+// NewService returns a Service over the provider, alias and client key ports; Apply makes its writes in one batch.
+func NewService(p Providers, a Aliases, k Keys, batch Batch) *Service {
+	return &Service{p: p, a: a, k: k, batch: batch}
+}
 
 // step is a planned change and the port calls that make it. run returns a generated client key value, if any.
 type step struct {

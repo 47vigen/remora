@@ -61,6 +61,7 @@ func newTestEnvTail(t *testing.T, tail *bifrost.Tail) *testEnv {
 		Accounts:  env.accounts,
 		Aliases:   env.aliases,
 		Keys:      env.keys,
+		Batch:     func(ctx context.Context, fn func(context.Context) error) error { return fn(ctx) },
 		System:    env.system,
 		Names:     env.names,
 		Logs:      env.logs,

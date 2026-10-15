@@ -145,8 +145,9 @@ func planConfig(ctx context.Context, c *gen.ClientWithResponses, req gen.ConfigR
 	return resp.JSON200.Changes, nil
 }
 
-// applyConfig applies a document. When a change fails after others were made, it returns those changes, their
-// generated key values included, with the error.
+// applyConfig applies a document. A failed apply changes nothing; an earlier remora that applied change by change
+// lists the changes made before the failure, their generated key values included, and those are returned with the
+// error.
 func applyConfig(ctx context.Context, c *gen.ClientWithResponses, req gen.ConfigRequest) ([]gen.Change, error) {
 	resp, err := c.ApplyConfigWithResponse(ctx, req)
 	if err != nil {

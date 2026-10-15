@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -18,8 +19,8 @@ func (e *ApplyError) Error() string {
 func (e *ApplyError) Unwrap() error { return e.Err }
 
 // Apply makes the store match want, change by change in Plan's order (see Plan for matching, secrets and prune),
-// and returns the changes it made. It stops at the first failure and returns the changes made before it with an
-// *ApplyError naming the change that failed. A client key created without a value gets a generated one, returned
+// and returns the changes it made. The changes are made in one Batch: when one fails, none is kept, and the error is
+// an *ApplyError naming the change that failed. A client key created without a value gets a generated one, returned
 // once in its Change's Value.
 func (s *Service) Apply(ctx context.Context, want File, sec Secrets, prune bool) ([]Change, error) {
 	steps, err := s.plan(ctx, want, sec, prune)
@@ -27,13 +28,23 @@ func (s *Service) Apply(ctx context.Context, want File, sec Secrets, prune bool)
 		return []Change{}, err
 	}
 	applied := make([]Change, 0, len(steps))
-	for _, st := range steps {
-		v, err := st.run(ctx)
-		if err != nil {
-			return applied, &ApplyError{Change: st.Change, Err: err}
+	err = s.batch(ctx, func(ctx context.Context) error {
+		for _, st := range steps {
+			v, err := st.run(ctx)
+			if err != nil {
+				return &ApplyError{Change: st.Change, Err: err}
+			}
+			st.Value = v
+			applied = append(applied, st.Change)
 		}
-		st.Value = v
-		applied = append(applied, st.Change)
+		return nil
+	})
+	var ae *ApplyError
+	if errors.As(err, &ae) {
+		return []Change{}, ae
+	}
+	if err != nil {
+		return []Change{}, err
 	}
 	return applied, nil
 }

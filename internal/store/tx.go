@@ -60,6 +60,17 @@ func (s *Store) Write(ctx context.Context, fn func(tx *Tx) error) (err error) {
 	return nil
 }
 
+type txKey struct{}
+
+// WithTx returns ctx carrying tx, for callers that join an open write transaction instead of opening their own.
+func WithTx(ctx context.Context, tx *Tx) context.Context { return context.WithValue(ctx, txKey{}, tx) }
+
+// TxFrom returns the transaction ctx carries (see WithTx).
+func TxFrom(ctx context.Context) (*Tx, bool) {
+	tx, ok := ctx.Value(txKey{}).(*Tx)
+	return tx, ok
+}
+
 // dbtx is what both *sql.DB and *sql.Tx offer, so read helpers serve Store and Tx alike.
 type dbtx interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
