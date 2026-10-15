@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/47vigen/remora/compare/v0.1.0...v0.1.1) (2026-10-15)
+
+
+### Bug Fixes
+
+* **import:** map OmniRoute's opencode, opencode-go and soniox providers ([#22](https://github.com/47vigen/remora/issues/22)) ([56996a3](https://github.com/47vigen/remora/commit/56996a3beb8c247094bd03f98e5797fbe6862d29))
+
 ## 0.1.0 (2026-10-15)
 
 
