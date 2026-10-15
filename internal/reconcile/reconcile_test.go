@@ -624,14 +624,14 @@ func TestChange_Invalid(t *testing.T) {
 		{"builtin named unlike its type", nil, putAll([]store.Provider{builtin("or", "openrouter")}), ErrInvalid},
 		{"custom without base URL", nil, putAll([]store.Provider{{Name: "up-n", Kind: store.KindOpenAICompatible}}), ErrInvalid},
 		{"soniox without the adapter", nil, putAll([]store.Provider{{Name: "soniox", Kind: store.KindSoniox, BaseURL: "http://x.test"}}), ErrInvalid},
-		{"alias prefix is a provider", nil, putAll(nil, chat("up-a/x", "up-a/m1")), ErrInvalid},
-		{"alias prefix is a standard provider", nil, putAll(nil, chat("openai/x", "up-a/m1")), ErrInvalid},
+		{"alias named like a provider model", nil, putAll(nil, chat("up-a/x", "up-a/m1")), nil},
+		{"alias named like a standard provider model", nil, putAll(nil, chat("openai/x", "up-a/m1")), nil},
 		{"cycle", nil, putAll(nil, chat("p", "q"), chat("q", "p")), alias.ErrCycle},
 		{"unknown member provider", nil, putAll(nil, chat("y", "nobody/m1")), ErrInvalid},
 		{"store provider remora-oauth", nil, putAll([]store.Provider{custom("remora-oauth")}), ErrInvalid},
 		{"store provider remora-x", nil, putAll([]store.Provider{custom("remora-x")}), ErrInvalid},
 		{"reserved provider name", []string{"codex", "grok"}, putAll([]store.Provider{custom("codex")}), ErrInvalid},
-		{"alias prefix is reserved", []string{"codex", "grok"}, putAll(nil, chat("grok/fast", "up-a/m1")), ErrInvalid},
+		{"alias named like a subscription model", []string{"codex", "grok"}, putAll(nil, chat("grok/fast", "up-a/m1")), nil},
 		{"fallback provider without key", nil, func(ctx context.Context, tx *store.Tx) error {
 			if err := tx.PutProvider(ctx, custom("up-k")); err != nil {
 				return err
@@ -710,7 +710,7 @@ func TestRun(t *testing.T) {
 }
 
 func TestNames(t *testing.T) {
-	if got, want := RuleCEL(`memory/fast`), `model == "memory/fast" && provider in ["", "openai", "typesafe"]`; got != want {
+	if got, want := RuleCEL(`memory/fast`), `model == "remora-alias/memory/fast" && provider in ["", "openai", "typesafe"]`; got != want {
 		t.Errorf("RuleCEL = %q, want %q", got, want)
 	}
 	if got := RuleName("memory/fast"); got != "remora:alias:memory/fast" {

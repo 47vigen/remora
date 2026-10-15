@@ -11,6 +11,7 @@ aliases:
   - {name: fast, kind: chat, members: [up-a/m1, up-b/m1], capabilities: [structured_outputs, tools], context_window: 131072}
   - {name: inner, kind: chat, members: [up-a/m1]}
   - {name: memory/fast, kind: chat, members: [inner, up-c/m1]}
+  - {name: openai/fast, kind: chat, members: [up-b/m1]}
   - {name: emb, kind: embeddings, members: [up-a/emb-1, up-b/emb-1]}
   - {name: jev, kind: decisions, members: [ts-a/jev, ts-b/jev]}
   - {name: cool, kind: chat, members: [cool-a/m1, cool-b/m1]}

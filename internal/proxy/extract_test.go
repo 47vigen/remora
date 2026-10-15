@@ -226,3 +226,44 @@ func TestExtractModel_NoBody(t *testing.T) {
 		t.Fatalf("err = %v, want %v", err, ErrNoModel)
 	}
 }
+
+func TestWithModel(t *testing.T) {
+	t.Run("json keeps every other byte", func(t *testing.T) {
+		in := []byte("{\"a\":[1,{\"model\":\"inner\"}],\n  \"model\"\t:\"openai/fast\" ,\"s\":\"\u0645\u06cc\u200c\u0634\u0648\u062f\"}")
+		want := []byte("{\"a\":[1,{\"model\":\"inner\"}],\n  \"model\"\t:\"remora-alias/openai/fast\" ,\"s\":\"\u0645\u06cc\u200c\u0634\u0648\u062f\"}")
+		got, err := withModel(in, "application/json", "remora-alias/openai/fast")
+		if err != nil || !bytes.Equal(got, want) {
+			t.Fatalf("withModel = %q, %v; want %q", got, err, want)
+		}
+	})
+	t.Run("multipart keeps the boundary and the file", func(t *testing.T) {
+		audio := bytes.Repeat([]byte{0, 1, 2, 0xff, '\r', '\n'}, 1<<14)
+		body, ct := multipartBody(t, []field{
+			{name: "file", filename: "a.wav", value: audio},
+			{name: "model", value: []byte("stt/fast")},
+			{name: "response_format", value: []byte("verbose_json")},
+		})
+		got, err := withModel(body, ct, "remora-alias/stt/fast")
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", bytes.NewReader(got))
+		r.Header.Set("Content-Type", ct)
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Fatal(err)
+		}
+		if m := r.FormValue("model"); m != "remora-alias/stt/fast" {
+			t.Errorf("model = %q", m)
+		}
+		if f := r.FormValue("response_format"); f != "verbose_json" {
+			t.Errorf("response_format = %q", f)
+		}
+		file, _, err := r.FormFile("file")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if data, _ := io.ReadAll(file); !bytes.Equal(data, audio) {
+			t.Error("the file part changed")
+		}
+	})
+}

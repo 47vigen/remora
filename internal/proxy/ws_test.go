@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"github.com/47vigen/remora/internal/alias"
 	"context"
 	"encoding/json"
 	"errors"
@@ -109,8 +110,8 @@ func TestWS_RelaysAndSwapsKey(t *testing.T) {
 		t.Fatalf("dial: %v", err)
 	}
 	frame := createFrame("fast")
-	if got := wsRoundTrip(t, c, frame); got != frame {
-		t.Fatalf("echo = %q, want %q", got, frame)
+	if got := wsRoundTrip(t, c, frame); got != upstreamFrame("fast") {
+		t.Fatalf("echo = %q, want %q", got, upstreamFrame("fast"))
 	}
 	s := f.seen()
 	if s.path != "/v1/responses" || s.method != http.MethodGet {
@@ -127,7 +128,7 @@ func TestWS_RelaysAndSwapsKey(t *testing.T) {
 			t.Fatalf("upstream saw %s: %q", h, v)
 		}
 	}
-	if got := echo.recorded(); len(got) != 1 || got[0] != frame {
+	if got := echo.recorded(); len(got) != 1 || got[0] != upstreamFrame("fast") {
 		t.Fatalf("upstream frames = %q", got)
 	}
 }
@@ -170,8 +171,8 @@ func TestWS_DeniesModel(t *testing.T) {
 		t.Fatalf("upstream recorded %d frames, want 0", n)
 	}
 	frame := createFrame("fast")
-	if got := wsRoundTrip(t, c, frame); got != frame {
-		t.Fatalf("after a denial, echo = %q, want %q", got, frame)
+	if got := wsRoundTrip(t, c, frame); got != upstreamFrame("fast") {
+		t.Fatalf("after a denial, echo = %q, want %q", got, upstreamFrame("fast"))
 	}
 	if got := echo.recorded(); len(got) != 1 {
 		t.Fatalf("upstream frames = %q", got)
@@ -347,8 +348,8 @@ func TestWS_AliasKindMustBeChat(t *testing.T) {
 		t.Fatalf("upstream recorded %d frames, want 0", n)
 	}
 	frame := createFrame("fast")
-	if got := wsRoundTrip(t, c, frame); got != frame {
-		t.Fatalf("chat alias echo = %q, want %q", got, frame)
+	if got := wsRoundTrip(t, c, frame); got != upstreamFrame("fast") {
+		t.Fatalf("chat alias echo = %q, want %q", got, upstreamFrame("fast"))
 	}
 }
 
@@ -361,7 +362,7 @@ func TestWS_KeyChangeAppliesToOpenSocket(t *testing.T) {
 		t.Fatalf("dial: %v", err)
 	}
 	frame := createFrame("fast")
-	if got := wsRoundTrip(t, c, frame); got != frame {
+	if got := wsRoundTrip(t, c, frame); got != upstreamFrame("fast") {
 		t.Fatalf("before the change: echo = %q", got)
 	}
 	// Narrow the key while the socket stays open.
@@ -389,3 +390,6 @@ func TestWS_KeyChangeAppliesToOpenSocket(t *testing.T) {
 		t.Fatalf("upstream recorded %d frames, want 1", n)
 	}
 }
+
+// upstreamFrame is createFrame(name) as the front door receives it: an alias travels as alias.EngineModel.
+func upstreamFrame(name string) string { return createFrame(alias.EngineModel(name)) }
