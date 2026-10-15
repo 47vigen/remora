@@ -145,6 +145,7 @@ type comboData struct {
 	ContextLength *float64          `json:"context_length"`
 	ContextCamel  *float64          `json:"contextLength"`
 	Dimensions    *float64          `json:"dimensions"`
+	IsActive      *bool             `json:"isActive"`
 }
 
 type comboEntry struct {
@@ -155,10 +156,29 @@ type comboEntry struct {
 }
 
 func (c *converter) aliases() {
+	// A member on an OmniRoute provider that was not imported (inactive, unsupported, no key) is dropped, as
+	// OmniRoute itself skips it; a member on a provider OmniRoute never had is kept for remora to judge.
+	known, imported := map[string]bool{}, map[string]bool{}
+	for _, conn := range c.s.Connections {
+		known[c.providerName(conn.Provider)] = true
+	}
+	for _, p := range c.r.Doc.Providers {
+		imported[p.Name] = true
+	}
+	for _, cred := range c.r.Credentials {
+		imported[cred.Provider] = true
+	}
+	skipped := map[string]bool{}
 	for _, combo := range c.s.Combos {
 		var d comboData
 		if err := json.Unmarshal(combo.Data, &d); err != nil {
 			c.warn("skipped combo %s: its definition is not JSON: %v", combo.Name, err)
+			skipped[combo.Name] = true
+			continue
+		}
+		if d.IsActive != nil && !*d.IsActive {
+			c.warn("skipped combo %s: inactive", combo.Name)
+			skipped[combo.Name] = true
 			continue
 		}
 		a := config.FileAlias{Name: combo.Name, Kind: "chat"}
@@ -180,9 +200,34 @@ func (c *converter) aliases() {
 				c.warn("alias %s: member %d (%s) skipped: not understood", combo.Name, i+1, raw)
 				continue
 			}
+			if p, _, ok := strings.Cut(m, "/"); ok && known[p] && !imported[p] {
+				c.warn("alias %s: member %s skipped: its provider was not imported", combo.Name, m)
+				continue
+			}
 			a.Members = append(a.Members, m)
 		}
 		c.r.Doc.Aliases = append(c.r.Doc.Aliases, a)
+	}
+	c.dropSkipped(skipped)
+}
+
+// dropSkipped removes members that name a skipped alias, then every alias left without members, until nothing
+// changes: an alias over a skipped alias goes too.
+func (c *converter) dropSkipped(skipped map[string]bool) {
+	for changed := true; changed; {
+		changed = false
+		kept := c.r.Doc.Aliases[:0]
+		for _, a := range c.r.Doc.Aliases {
+			a.Members = slices.DeleteFunc(a.Members, func(m string) bool { return skipped[m] })
+			if len(a.Members) == 0 {
+				c.warn("skipped alias %s: no member left", a.Name)
+				skipped[a.Name] = true
+				changed = true
+				continue
+			}
+			kept = append(kept, a)
+		}
+		c.r.Doc.Aliases = kept
 	}
 }
 
@@ -201,7 +246,8 @@ func (c *converter) member(raw json.RawMessage) (string, bool) {
 	case e.Kind == "combo-ref":
 		return e.ComboName, e.ComboName != ""
 	case strings.Contains(e.Model, "/"):
-		return e.Model, true
+		p, rest, _ := strings.Cut(e.Model, "/")
+		return c.providerName(p) + "/" + rest, true
 	case e.Model != "" && e.ProviderID != "":
 		return c.providerName(e.ProviderID) + "/" + e.Model, true
 	case e.Model != "":
