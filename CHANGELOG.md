@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.1](https://github.com/47vigen/remora/compare/v0.2.0...v0.2.1) (2026-10-16)
+
+
+### Performance
+
+* account affinity, thinking levels, front-door fallback and reasoning fixes, pool health ([#47](https://github.com/47vigen/remora/issues/47)) ([3eabf4c](https://github.com/47vigen/remora/commit/3eabf4cd8b69852815e87c6d706b4b5ebb6d4bb1))
+* load harness, gateway config and engine settings ([#43](https://github.com/47vigen/remora/issues/43)) ([d36d5af](https://github.com/47vigen/remora/commit/d36d5affb70cd838b56bd3698d785f91e321cf5b))
+* **proxy:** hot path — snapshot, one-pass scan, SSE batching, leak fix ([#46](https://github.com/47vigen/remora/issues/46)) ([97b740a](https://github.com/47vigen/remora/commit/97b740a0291955c18df687543cddefee798a9d36))
+
+
+### Dependencies and engines
+
+* **engines:** bump cliproxyapi to v8.0.31 ([#44](https://github.com/47vigen/remora/issues/44)) ([a6cff60](https://github.com/47vigen/remora/commit/a6cff60ebaab2f94876f6ca2d8e6cdb1547e80c9))
+
 ## [0.2.0](https://github.com/47vigen/remora/compare/v0.1.5...v0.2.0) (2026-10-15)
 
 
