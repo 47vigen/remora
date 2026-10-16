@@ -157,3 +157,30 @@ func TestReconcileAfterEngineRestart(t *testing.T) {
 		time.Sleep(time.Second)
 	}
 }
+
+// TestNoFallbackOnCallerFault: a primary that refuses the request itself answers the client; no other member is
+// tried with a request already known to be malformed.
+func TestNoFallbackOnCallerFault(t *testing.T) {
+	const body = `{"error":{"message":"bad request","type":"invalid_request_error","param":"messages","code":"invalid_value"}}`
+	for _, status := range []int{http.StatusBadRequest, http.StatusRequestEntityTooLarge, http.StatusUnprocessableEntity} {
+		for _, stream := range []bool{false, true} {
+			t.Run(strconv.Itoa(status)+"/stream="+strconv.FormatBool(stream), func(t *testing.T) {
+				resetFakes(t)
+				once(t, "a", control.RouteOpenAIChat, control.Step{Status: status, Body: body})
+				rep := chat(t, chatBody("fast", stream))
+				if rep.Status != status {
+					t.Fatalf("status %d, want %d; body %s", rep.Status, status, rep.Body)
+				}
+				if f := rep.Header.Get("X-Remora-Fallback"); f != "" && f != "false" {
+					t.Errorf("X-Remora-Fallback = %q", f)
+				}
+				if n := len(received(t, "a", control.RouteOpenAIChat)); n != 1 {
+					t.Errorf("up-a got %d chat requests, want 1", n)
+				}
+				if n := len(received(t, "b", control.RouteOpenAIChat)); n != 0 {
+					t.Errorf("up-b got %d chat requests, want 0", n)
+				}
+			})
+		}
+	}
+}
