@@ -96,7 +96,8 @@ export function memberOptions(
   self: string,
 ): { aliases: string[]; models: string[] } {
   const models = new Set<string>();
-  for (const p of providers) for (const m of p.models ?? []) models.add(m.startsWith(`${p.name}/`) ? m : `${p.name}/${m}`);
+  for (const p of providers)
+    for (const m of p.models ?? []) models.add(m.startsWith(`${p.name}/`) ? m : `${p.name}/${m}`);
   return { aliases: aliases.filter((a) => a !== self), models: [...models] };
 }
 
