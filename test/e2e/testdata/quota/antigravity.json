@@ -1,0 +1,8 @@
+{
+  "type": "antigravity",
+  "email": "antigravity@example.test",
+  "access_token": "fake-antigravity-token",
+  "refresh_token": "fake-antigravity-refresh",
+  "expired": "2099-01-01T00:00:00Z",
+  "project_id": "e2e-project"
+}
