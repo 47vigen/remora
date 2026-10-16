@@ -8,7 +8,8 @@ root=$(cd "$(dirname "$0")/../.." && pwd)
 dc=(docker compose -p remora-bench -f "$root/tools/bench/compose.yaml")
 key=rk-bench-0123456789abcdef
 dur=${BENCH_DURATION:-15s}
-out="$root/bench-results/$(git -C "$root" describe --tags --always --dirty).txt"
+image=${REMORA_IMAGE:-remora:dev}
+out="$root/bench-results/$(git -C "$root" describe --tags --always --dirty)-${image//[:\/]/_}.txt"
 mkdir -p "$root/bench-results"
 
 cleanup() { "${dc[@]}" down -v --remove-orphans >/dev/null 2>&1 || true; }
@@ -63,7 +64,7 @@ run() {
 
 {
 	echo "# remora bench $(date -u +%FT%TZ) $(git -C "$root" describe --tags --always --dirty)"
-	echo "# image ${REMORA_IMAGE:-remora:dev}, remora limited to 4 CPUs and 8 GiB, duration $dur per scenario"
+	echo "# image $image, remora limited to 4 CPUs and ${BENCH_MEM:-8g} of memory, duration $dur per scenario"
 } | tee "$out"
 
 reset

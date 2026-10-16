@@ -62,3 +62,12 @@ func TestBodyPadding(t *testing.T) {
 		t.Fatalf("len = %d, want ≥ 64 KiB", len(b))
 	}
 }
+
+func TestFailureList(t *testing.T) {
+	if got := failureList(nil); got != "" {
+		t.Errorf("empty = %q", got)
+	}
+	if got := failureList(map[string]int{"net": 1, "502": 3}); got != " (502:3,net:1)" {
+		t.Errorf("list = %q", got)
+	}
+}

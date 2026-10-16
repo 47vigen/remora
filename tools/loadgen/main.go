@@ -10,10 +10,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -43,7 +45,14 @@ func main() {
 		tot, ttft []time.Duration
 		ok        int
 		failed    atomic.Int64
+		failures  = map[string]int{} // status code, or "net" for a transport error
 	)
+	fail := func(why string) {
+		failed.Add(1)
+		mu.Lock()
+		failures[why]++
+		mu.Unlock()
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), *d)
 	defer cancel()
 	start := time.Now()
@@ -64,7 +73,7 @@ func main() {
 				}
 				resp, err := cl.Do(req)
 				if err != nil {
-					failed.Add(1)
+					fail("net")
 					time.Sleep(10 * time.Millisecond)
 					continue
 				}
@@ -76,8 +85,12 @@ func main() {
 				}
 				_ = resp.Body.Close()
 				el := time.Since(t0)
-				if err != nil || resp.StatusCode != http.StatusOK {
-					failed.Add(1)
+				if resp.StatusCode != http.StatusOK {
+					fail(strconv.Itoa(resp.StatusCode))
+					continue
+				}
+				if err != nil {
+					fail("body")
 					continue
 				}
 				mu.Lock()
@@ -94,9 +107,9 @@ func main() {
 	wall := time.Since(start)
 	slices.Sort(tot)
 	slices.Sort(ttft)
-	fmt.Printf("c=%d rps=%.1f p50=%s p90=%s p99=%s ttft_p50=%s ttft_p99=%s ok=%d err=%d\n",
+	fmt.Printf("c=%d rps=%.1f p50=%s p90=%s p99=%s ttft_p50=%s ttft_p99=%s ok=%d err=%d%s\n",
 		*c, float64(ok)/wall.Seconds(), ms(percentile(tot, .5)), ms(percentile(tot, .9)), ms(percentile(tot, .99)),
-		ms(percentile(ttft, .5)), ms(percentile(ttft, .99)), ok, failed.Load())
+		ms(percentile(ttft, .5)), ms(percentile(ttft, .99)), ok, failed.Load(), failureList(failures))
 	if ok == 0 {
 		os.Exit(1)
 	}
@@ -150,6 +163,19 @@ func requestBody(model string, stream bool, kb int) []byte {
 		"messages": []map[string]string{{"role": "user", "content": msg}},
 	})
 	return b
+}
+
+// failureList is " (502:3,net:1)" sorted by cause, or "" when nothing failed.
+func failureList(m map[string]int) string {
+	if len(m) == 0 {
+		return ""
+	}
+	keys := slices.Sorted(maps.Keys(m))
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = k + ":" + strconv.Itoa(m[k])
+	}
+	return " (" + strings.Join(parts, ",") + ")"
 }
 
 func ms(d time.Duration) string { return fmt.Sprintf("%.2fms", float64(d.Microseconds())/1000) }
