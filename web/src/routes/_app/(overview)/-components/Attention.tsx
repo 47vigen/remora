@@ -19,6 +19,7 @@ export function Attention({
   health,
   pool,
   quota,
+  quotaError,
   cooling,
   coolingTotal,
   now,
@@ -29,6 +30,8 @@ export function Attention({
   health: HealthCounts;
   pool: AccountPool[];
   quota: QuotaProvider[];
+  /** Set when the quota could not be read, so its silence is not taken for health. */
+  quotaError?: string;
   cooling: Cooling[];
   coolingTotal: number;
   now: Date;
@@ -58,6 +61,8 @@ export function Attention({
       detail: p.out.map((a) => `${a.label} (${a.reason})`).join(", "),
       href: `/providers/${p.provider}`,
     });
+  if (quotaError)
+    items.push({ key: "quota-error", tone: "danger", title: "Could not read subscription quota", detail: quotaError });
   for (const q of quota) {
     const label = getOAuthProviderLabel(q.provider);
     if (q.exhausted > 0)
@@ -82,7 +87,7 @@ export function Attention({
       tone: "muted",
       title: <span className="font-mono text-[13px]">{`${c.provider}/${c.model}`}</span>,
       detail: `cooling ${formatRelative(c.until, now).replace(/^in /, "for ")} · ${c.reason}`,
-      href: c.aliases[0] ? `/aliases/${c.aliases[0]}` : undefined,
+      href: c.aliases[0] ? `/aliases/${encodeURIComponent(c.aliases[0])}` : undefined,
     });
   if (coolingTotal > COOLING_LIMIT)
     items.push({

@@ -25,6 +25,7 @@ import { CostChart } from "./-components/charts/CostChart";
 import { LatencyChart } from "./-components/charts/LatencyChart";
 import { TokenChart } from "./-components/charts/TokenChart";
 import { VolumeChart } from "./-components/charts/VolumeChart";
+import { Panel } from "./-components/Panel";
 import { Sparkline } from "./-components/Sparkline";
 import { StatCards } from "./-components/StatCards";
 import { Subscriptions } from "./-components/Subscriptions";
@@ -199,6 +200,10 @@ function OverviewPage() {
         )}
         {quota.data ? (
           <Subscriptions providers={quota.data} now={new Date(now)} className="lg:col-span-4" />
+        ) : quota.error ? (
+          <Panel title="Subscriptions" className="lg:col-span-4">
+            <p className="text-danger p-4 text-sm">Could not load the quota: {errorMessage(quota.error)}</p>
+          </Panel>
         ) : (
           <Skeleton className="h-80 lg:col-span-4" />
         )}
@@ -231,6 +236,7 @@ function OverviewPage() {
             health={healthCounts(providers.data.items)}
             pool={pool.data ?? []}
             quota={quota.data ?? []}
+            quotaError={quota.error && !quota.data ? errorMessage(quota.error) : undefined}
             cooling={cooling.data?.items ?? []}
             coolingTotal={cooling.data?.total ?? 0}
             now={new Date(now)}

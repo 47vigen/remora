@@ -83,7 +83,7 @@ export function ProviderQuota({
           {label}
         </Link>
         <p className="text-muted flex flex-wrap items-center gap-x-3 font-mono text-xs tabular-nums">
-          <span className="text-foreground">{`${provider.available}/${rows.length} available`}</span>
+          <span className="text-foreground">{`${provider.available}/${provider.accounts.length} available`}</span>
           {counts
             .filter(([n]) => n > 0)
             .map(([n, name, tone]) => (
