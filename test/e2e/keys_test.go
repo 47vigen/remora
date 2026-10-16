@@ -74,7 +74,7 @@ func listModels(t *testing.T, key string) (modelsReply, []string) {
 
 func TestModelsList(t *testing.T) {
 	m, ids := listModels(t, keyFull)
-	if want := []string{"cool", "emb", "fast", "inner", "jev", "memory/fast", "openai/fast"}; !reflect.DeepEqual(ids, want) {
+	if want := []string{"cool", "emb", "fast", "inner", "jev", "memory/fast", "openai/fast", "spread-fb", "spread-lu", "spread-rr"}; !reflect.DeepEqual(ids, want) {
 		t.Errorf("full key ids %q, want %q", ids, want)
 	}
 	for _, d := range m.Data {
