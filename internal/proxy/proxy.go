@@ -24,6 +24,10 @@ const (
 	headerExtraParams = "X-Bf-Passthrough-Extra-Params" // forward unknown JSON params instead of dropping them
 )
 
+// upstreamIdleConns is how many loopback connections to the front door stay open, so a burst of streams reuses them
+// instead of dialing.
+const upstreamIdleConns = 1024
+
 // ResponseHook sees every proxied response in ModifyResponse, after remora's own x-remora-* headers are set and
 // before the first byte is written, so it may rewrite those headers. r is the client's request; reqBody is the
 // exact body ExtractModel held (nil on the WebSocket route). Plan 03 uses it for served-by names of internal
@@ -58,8 +62,8 @@ func New(upstream *url.URL, st *store.Store, log *slog.Logger) *Proxy {
 		transport: &http.Transport{
 			Proxy:                 nil, // loopback only; never an environment proxy
 			DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-			MaxIdleConns:          256,
-			MaxIdleConnsPerHost:   256,
+			MaxIdleConns:          upstreamIdleConns,
+			MaxIdleConnsPerHost:   upstreamIdleConns,
 			IdleConnTimeout:       90 * time.Second,
 			ExpectContinueTimeout: time.Second,
 			DisableCompression:    true, // bodies pass byte for byte; the client's Accept-Encoding is not forwarded

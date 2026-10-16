@@ -63,7 +63,7 @@ func TestLoadOverrides(t *testing.T) {
 		EngineDir:     "/opt/e",
 		MasterKey:     "a2V5",
 		Ports:         Ports{Bifrost: 28080, CLIProxyAPI: 18317, Soniox: 18090},
-		Cooling:       Cooling{Count429: 3, Window429: time.Minute, Default: 5 * time.Minute, Poll: time.Second},
+		Cooling:       Cooling{Count429: 3, Window429: time.Minute, Default: 5 * time.Minute, Poll: time.Second, SubscriptionDefault: 30 * time.Second},
 
 		SonioxAddr:          "127.0.0.1:18090",
 		SonioxBaseURL:       "https://api.soniox.com",
@@ -156,5 +156,35 @@ func TestConfigSonioxOverrides(t *testing.T) {
 	}
 	if c.SonioxSweepInterval != 2*time.Second {
 		t.Errorf("SonioxSweepInterval = %v", c.SonioxSweepInterval)
+	}
+}
+
+func TestConfigPerformanceSettings(t *testing.T) {
+	c, err := Load(func(string) string { return "" })
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.PprofAddr != "" || c.LogContent || c.Cooling.SubscriptionDefault != 30*time.Second {
+		t.Errorf("defaults: PprofAddr=%q LogContent=%v SubscriptionDefault=%v", c.PprofAddr, c.LogContent,
+			c.Cooling.SubscriptionDefault)
+	}
+	c, err = Load(envFrom(map[string]string{
+		EnvPprofAddr: "127.0.0.1:6060", EnvLogContent: "true", EnvCoolingSubscriptionDefault: "10s",
+	}))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.PprofAddr != "127.0.0.1:6060" || !c.LogContent || c.Cooling.SubscriptionDefault != 10*time.Second {
+		t.Errorf("overrides: PprofAddr=%q LogContent=%v SubscriptionDefault=%v", c.PprofAddr, c.LogContent,
+			c.Cooling.SubscriptionDefault)
+	}
+	for name, env := range map[string]map[string]string{
+		"pprof on a public address": {EnvPprofAddr: "0.0.0.0:6060"},
+		"pprof without a port":      {EnvPprofAddr: "localhost"},
+		"log content not a bool":    {EnvLogContent: "maybe"},
+	} {
+		if _, err := Load(envFrom(env)); err == nil {
+			t.Errorf("%s: Load succeeded, want an error", name)
+		}
 	}
 }

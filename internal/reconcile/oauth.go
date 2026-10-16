@@ -2,6 +2,7 @@ package reconcile
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/engine/bifrost"
@@ -31,6 +32,8 @@ func OAuthProvider(clientKey, engineURL string) InternalProvider {
 			BaseURL:             engineURL,
 			AllowPrivateNetwork: true,
 			AllowedRequests:     append([]string(nil), oauthAllowed...),
+			// A subscription model can think for many minutes before its first token; 600 s cut those requests off.
+			RequestTimeout: 30 * time.Minute,
 		},
 		Keys: []bifrost.Key{{ID: oauthKeyID, Name: oauthKeyID, Value: clientKey, Enabled: true}},
 	}

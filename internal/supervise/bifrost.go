@@ -15,12 +15,36 @@ type bifrostConfig struct {
 	ConfigStore   bifrostStore      `json:"config_store"`
 	LogsStore     bifrostStore      `json:"logs_store"`
 	Governance    bifrostGovernance `json:"governance"`
+	Client        bifrostClient     `json:"client"`
+	Plugins       []bifrostPlugin   `json:"plugins"`
 }
 
 type bifrostStore struct {
 	Enabled bool               `json:"enabled"`
 	Type    string             `json:"type"`
 	Config  bifrostStoreConfig `json:"config"`
+	Writer  *bifrostWriter     `json:"writer,omitempty"`
+}
+
+// bifrostWriter is the request log's batch writer: a 1 s flush instead of the default 5 s lets cooling see a failure
+// in about 2 s.
+type bifrostWriter struct {
+	BatchInterval string `json:"batch_interval"`
+}
+
+// bifrostClient holds only the keys remora sets; the engine fills every omitted key with its default. The request log
+// keeps 7 days instead of 365, and request and response bodies only when the operator asks (REMORA_LOG_CONTENT).
+// Error details, which cooling reads, stay either way.
+type bifrostClient struct {
+	LogRetentionDays      int  `json:"log_retention_days"`
+	DisableContentLogging bool `json:"disable_content_logging"`
+}
+
+// bifrostPlugin turns a built-in plugin off. Nothing scrapes the telemetry plugin's metrics, and it runs a goroutine
+// per stream chunk.
+type bifrostPlugin struct {
+	Name    string `json:"name"`
+	Enabled bool   `json:"enabled"`
 }
 
 type bifrostStoreConfig struct {
@@ -41,15 +65,19 @@ type bifrostAuthConfig struct {
 // boot: the file is a pure function of cfg and c.
 func BifrostEngine(cfg config.Config, c Credentials) (Engine, error) {
 	appDir := filepath.Join(cfg.DataDir, "bifrost")
+	logsStore := sqliteStore(filepath.Join(appDir, "logs.db"))
+	logsStore.Writer = &bifrostWriter{BatchInterval: "1s"}
 	doc := bifrostConfig{
 		EncryptionKey: c.BifrostEncryptionKey,
 		ConfigStore:   sqliteStore(filepath.Join(appDir, "config.db")),
-		LogsStore:     sqliteStore(filepath.Join(appDir, "logs.db")),
+		LogsStore:     logsStore,
 		Governance: bifrostGovernance{AuthConfig: bifrostAuthConfig{
 			AdminUsername: c.BifrostAdminUser,
 			AdminPassword: c.BifrostAdminPassword,
 			IsEnabled:     true,
 		}},
+		Client:  bifrostClient{LogRetentionDays: 7, DisableContentLogging: !cfg.LogContent},
+		Plugins: []bifrostPlugin{{Name: "telemetry", Enabled: false}},
 	}
 	data, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
@@ -70,7 +98,7 @@ func BifrostEngine(cfg config.Config, c Credentials) (Engine, error) {
 			"-log-style", "json",
 			"-log-level", levelName(cfg.LogLevel),
 		},
-		Env:       []string{childPath, "HOME=" + appDir},
+		Env:       append([]string{childPath, "HOME=" + appDir}, GoMemLimitEnv(cfg.MemoryLimit, MemoryShares.Router)...),
 		HealthURL: "http://127.0.0.1:" + port + "/health",
 	}, nil
 }

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -42,6 +43,20 @@ func checkFileMode(t *testing.T, path string) {
 	}
 }
 
+// checkGoMemLimit: want "" means no GOMEMLIMIT entry at all.
+func checkGoMemLimit(t *testing.T, env []string, want string) {
+	t.Helper()
+	var got []string
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "GOMEMLIMIT=") {
+			got = append(got, kv)
+		}
+	}
+	if want == "" && len(got) != 0 || want != "" && !slices.Equal(got, []string{want}) {
+		t.Errorf("GOMEMLIMIT entries = %q, want %q", got, want)
+	}
+}
+
 func checkNoRemoraEnv(t *testing.T, env []string) {
 	t.Helper()
 	for _, kv := range env {
@@ -74,6 +89,7 @@ func TestBifrostEngine(t *testing.T) {
 		t.Errorf("Env = %q, want HOME", e.Env)
 	}
 	checkNoRemoraEnv(t, e.Env)
+	checkGoMemLimit(t, e.Env, "")
 
 	path := filepath.Join(dir, "bifrost", "config.json")
 	checkFileMode(t, path)
@@ -87,11 +103,20 @@ func TestBifrostEngine(t *testing.T) {
 		Config  struct {
 			Path string `json:"path"`
 		} `json:"config"`
+		Writer *struct {
+			BatchInterval string `json:"batch_interval"`
+		} `json:"writer"`
+	}
+	type client struct {
+		LogRetentionDays      int  `json:"log_retention_days"`
+		DisableContentLogging bool `json:"disable_content_logging"`
 	}
 	var doc struct {
-		EncryptionKey string `json:"encryption_key"`
-		ConfigStore   store  `json:"config_store"`
-		LogsStore     store  `json:"logs_store"`
+		EncryptionKey string           `json:"encryption_key"`
+		ConfigStore   store            `json:"config_store"`
+		LogsStore     store            `json:"logs_store"`
+		Client        client           `json:"client"`
+		Plugins       []map[string]any `json:"plugins"`
 		Governance    struct {
 			AuthConfig struct {
 				AdminUsername string `json:"admin_username"`
@@ -120,6 +145,36 @@ func TestBifrostEngine(t *testing.T) {
 	ac := doc.Governance.AuthConfig
 	if ac.AdminUsername != "remora" || ac.AdminPassword != testCreds.BifrostAdminPassword || !ac.IsEnabled {
 		t.Errorf("governance.auth_config = %+v", ac)
+	}
+	if w := doc.LogsStore.Writer; w == nil || w.BatchInterval != "1s" {
+		t.Errorf("logs_store.writer = %+v, want batch_interval 1s", w)
+	}
+	if doc.ConfigStore.Writer != nil {
+		t.Errorf("config_store.writer = %+v, want none", doc.ConfigStore.Writer)
+	}
+	if want := (client{LogRetentionDays: 7, DisableContentLogging: true}); doc.Client != want {
+		t.Errorf("client = %+v, want %+v", doc.Client, want)
+	}
+	if want := []map[string]any{{"name": "telemetry", "enabled": false}}; !reflect.DeepEqual(doc.Plugins, want) {
+		t.Errorf("plugins = %v, want %v", doc.Plugins, want)
+	}
+
+	cfg := testConfig(dir)
+	cfg.LogContent = true
+	cfg.MemoryLimit = 4 << 30
+	if e, err = BifrostEngine(cfg, testCreds); err != nil {
+		t.Fatalf("BifrostEngine: %v", err)
+	}
+	checkGoMemLimit(t, e.Env, "GOMEMLIMIT=2147483648")
+	if raw, err = os.ReadFile(path); err != nil { //nolint:gosec // G304: a path under t.TempDir().
+		t.Fatal(err)
+	}
+	doc.Client = client{}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("decode config.json: %v", err)
+	}
+	if doc.Client.DisableContentLogging {
+		t.Error("client.disable_content_logging = true with LogContent set")
 	}
 }
 
@@ -184,6 +239,7 @@ func TestCLIProxyAPIEngine(t *testing.T) {
 		}
 	}
 	checkNoRemoraEnv(t, e.Env)
+	checkGoMemLimit(t, e.Env, "")
 
 	checkFileMode(t, path)
 	doc := readCLIProxyConfig(t, path)
@@ -206,6 +262,13 @@ func TestCLIProxyAPIEngine(t *testing.T) {
 	if doc.Plugins.Enabled {
 		t.Error("plugins.enabled = true")
 	}
+
+	cfg := testConfig(dir)
+	cfg.MemoryLimit = 4 << 30
+	if e, err = CLIProxyAPIEngine(cfg, testCreds); err != nil {
+		t.Fatalf("CLIProxyAPIEngine: %v", err)
+	}
+	checkGoMemLimit(t, e.Env, "GOMEMLIMIT=644245094")
 }
 
 func TestRenderOverwritesAtomically(t *testing.T) {

@@ -19,6 +19,9 @@ const (
 	vkPrefix   = "remora:key:"
 )
 
+// maxFallbacks bounds a round-robin alias's fallback chain.
+const maxFallbacks = 3
+
 // RuleName is the routing rule name of an alias.
 func RuleName(alias string) string { return rulePrefix + alias }
 
@@ -289,7 +292,9 @@ func (r *Reconciler) aliasRule(all map[string]alias.Alias, name string, isTarget
 	switch {
 	case len(routes) == 1:
 	case all[name].Strategy == alias.StrategyRoundRobin:
-		rule.Spread, rule.Fallbacks = routes[1:], routes
+		// The front door cannot tell which spread member it picked, so the chain may repeat it; a cap keeps a failing
+		// request from walking every member, each a full round through the OAuth engine's accounts.
+		rule.Spread, rule.Fallbacks = routes[1:], routes[:min(len(routes), maxFallbacks)]
 	default:
 		rule.Fallbacks = routes[1:]
 	}

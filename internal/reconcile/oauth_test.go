@@ -90,6 +90,13 @@ func TestReconcileRegistersOAuth(t *testing.T) {
 	if !ok || p.BaseURL != "http://127.0.0.1:18317" {
 		t.Fatalf("provider remora-oauth = %+v, %v", p, ok)
 	}
+	if p.RequestTimeout != 30*time.Minute {
+		t.Errorf("remora-oauth RequestTimeout = %v, want 30m", p.RequestTimeout)
+	}
+	// 0 is the engine client's default, rendered as 600 s.
+	if up, ok := h.eng.Provider("up-a"); !ok || up.RequestTimeout != 0 {
+		t.Errorf("up-a = %+v, %v, want the default RequestTimeout", up, ok)
+	}
 	if k, ok := h.eng.Key("remora-oauth", oauthKeyID); !ok || k.Value != oauthTestKey {
 		t.Errorf("key = %+v, %v", k, ok)
 	}

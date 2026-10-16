@@ -36,7 +36,7 @@ func EventFrom(l bifrost.Log) (Event, bool) {
 	}
 	return Event{
 		ID: l.ID, At: l.Timestamp, Target: alias.Target{Provider: provider, Model: model},
-		StatusCode: code, RetryAfter: retryAfter,
+		StatusCode: code, RetryAfter: retryAfter, Subscription: l.Provider == bifrost.OAuthProvider,
 	}, true
 }
 

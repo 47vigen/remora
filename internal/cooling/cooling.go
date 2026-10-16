@@ -22,6 +22,9 @@ const (
 	DefaultThreshold = 3
 	DefaultWindow    = 60 * time.Second
 	DefaultCooldown  = 5 * time.Minute
+	// DefaultSubscriptionCooldown is shorter: a subscription member stands for a pool of accounts that the OAuth engine
+	// rotates and cools itself, so the member as a whole is back within seconds.
+	DefaultSubscriptionCooldown = 30 * time.Second
 )
 
 // Config tunes when a member cools and for how long. Zero fields take the defaults above.
@@ -29,6 +32,8 @@ type Config struct {
 	Threshold int           // 429s within Window that cool a member
 	Window    time.Duration // how close together those 429s must be
 	Default   time.Duration // cooldown when the upstream sent no retry hint
+	// SubscriptionDefault replaces Default for a subscription member's failure without a retry hint.
+	SubscriptionDefault time.Duration
 }
 
 // Event is one failed upstream attempt. Target is in user names (provider and model as the user wrote them).
@@ -38,6 +43,8 @@ type Event struct {
 	Target     alias.Target
 	StatusCode int
 	RetryAfter time.Duration // 0 when the upstream gave no hint
+	// Subscription marks a failure of a subscription member, served through the OAuth engine.
+	Subscription bool
 }
 
 // Cooling is one member that is out of its chains until Until. Reason is the status code that cooled it, "402" or
@@ -70,6 +77,9 @@ func New(cfg Config, apply func(context.Context) error, now func() time.Time, lo
 	}
 	if cfg.Window <= 0 {
 		cfg.Window = DefaultWindow
+	}
+	if cfg.SubscriptionDefault <= 0 {
+		cfg.SubscriptionDefault = DefaultSubscriptionCooldown
 	}
 	if cfg.Default <= 0 {
 		cfg.Default = DefaultCooldown
@@ -179,7 +189,11 @@ func (c *Cooler) count429Locked(t alias.Target, at time.Time) bool {
 // extended only when the new deadline is later.
 func (c *Cooler) coolLocked(e Event) {
 	d := e.RetryAfter
-	if d <= 0 {
+	switch {
+	case d > 0:
+	case e.Subscription:
+		d = c.cfg.SubscriptionDefault
+	default:
 		d = c.cfg.Default
 	}
 	until := c.now().Add(d)

@@ -9,7 +9,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"sync"
 	"time"
@@ -31,6 +33,7 @@ import (
 
 const (
 	readHeaderTimeout = 10 * time.Second
+	idleTimeout       = 120 * time.Second // closes a client's idle keep-alive connection
 	shutdownTimeout   = 15 * time.Second
 	engineStopTimeout = 45 * time.Second // covers both engines' 15s SIGTERM grace
 	// sweepMargin keeps the speech sweeper off a job a live request still waits on.
@@ -61,6 +64,10 @@ func newServeLogger(w io.Writer, level slog.Leveler) *slog.Logger {
 // serve prepares the data directory, the store and the engine credentials, starts the engines and then serves the
 // public listener until ctx ends. It shuts down the listener, then the engines, then the store.
 func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err error) {
+	cfg.MemoryLimit = supervise.MemoryLimit(os.ReadFile)
+	if n := selfMemoryLimit(cfg.MemoryLimit, os.Getenv); n > 0 {
+		debug.SetMemoryLimit(n)
+	}
 	if err := prepareDataDir(cfg.DataDir); err != nil {
 		return fmt.Errorf("prepare data dir: %w", err)
 	}
@@ -140,6 +147,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	rec.Also = []func(context.Context) error{accts.Reconcile}
 	cooler := cooling.New(cooling.Config{
 		Threshold: cfg.Cooling.Count429, Window: cfg.Cooling.Window429, Default: cfg.Cooling.Default,
+		SubscriptionDefault: cfg.Cooling.SubscriptionDefault,
 	}, rec.Sync, nil, logger)
 	rec.Filter = cooler.Filter
 	if err := rec.SyncAll(ctx); err != nil {
@@ -154,9 +162,14 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	rctx, rcancel := context.WithCancel(ctx)
 	var loops sync.WaitGroup
 	loops.Go(func() { rec.Run(rctx) })
-	tail := bifrost.NewTail(fd, cfg.Cooling.Poll, logger)
-	loops.Go(func() { tail.Run(rctx) })
-	loops.Go(func() { runCooling(rctx, cooler, tail, fd, logger) })
+	// Cooling only uses failures, so its tail asks for error rows, plus the requests still running so one that outlives
+	// the lookback and then fails is still followed; reading every row re-read the whole window, bodies included,
+	// every poll. Live log viewers get their own tail, which polls only while one is open.
+	coolTail := bifrost.NewTail(fd, cfg.Cooling.Poll, []string{"error", "processing"}, logger)
+	liveTail := bifrost.NewTail(fd, cfg.Cooling.Poll, nil, logger)
+	loops.Go(func() { coolTail.Run(rctx) })
+	loops.Go(func() { liveTail.Run(rctx) })
+	loops.Go(func() { runCooling(rctx, cooler, coolTail, fd, logger) })
 	defer func() {
 		rcancel()
 		loops.Wait()
@@ -177,7 +190,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		System:    api.NewSystem(sup),
 		Names:     api.NewNames(st),
 		Logs:      fd,
-		Tail:      tail, // the cooling tail; live log viewers share its one poller
+		Tail:      liveTail,
 		Auth:      auth.NewService(st, nil),
 		Log:       logger,
 	})
@@ -191,6 +204,11 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	mux.Handle("/v1/", px)
 	// Everything else is the web console.
 	mux.Handle("/", web.Handler())
+	stopPprof, _, err := startPprof(ctx, cfg.PprofAddr, logger)
+	if err != nil {
+		return err
+	}
+	defer stopPprof()
 	srv := newServer(ctx, cfg.Listen, mux)
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.Listen)
 	if err != nil {
@@ -213,6 +231,15 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		return fmt.Errorf("shut down http: %w", err)
 	}
 	return nil
+}
+
+// selfMemoryLimit is the soft memory limit remora sets for itself: its share of the container's limit, or 0 when
+// there is no limit or the operator set GOMEMLIMIT, which the runtime already applied.
+func selfMemoryLimit(limit int64, getenv func(string) string) int64 {
+	if limit <= 0 || getenv("GOMEMLIMIT") != "" {
+		return 0
+	}
+	return int64(float64(limit) * supervise.MemoryShares.Self)
 }
 
 // newReconciler is serve's reconciler: the store, the front door and the speech adapter it registers.
@@ -315,6 +342,7 @@ func newServer(ctx context.Context, addr string, h http.Handler) *http.Server {
 		Addr:              addr,
 		Handler:           h,
 		ReadHeaderTimeout: readHeaderTimeout,
+		IdleTimeout:       idleTimeout,
 		BaseContext:       func(net.Listener) context.Context { return context.WithoutCancel(ctx) },
 	}
 }

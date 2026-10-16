@@ -97,7 +97,7 @@ func newLiveEnv(t *testing.T) *liveEnv {
 	t.Helper()
 	src := &tailSource{}
 	drop := &dropSignal{dropped: make(chan struct{})}
-	tail := bifrost.NewTail(src, 5*time.Millisecond, slog.New(drop))
+	tail := bifrost.NewTail(src, 5*time.Millisecond, nil, slog.New(drop))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { defer close(done); tail.Run(ctx) }()

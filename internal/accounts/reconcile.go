@@ -47,9 +47,12 @@ func (s *Service) Reconcile(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// settingsPatch is the engine configuration remora owns. force-model-prefix makes each credential answer only to
-// "<prefix>/<model>", so a bare model name never crosses providers; PATCH replaces lists, so access.api-keys holds
-// only remora's key. twice lists the key twice: the same access through a different file.
+// settingsPatch is the engine configuration remora owns; supervise.CLIProxyAPIEngine renders the same values into the
+// file. force-model-prefix makes each credential answer only to "<prefix>/<model>", so a bare model name never crosses
+// providers; PATCH replaces lists, so access.api-keys holds only remora's key. twice lists the key twice: the same
+// access through a different file. request-retry and bootstrap-retries retry only before the first byte reaches the
+// client, absorbing a short capacity spike; the antigravity pool reuses upstream connections instead of a TLS
+// handshake per request.
 func settingsPatch(key string, twice bool) map[string]any {
 	keys := []any{key}
 	if twice {
@@ -60,8 +63,13 @@ func settingsPatch(key string, twice bool) map[string]any {
 		"routing": map[string]any{
 			"strategy":           "round-robin",
 			"force-model-prefix": true,
-			"cooldown":           map[string]any{"save-cooldown-status": true},
+			"retry":              map[string]any{"request-retry": 1, "max-retry-interval": 10},
+			"cooldown":           map[string]any{"save-cooldown-status": true, "transient-error-cooldown-seconds": 5},
 		},
+		"requests": map[string]any{"streaming": map[string]any{"bootstrap-retries": 1, "keepalive-seconds": 15}},
+		"oauth": map[string]any{"providers": map[string]any{"antigravity": map[string]any{"connection-pool": map[string]any{
+			"enabled": true, "idle-conn-timeout": "90s", "max-idle-conns-per-host": 8,
+		}}}},
 		"upstream": map[string]any{"codex": map[string]any{"model-level-cooling": true}},
 	}
 }

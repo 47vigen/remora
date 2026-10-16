@@ -2,9 +2,13 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
+
+	"github.com/47vigen/remora/internal/alias"
 )
 
 func openTemp(t *testing.T) *Store {
@@ -157,5 +161,60 @@ func TestEngineValueRoundTrip(t *testing.T) {
 		if v != tt.want || !ok || err != nil {
 			t.Errorf("EngineValue(%s, x) = (%q, %v, %v), want (%s, true, nil)", tt.engine, v, ok, err, tt.want)
 		}
+	}
+}
+
+func TestStorePoolKeepsConnections(t *testing.T) {
+	ctx := context.Background()
+	s := openTemp(t)
+	if got := s.DB().Stats().MaxOpenConnections; got != maxConns {
+		t.Fatalf("MaxOpenConnections = %d, want %d", got, maxConns)
+	}
+	// Hold maxConns connections at once, then give them back: all of them must stay open for the next requests.
+	conns := make([]*sql.Conn, maxConns)
+	for i := range conns {
+		c, err := s.DB().Conn(ctx)
+		if err != nil {
+			t.Fatalf("Conn: %v", err)
+		}
+		conns[i] = c
+	}
+	for _, c := range conns {
+		_ = c.Close()
+	}
+	if got := s.DB().Stats().Idle; got != maxConns {
+		t.Errorf("idle connections = %d, want %d", got, maxConns)
+	}
+}
+
+func TestStoreConcurrentReadsAndWrite(t *testing.T) {
+	ctx := context.Background()
+	s := openTemp(t)
+	var wg sync.WaitGroup
+	errs := make(chan error, 64)
+	for range 32 {
+		wg.Go(func() {
+			for range 20 {
+				if _, err := s.Aliases(ctx); err != nil {
+					errs <- err
+					return
+				}
+			}
+		})
+	}
+	err := s.Write(ctx, func(tx *Tx) error {
+		return tx.PutAlias(ctx, alias.Alias{Name: "a", Kind: alias.KindChat, Members: []alias.Member{{Ref: "p/m"}}})
+	})
+	wg.Wait()
+	close(errs)
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	for err := range errs {
+		t.Fatalf("read: %v", err)
+	}
+	got, err := s.Aliases(ctx)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("Aliases = %v, %v; want one alias", got, err)
 	}
 }

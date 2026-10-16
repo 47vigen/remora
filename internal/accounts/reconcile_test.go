@@ -3,11 +3,15 @@ package accounts
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"go.yaml.in/yaml/v3"
+
+	"github.com/47vigen/remora/internal/config"
 	"github.com/47vigen/remora/internal/engine/cliproxyapi"
 	"github.com/47vigen/remora/internal/supervise"
 )
@@ -50,14 +54,33 @@ func at(m map[string]any, path string) any {
 	return v
 }
 
+// oldSettings is what remora wrote before the request-retry, streaming and connection-pool keys existed.
+func oldSettings() map[string]any {
+	return map[string]any{
+		"access": map[string]any{"api-keys": []any{testClientKey}},
+		"routing": map[string]any{
+			"strategy":           "round-robin",
+			"force-model-prefix": true,
+			"cooldown":           map[string]any{"save-cooldown-status": true},
+		},
+		"upstream": map[string]any{"codex": map[string]any{"model-level-cooling": true}},
+	}
+}
+
 func wantSettings(t *testing.T, m map[string]any) {
 	t.Helper()
 	for path, want := range map[string]any{
-		"access.api-keys":                       []any{testClientKey},
-		"routing.strategy":                      "round-robin",
-		"routing.force-model-prefix":            true,
-		"routing.cooldown.save-cooldown-status": true,
-		"upstream.codex.model-level-cooling":    true,
+		"access.api-keys":                                   []any{testClientKey},
+		"routing.strategy":                                  "round-robin",
+		"routing.force-model-prefix":                        true,
+		"routing.cooldown.save-cooldown-status":             true,
+		"routing.cooldown.transient-error-cooldown-seconds": 5.0,
+		"routing.retry.request-retry":                       1.0,
+		"routing.retry.max-retry-interval":                  10.0,
+		"requests.streaming.bootstrap-retries":              1.0,
+		"requests.streaming.keepalive-seconds":              15.0,
+		"oauth.providers.antigravity.connection-pool":       map[string]any{"enabled": true, "idle-conn-timeout": "90s", "max-idle-conns-per-host": 8.0},
+		"upstream.codex.model-level-cooling":                true,
 	} {
 		if got := at(m, path); !reflect.DeepEqual(got, want) {
 			t.Errorf("%s = %#v, want %#v", path, got, want)
@@ -129,6 +152,52 @@ func TestReconcileSettingsPresentAtStart(t *testing.T) {
 	e.reconcile(t)
 	if n := len(e.fake.ConfigPatches()); n != 1 {
 		t.Errorf("%d patches, want only the test's own", n)
+	}
+}
+
+// TestReconcileAddsNewSettings: a node upgraded from a remora that wrote only the old settings gets the new ones
+// through the management API, without an engine restart.
+func TestReconcileAddsNewSettings(t *testing.T) {
+	e := newEnv(t)
+	e.setClientKey(t)
+	if err := cliproxyapi.New(e.fake.URL, testSecret, nil).PatchConfig(context.Background(), oldSettings()); err != nil {
+		t.Fatalf("PatchConfig: %v", err)
+	}
+	e.reconcile(t)
+	patches := e.fake.ConfigPatches()
+	if len(patches) != 2 {
+		t.Fatalf("%d patches, want the test's own and one from Reconcile", len(patches))
+	}
+	wantSettings(t, decodePatch(t, patches[1]))
+}
+
+// TestSettingsPatchMatchesRenderedFile: the runtime patch and the file the engine boots with hold the same settings,
+// so neither can drift from the other.
+func TestSettingsPatchMatchesRenderedFile(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := supervise.CLIProxyAPIEngine(config.Config{DataDir: dir, EngineDir: "/e"}, supervise.Credentials{CLIProxyAPIKey: testClientKey}); err != nil {
+		t.Fatalf("CLIProxyAPIEngine: %v", err)
+	}
+	raw, err := os.ReadFile(dir + "/cliproxyapi/config.yaml") //nolint:gosec // G304: a path under t.TempDir().
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file map[string]any
+	if err := yaml.Unmarshal(raw, &file); err != nil {
+		t.Fatalf("decode config.yaml: %v", err)
+	}
+	file = jsonRoundTrip(file)
+	patch := jsonRoundTrip(settingsPatch(testClientKey, false))
+	if !containsAll(file, patch) {
+		t.Errorf("rendered file lacks part of the patch:\nfile  %v\npatch %v", file, patch)
+	}
+	for _, section := range []string{"routing", "requests", "upstream"} {
+		if !reflect.DeepEqual(file[section], patch[section]) {
+			t.Errorf("%s: file %v, patch %v", section, file[section], patch[section])
+		}
+	}
+	if got, want := at(file, "oauth.providers"), at(patch, "oauth.providers"); !reflect.DeepEqual(got, want) {
+		t.Errorf("oauth.providers: file %v, patch %v", got, want)
 	}
 }
 
