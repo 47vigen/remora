@@ -541,14 +541,22 @@ type AccountStrategies interface {
     SetStrategy(ctx context.Context, provider string, st alias.Strategy) error
 }
 func NewService(p Providers, a Aliases, k Keys, as AccountStrategies, batch Batch) *Service
+// Batch gains, on its write transaction:
+//     SetAccountStrategy(ctx context.Context, provider string, st alias.Strategy) error
 ```
 
 Validation: a key that is not `cliproxyapi.IsSubscription` → `account_strategies.<key>: "<key>" is not a subscription
 provider`; a bad value → Task 1's file copy. Plan: a differing provider → `Change{Op: "update", Kind:
 "account_strategy", Name: provider, Fields: ["strategy"]}` after the key steps; with prune, an omitted provider not on
-`round-robin` is reset to it (nothing is deleted). Apply runs these steps **after** the batch commits: they write the
-OAuth engine and a store table, and a second store writer inside the batch's write transaction would block; a failure
-is an `*ApplyError`, the batch's changes stay. Export lists only non-`round-robin` providers (`nil` when none). Schema:
+`round-robin` is reset to it (nothing is deleted). The store write is part of the batch: `Batch` gains
+`SetAccountStrategy(ctx, provider, st)` on the same write transaction as every other change, so a document with
+ordinary changes and account strategies is applied all or nothing (Apply's existing contract; a second store writer
+outside the transaction would block, and writing after commit would leave a partial apply behind a "Nothing was
+changed" error). The OAuth engine is not written inside Apply: after commit, Apply nudges the accounts reconciler (the
+same path an account edit takes), which compiles strategies and priorities into the engine and retries on its own
+loop. An engine failure there is logged and surfaced by the accounts page like any reconcile failure; it never turns
+a committed apply into an `*ApplyError`. Test `TestApplyAccountStrategyAtomic`: a document with an alias change and
+an invalid second step fails as a whole and leaves both the alias and the strategy unchanged. Export lists only non-`round-robin` providers (`nil` when none). Schema:
 values are the six-name enum; keys are checked in Go.
 
 - [ ] **Step 1: Write the failing tests.**
