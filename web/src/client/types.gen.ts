@@ -91,6 +91,24 @@ export type AccountQuota = {
     reset_at?: string;
 };
 
+export type AccountPool = {
+    provider: string;
+    /**
+     * Enabled accounts of the provider.
+     */
+    enabled: number;
+    out: Array<PoolAccount>;
+};
+
+export type PoolAccount = {
+    id: string;
+    label: string;
+    /**
+     * "missing", "signed out", or the provider's message.
+     */
+    reason: string;
+};
+
 export type Account = {
     id: string;
     provider: string;
@@ -873,6 +891,33 @@ export type ListAccountsResponses = {
 };
 
 export type ListAccountsResponse = ListAccountsResponses[keyof ListAccountsResponses];
+
+export type GetAccountPoolData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/accounts/pool';
+};
+
+export type GetAccountPoolErrors = {
+    /**
+     * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     *
+     */
+    default: Error;
+};
+
+export type GetAccountPoolError = GetAccountPoolErrors[keyof GetAccountPoolErrors];
+
+export type GetAccountPoolResponses = {
+    /**
+     * The pool of each subscription provider.
+     */
+    200: Array<AccountPool>;
+};
+
+export type GetAccountPoolResponse = GetAccountPoolResponses[keyof GetAccountPoolResponses];
 
 export type StartAccountLoginData = {
     body: AccountLoginStart;

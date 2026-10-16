@@ -5,6 +5,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import {
+  getAccountPoolOptions,
   getStatsOptions,
   listCoolingOptions,
   listProvidersOptions,
@@ -24,6 +25,7 @@ import { TokenChart } from "./-components/charts/TokenChart";
 import { VolumeChart } from "./-components/charts/VolumeChart";
 import { COOLING_LIMIT, CoolingList } from "./-components/CoolingList";
 import { HealthSummary } from "./-components/HealthSummary";
+import { PoolAlert } from "./-components/PoolAlert";
 import { Sparkline } from "./-components/Sparkline";
 import { StatCards } from "./-components/StatCards";
 import { overviewCostToCSV, overviewLatencyToCSV, overviewTokensToCSV, overviewVolumeToCSV } from "./-lib/export";
@@ -42,6 +44,7 @@ export const Route = createFileRoute("/_app/(overview)/")({
 });
 
 const STATS_REFRESH_MS = 60_000;
+const POOL_REFRESH_MS = 30_000;
 
 function exportOverview(stats: Stats) {
   const sections = [
@@ -101,6 +104,7 @@ function OverviewPage() {
     onSettled: () => invalidateOps(qc, "listProviders", "getProvider"),
   });
   const cooling = useQuery(listCoolingOptions({ query: { limit: COOLING_LIMIT } }));
+  const pool = useQuery({ ...getAccountPoolOptions(), refetchInterval: POOL_REFRESH_MS });
 
   const summary = stats.data ? summarize(stats.data.summary) : undefined;
   const series = stats.data?.series ?? [];
@@ -142,6 +146,8 @@ function OverviewPage() {
           </>
         }
       />
+
+      {pool.data ? <PoolAlert pool={pool.data} /> : null}
 
       {stats.error ? (
         <Alert status="danger" role="alert">
