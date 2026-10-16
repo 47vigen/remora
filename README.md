@@ -179,6 +179,34 @@ A subscription model in an alias may carry an explicit thinking level as a suffi
 - For that member it overrides the client's `reasoning_effort`. A model without thinking ignores it.
 - No existing alias changes, and there is no default level: a faster tier is a separate, named alias.
 
+## Routing strategies
+
+Six strategies decide which member of an alias, and which account of a subscription provider, a request tries
+first. "Live" means not cooling and not disabled. "Busy" means requests started in the last 60 seconds, counted in
+memory (a restart resets it). Ties go to the declared order.
+
+| strategy | first pick | fallback after the first pick |
+|---|---|---|
+| `priority` | the first live member in order / the highest priority tier, rotating inside it | the rest, in order |
+| `fill-first` | the first live member in order, staying on it until it cools | the rest, in order |
+| `round-robin` | a rotation with one cursor per alias / per provider | the other live members, rotated from the pick |
+| `random` | uniform over the live members | the other live members, rotated from the pick |
+| `p2c` | two distinct live members at random; the less busy one wins | the other live members, rotated from the pick |
+| `least-used` | the least busy live member | the other live members, rotated from the pick |
+
+- **Aliases.** Set `strategy` on the alias (form, API or `remora.yaml`); omitted means `priority`. For an alias,
+  `priority` and `fill-first` behave the same: cooling already moves a request past a member that stopped answering.
+  A WebSocket session on `/v1/responses` always uses the declared order, because its headers are fixed before any
+  model is known. With a spreading strategy, the turns of one conversation may land on different members.
+- **Accounts.** Each subscription provider has one strategy, default `round-robin`, set on its page in the console,
+  through `PUT /api/accounts/strategies/{provider}`, or in `remora.yaml` as `account_strategies: {codex: p2c}`. Each
+  account has a priority number, default 0, editable on the same page: `priority` honours the numbers and takes turns
+  inside equal ones; `fill-first` uses one account at a time, highest priority first, then the oldest account. The
+  other four treat every account alike. A conversation that already has an account keeps it while that account is
+  live; the strategy decides first turns and moves.
+- **Upgrading.** Aliases stored with `round-robin` before this version picked a member at random; they were migrated
+  to `random`, which keeps that behaviour. `round-robin` now rotates.
+
 ## Verifying an image
 
 Every release image is signed with cosign (keyless, by the release workflow) and carries an SBOM and build
