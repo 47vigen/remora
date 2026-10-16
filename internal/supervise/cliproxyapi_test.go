@@ -41,6 +41,14 @@ func TestCLIProxyAPIEngineRendersSettings(t *testing.T) {
 		{[]string{"routing", "force-model-prefix"}, true},
 		{[]string{"routing", "cooldown", "save-cooldown-status"}, true},
 		{[]string{"upstream", "codex", "model-level-cooling"}, true},
+		{[]string{"routing", "retry", "request-retry"}, 1},
+		{[]string{"routing", "retry", "max-retry-interval"}, 10},
+		{[]string{"routing", "cooldown", "transient-error-cooldown-seconds"}, 5},
+		{[]string{"requests", "streaming", "bootstrap-retries"}, 1},
+		{[]string{"requests", "streaming", "keepalive-seconds"}, 15},
+		{[]string{"oauth", "providers", "antigravity", "connection-pool", "enabled"}, true},
+		{[]string{"oauth", "providers", "antigravity", "connection-pool", "idle-conn-timeout"}, "90s"},
+		{[]string{"oauth", "providers", "antigravity", "connection-pool", "max-idle-conns-per-host"}, 8},
 	}
 	for _, c := range checks {
 		if got := get(c.path...); got != c.want {
