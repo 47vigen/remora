@@ -10,6 +10,7 @@ const account = (id: string, email: string, provider = "antigravity") => ({
   provider,
   email,
   enabled: true,
+  priority: 0,
   status: "active",
   quota: [],
   models: [],
