@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/47vigen/remora/internal/alias"
 )
 
 func benchChatBody(msgs int) []byte {
@@ -150,5 +152,15 @@ func BenchmarkCleanResponseHeaders(b *testing.B) {
 			"X-Bifrost-Routing-Info-Is-Fallback": {"false"}, "Server": {"fasthttp"},
 		}
 		setRemoraHeaders(h, info)
+	}
+}
+
+// BenchmarkPickP2C is the per-request cost the picker adds for a spreading alias.
+func BenchmarkPickP2C(b *testing.B) {
+	p := NewPicker(nil, nil)
+	p.SetChains(map[string]alias.Chain{"spread": {Strategy: alias.StrategyP2C, Members: []string{"up/m1", "up/m2", "up/m3", "up/m4"}}})
+	b.ReportAllocs()
+	for b.Loop() {
+		p.Started(p.Pick("spread"))
 	}
 }

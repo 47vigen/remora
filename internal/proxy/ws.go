@@ -53,7 +53,9 @@ func headerHasToken(h http.Header, name, token string) bool {
 
 // serveResponsesWS relays the Responses WebSocket: it dials the front door's /v1/responses with the key's virtual
 // key, accepts the client's socket and relays frames both ways. Each client response.create event is checked
-// against the key's allowlist on its own model, because the model arrives per message, not per request.
+// against the key's allowlist on its own model, because the model arrives per message, not per request. A session
+// always uses a spreading alias's default (declared-order) rule: headers are fixed at the handshake, before any
+// model is known, so no X-Remora-First is sent.
 func (p *Proxy) serveResponsesWS(w http.ResponseWriter, r *http.Request, key store.ClientKey) {
 	if key.VKValue == "" {
 		errKeyNotReady.write(w, shapeOpenAI)
