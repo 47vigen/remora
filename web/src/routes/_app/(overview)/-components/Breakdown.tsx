@@ -80,14 +80,16 @@ export function Breakdown({
   models,
   modelsError,
   providers,
+  className,
 }: {
+  className?: string;
   /** Undefined while the separate model query loads. */
   models?: BreakdownRow[];
   modelsError?: string;
   providers: BreakdownRow[];
 }) {
   return (
-    <section className="bg-surface border-border overflow-hidden rounded-sm border">
+    <section className={cn("bg-surface border-border min-w-0 overflow-hidden rounded-sm border", className)}>
       <Tabs defaultSelectedKey="models">
         <div className="border-border flex items-center justify-between gap-3 border-b px-4 py-2">
           <h3 className="label-caps text-muted">Breakdown</h3>

@@ -24,6 +24,7 @@ import { errorMessage } from "../../../lib/api";
 import { type ListSearch, parseListSearch } from "../../../lib/list-search";
 import { getOAuthProviderLabel, getProviderLabel, isOAuthProvider } from "../../../lib/providers";
 import { invalidateOps } from "../../../lib/query";
+import { StrategyIcon, StrategyValue } from "../../../lib/routing";
 import { AccountLoginDialog } from "./-components/AccountLoginDialog";
 import { AccountsTable } from "./-components/AccountsTable";
 import { ProviderEditorDrawer } from "./-components/ProviderEditorDrawer";
@@ -216,14 +217,17 @@ function SubscriptionProvider({ providerId }: { providerId: string }) {
           }}
         >
           <Select.Trigger>
-            <Select.Value />
+            <Select.Value>
+              {({ selectedText }) => <StrategyValue id={strategy} text={selectedText ?? ""} />}
+            </Select.Value>
             <Select.Indicator />
           </Select.Trigger>
-          <Select.Popover>
+          <Select.Popover placement="bottom end">
             <ListBox aria-label="Strategy">
               {ACCOUNT_STRATEGIES.map((s) => (
                 <ListBox.Item key={s.id} id={s.id} textValue={s.label}>
-                  <div className="flex flex-col">
+                  <StrategyIcon id={s.id} />
+                  <div className="flex min-w-0 flex-1 flex-col">
                     <Label>{s.label}</Label>
                     <Description>{s.description}</Description>
                   </div>

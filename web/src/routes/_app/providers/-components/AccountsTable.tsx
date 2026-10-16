@@ -16,7 +16,13 @@ function Quota({ quota }: { quota: Account["quota"] }) {
         const left = Math.round(Math.min(1, Math.max(0, q.remaining_fraction ?? 0)) * 100);
         const label = `${q.model ?? "All models"}: ${left}% left`;
         return (
-          <Meter key={q.model ?? i} value={left} valueLabel={label} size="sm">
+          <Meter
+            key={q.model ?? i}
+            value={left}
+            valueLabel={label}
+            size="sm"
+            color={left > 50 ? "success" : left >= 20 ? "warning" : "danger"}
+          >
             <Label className="text-xs">{label}</Label>
             <Meter.Track>
               <Meter.Fill />
