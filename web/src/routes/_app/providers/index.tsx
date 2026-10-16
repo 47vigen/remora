@@ -17,8 +17,8 @@ import { PageHeader } from "../../../components/page-header/PageHeader";
 import { errorMessage } from "../../../lib/api";
 import { type ListSearch, parseEnum, parseListSearch } from "../../../lib/list-search";
 import { invalidateOps } from "../../../lib/query";
+import { ProviderCards } from "./-components/ProviderCards";
 import { ProviderEditorDrawer } from "./-components/ProviderEditorDrawer";
-import { ProvidersTable } from "./-components/ProvidersTable";
 import { DISPLAY_GROUPS, type DisplayGroup, GROUP_LABELS, PROVIDER_STATUSES } from "./-lib/provider-form";
 import { FETCH_LIMIT, providerListRows } from "./-lib/providers-list";
 
@@ -45,7 +45,6 @@ const STATUS_LABELS: Record<Provider["status"], string> = {
 function ProvidersPage() {
   const search = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
-  const go = useNavigate();
   const qc = useQueryClient();
   const [deleting, setDeleting] = useState<Provider>();
   const [testing, setTesting] = useState<string>();
@@ -137,17 +136,10 @@ function ProvidersPage() {
           }
           emptyAction={filtered ? undefined : addButton}
         >
-          <ProvidersTable
+          <ProviderCards
             items={rows.items}
             subscriptions={rows.subscriptions}
             testing={testing}
-            onOpen={(name) =>
-              void go({
-                to: "/providers/$providerId",
-                params: { providerId: name },
-                search: { page: 1, pageSize: 25, q: "" },
-              })
-            }
             onTest={(p) => test.mutate({ path: { name: p.name } })}
             onEdit={(p) => void navigate({ search: (prev) => ({ ...prev, edit: p.name }) })}
             onDelete={(p) => {

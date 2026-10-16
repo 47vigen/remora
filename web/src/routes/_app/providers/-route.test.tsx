@@ -20,7 +20,7 @@ test("the list opens the editor from ?edit= and the row menu", async () => {
     if (url.pathname === "/api/providers") return Response.json({ items: [local], total: 1 });
     if (url.pathname === "/api/accounts") return Response.json({ items: [], total: 0 });
   });
-  const row = await screen.findByRole("row", { name: /local/ });
+  const row = await screen.findByRole("article", { name: "local" });
   await userEvent.click(within(row).getByRole("button", { name: "Actions for local" }));
   await userEvent.click(await screen.findByRole("menuitem", { name: "Edit" }));
   await waitFor(() => expect(router.state.location.search).toMatchObject({ edit: "local" }));

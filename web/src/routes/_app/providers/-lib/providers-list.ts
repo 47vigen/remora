@@ -1,4 +1,4 @@
-import type { SubscriptionRow } from "../-components/ProvidersTable";
+import type { SubscriptionRow } from "../-components/ProviderCards";
 import type { Account, Provider } from "../../../../client/types.gen";
 import type { ListSearch } from "../../../../lib/list-search";
 import { OAUTH_PROVIDERS, OAuthProviderLabels } from "../../../../lib/providers";
