@@ -1,5 +1,5 @@
 // Package reconcile makes the front door (Bifrost) match remora's store: one provider per store provider, one key
-// per provider key, one virtual key per client key and one routing rule per alias. The store always wins.
+// per provider key, one virtual key per client key and the routing rules of each alias. The store always wins.
 package reconcile
 
 import (
@@ -60,7 +60,8 @@ var ErrInvalid = errors.New("reconcile: invalid configuration")
 // base belong to InternalRules: an entry whose Priority is in 1..RulePriorityBase-1 takes exactly that priority (each
 // entry its own); while another engine rule still holds it, the entry takes a free one at or above the base and moves
 // back on a later pass, once the holder is gone. The order between rules does not matter: an alias rule matches one
-// exact model name, and an alias's name never starts with a provider name.
+// exact model name, an alias's name never starts with a provider name, and the rules of one spreading alias exclude
+// each other by the X-Remora-First value (DefaultRuleCEL), so a new member rule may sit after its default rule.
 const RulePriorityBase = 1000
 
 const defaultInterval = 60 * time.Second
@@ -77,7 +78,10 @@ type Reconciler struct {
 	Filter func(chain []alias.Target) []alias.Target
 	// Also runs in every SyncAll (so in every Run pass) before the front-door pass: work that belongs to the same
 	// reconcile cycle, such as the OAuth engine's own reconciliation. Errors are joined with the pass's.
-	Also     []func(ctx context.Context) error
+	Also []func(ctx context.Context) error
+	// Publish, when set, receives the live chains of every spreading alias after a pass commits; never inside Batch's
+	// nested calls, never after a rollback.
+	Publish  func(chains map[string]alias.Chain)
 	Interval time.Duration // 0 = 60s
 	MaxDepth int           // 0 = alias.DefaultMaxDepth
 	// SonioxURL is the speech adapter's base URL, e.g. "http://127.0.0.1:18090"; "" = a soniox provider is invalid.
@@ -118,8 +122,12 @@ func (r *Reconciler) Synced() bool {
 // it changed the engine leaves it partly reconciled, so Synced reports false until a pass succeeds again.
 func (r *Reconciler) sync(ctx context.Context, force map[string]bool) error {
 	touched := map[string]bool{}
+	var chains map[string]alias.Chain
 	err := r.Store.Write(ctx, func(tx *store.Tx) error {
-		return (&pass{r: r, tx: tx, force: force, touched: touched}).run(ctx)
+		p := &pass{r: r, tx: tx, force: force, touched: touched}
+		err := p.run(ctx)
+		chains = p.chains
+		return err
 	})
 	if err != nil {
 		if len(touched) > 0 {
@@ -127,6 +135,7 @@ func (r *Reconciler) sync(ctx context.Context, force map[string]bool) error {
 		}
 		return fmt.Errorf("reconcile: sync: %w", err)
 	}
+	r.publish(chains)
 	return nil
 }
 
@@ -139,13 +148,18 @@ func (r *Reconciler) Change(ctx context.Context, fn func(ctx context.Context, tx
 		return fn(ctx, tx)
 	}
 	touched := map[string]bool{}
+	var chains map[string]alias.Chain
 	err := r.Store.Write(ctx, func(tx *store.Tx) error {
 		if err := fn(ctx, tx); err != nil {
 			return err
 		}
-		return (&pass{r: r, tx: tx, strict: true, touched: touched}).run(ctx)
+		p := &pass{r: r, tx: tx, strict: true, touched: touched}
+		err := p.run(ctx)
+		chains = p.chains
+		return err
 	})
 	if err == nil {
+		r.publish(chains)
 		return nil
 	}
 	if len(touched) > 0 {
@@ -156,6 +170,12 @@ func (r *Reconciler) Change(ctx context.Context, fn func(ctx context.Context, tx
 		}
 	}
 	return fmt.Errorf("reconcile: change: %w", err)
+}
+
+func (r *Reconciler) publish(chains map[string]alias.Chain) {
+	if r.Publish != nil {
+		r.Publish(chains)
+	}
 }
 
 // Batch runs fn as one Change: every Change made with the context fn receives joins its store transaction and its
@@ -209,6 +229,7 @@ type pass struct {
 	force   map[string]bool // objects to push even when their MAC matches
 	touched map[string]bool // objects this pass sent a mutating call for; survives a rollback
 	macs    map[string]string
+	chains  map[string]alias.Chain // the desired state's live chains, set once it is built
 }
 
 // stale is an engine object to delete after the pushes.
@@ -219,6 +240,7 @@ func (p *pass) run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	p.chains = d.Chains
 	for _, name := range slices.Sorted(maps.Keys(d.Skipped)) {
 		p.r.log().Error("reconcile: alias skipped", "alias", name, "err", d.Skipped[name])
 	}
