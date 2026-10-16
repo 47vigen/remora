@@ -610,3 +610,30 @@ func TestContractCodexResponsesDrops(t *testing.T) {
 	}
 	checkDropped(t, reported, body, rec)
 }
+
+func TestEngineProviderStrategiesRoundTrip(t *testing.T) {
+	e := startEngine(t)
+	ctx := context.Background()
+	patch := map[string]any{"routing": map[string]any{"provider-strategies": map[string]any{"codex": "p2c"}}}
+	if err := e.client.PatchConfig(ctx, patch); err != nil {
+		t.Fatalf("PatchConfig: %v", err)
+	}
+	raw, err := e.client.Config(ctx)
+	if err != nil {
+		t.Fatalf("Config: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	containsAt(t, "config", got, patch)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, e.url+"/healthz", http.NoBody)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("healthz: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("healthz = %d", resp.StatusCode)
+	}
+}
