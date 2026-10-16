@@ -47,6 +47,8 @@ test("memberKind and memberOptions", () => {
     models: ["or/m1"],
   });
 });
+test("memberOptions keeps a model that already carries its provider", () =>
+  expect(memberOptions([], [{ name: "ag", models: ["ag/gemini-3"] }], "x").models).toEqual(["ag/gemini-3"]));
 test("memberOptions merges sources with the same name and skips duplicates", () => {
   expect(
     memberOptions([], [{ name: "codex", models: ["a", "b"] }, { name: "codex", models: ["b"] }, { name: "or" }], "x"),
