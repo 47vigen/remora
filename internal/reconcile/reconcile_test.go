@@ -406,6 +406,28 @@ func TestSync_RoundRobinAliasSpreadsTheFirstTry(t *testing.T) {
 	}
 }
 
+func TestSync_RoundRobinFallbacksCapped(t *testing.T) {
+	h := newHarness(t)
+	names := []string{"up-a", "up-b", "up-c", "up-d", "up-e"}
+	var provs []store.Provider
+	var members []string
+	for _, n := range names {
+		provs = append(provs, custom(n))
+		members = append(members, n+"/m1")
+	}
+	rr := chat("spread", members...)
+	rr.Strategy = alias.StrategyRoundRobin
+	h.write(t, putAll(provs, rr, chat("ordered", members...)))
+	h.sync(t)
+	r := h.eng.RulesNamed(RuleName("spread"))[0]
+	if len(r.Spread) != 4 || len(r.Fallbacks) != maxFallbacks || maxFallbacks != 3 {
+		t.Errorf("round-robin rule: spread %d fallbacks %d, want 4 and 3", len(r.Spread), len(r.Fallbacks))
+	}
+	if o := h.eng.RulesNamed(RuleName("ordered"))[0]; len(o.Fallbacks) != 4 {
+		t.Errorf("ordered rule fallbacks = %d, want all 4: an ordered chain is the user's explicit order", len(o.Fallbacks))
+	}
+}
+
 func TestSync_BadAliasSkipped(t *testing.T) {
 	h := newHarness(t)
 	h.base(t)
