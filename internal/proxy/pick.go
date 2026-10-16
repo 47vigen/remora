@@ -71,14 +71,14 @@ func (p *Picker) Pick(aliasName string) string {
 			j = p.intn(n)
 		}
 		i, j = min(i, j), max(i, j)
-		if p.recent.Count(c.Members[j]) < p.recent.Count(c.Members[i]) {
+		if p.recent.Count(loadKey(c.Members[j])) < p.recent.Count(loadKey(c.Members[i])) {
 			return c.Members[j]
 		}
 		return c.Members[i]
 	case alias.StrategyLeastUsed:
-		best, bestN := 0, p.recent.Count(c.Members[0])
+		best, bestN := 0, p.recent.Count(loadKey(c.Members[0]))
 		for i := 1; i < n; i++ {
-			if k := p.recent.Count(c.Members[i]); k < bestN {
+			if k := p.recent.Count(loadKey(c.Members[i])); k < bestN {
 				best, bestN = i, k
 			}
 		}
@@ -91,8 +91,16 @@ func (p *Picker) Pick(aliasName string) string {
 // where it landed. "" is ignored.
 func (p *Picker) Started(servedBy string) {
 	if servedBy != "" {
-		p.recent.Add(servedBy)
+		p.recent.Add(loadKey(servedBy))
 	}
 }
 
-func (p *Picker) starts(ref string) int { return p.recent.Count(ref) }
+func (p *Picker) starts(ref string) int { return p.recent.Count(loadKey(ref)) }
+
+// loadKey drops a thinking suffix, so a member and the served-by value that names it count as one upstream model.
+func loadKey(ref string) string {
+	if base, _, ok := alias.ParseThinking(ref); ok {
+		return base
+	}
+	return ref
+}

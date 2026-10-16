@@ -166,3 +166,12 @@ func equal(a, b []string) bool {
 	}
 	return true
 }
+
+func TestPickLeastUsedMatchesThinkingSuffix(t *testing.T) {
+	p := NewPicker(nil, nil)
+	p.SetChains(chains(alias.StrategyLeastUsed, "ag/m(low)", "ag/n"))
+	started(p, "ag/m", 2) // served-by names the model without the suffix
+	if got := p.Pick("s"); got != "ag/n" {
+		t.Errorf("ag/m served twice = %q, want ag/n", got)
+	}
+}
