@@ -4,12 +4,17 @@ on:
   pull_request:
   push:
     branches: [main]
+    # A release merge changes only these, and release.yml tests the tagged image on both architectures.
+    paths-ignore:
+      - CHANGELOG.md
+      - .release-please-manifest.json
 
 permissions: {}
 
+# Only a newer push to the same pull request cancels a run; every commit on main keeps its own result.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # A release pull request changes only the changelog and the version manifest, and release.yml builds and tests
 # the tagged image on both architectures, so its jobs are skipped; a skipped required check counts as passed. Only a
