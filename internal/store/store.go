@@ -34,6 +34,11 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store: open %s: %w", path, err)
 	}
+	// Every /v1 request reads the store; with database/sql's default of 2 idle connections, any concurrency beyond
+	// that opens a fresh SQLite connection (and re-reads the schema) per request.
+	db.SetMaxOpenConns(maxConns)
+	db.SetMaxIdleConns(maxConns)
+	db.SetConnMaxIdleTime(0)
 	s := &Store{db: db}
 	if err := s.migrate(ctx); err != nil {
 		_ = db.Close()
@@ -51,6 +56,9 @@ func (s *Store) Close() error {
 func (s *Store) DB() *sql.DB {
 	return s.db
 }
+
+// maxConns bounds the pool and is also how many connections stay open between requests.
+const maxConns = 16
 
 // busyTimeoutMS is how long a statement waits for the database lock. Write waits longer (writeBusyTimeoutMS).
 const busyTimeoutMS = 5000
