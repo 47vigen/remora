@@ -14,6 +14,7 @@ import (
 	"github.com/47vigen/remora/internal/accounts"
 	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/engine/bifrost"
+	"github.com/47vigen/remora/internal/quota"
 	"github.com/47vigen/remora/internal/store"
 )
 
@@ -717,4 +718,27 @@ func (f *fakeLogs) ModelUsage(_ context.Context, fl bifrost.LogFilter) ([]bifros
 	defer f.mu.Unlock()
 	f.usageCalls = append(f.usageCalls, fl)
 	return slices.Clone(f.usage), nil
+}
+
+// fakeQuota answers overview and records refresh calls; err is returned by Refresh.
+type fakeQuota struct {
+	mu        sync.Mutex
+	overview  []quota.ProviderView
+	queued    []string
+	skipped   []string
+	err       error
+	refreshed [][2]string // (account id, provider)
+}
+
+func (f *fakeQuota) Overview(context.Context) ([]quota.ProviderView, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.overview, nil
+}
+
+func (f *fakeQuota) Refresh(_ context.Context, accountID, provider string) ([]string, []string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.refreshed = append(f.refreshed, [2]string{accountID, provider})
+	return f.queued, f.skipped, f.err
 }

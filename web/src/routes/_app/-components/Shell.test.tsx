@@ -4,7 +4,7 @@ import { Shell } from "./Shell";
 
 test("Shell.Nav marks the current page and lists every section", () => {
   render(<Shell.Nav current="/keys" />);
-  for (const name of ["Overview", "Providers", "Aliases", "Keys", "Logs", "Settings"])
+  for (const name of ["Overview", "Providers", "Quota", "Aliases", "Keys", "Logs", "Settings"])
     expect(screen.getByRole("link", { name })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Keys" })).toHaveAttribute("aria-current", "page");
   expect(screen.getByRole("link", { name: "Overview" })).not.toHaveAttribute("aria-current");
@@ -26,5 +26,12 @@ test("Shell.Nav renders links through the given link component", () => {
       )}
     />,
   );
-  expect(screen.getAllByTestId("custom")).toHaveLength(6);
+  expect(screen.getAllByTestId("custom")).toHaveLength(7);
+});
+
+test("Shell.Nav lists Quota right after Providers", () => {
+  render(<Shell.Nav current="/" />);
+  const names = screen.getAllByRole("link").map((l) => l.textContent);
+  expect(names[names.indexOf("Providers") + 1]).toBe("Quota");
+  expect(screen.getByRole("link", { name: "Quota" })).toHaveAttribute("href", "/quota");
 });

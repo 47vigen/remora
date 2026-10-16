@@ -24,6 +24,7 @@ import (
 	"github.com/47vigen/remora/internal/engine/bifrost"
 	"github.com/47vigen/remora/internal/engine/cliproxyapi"
 	"github.com/47vigen/remora/internal/proxy"
+	"github.com/47vigen/remora/internal/quota"
 	"github.com/47vigen/remora/internal/reconcile"
 	"github.com/47vigen/remora/internal/soniox"
 	"github.com/47vigen/remora/internal/store"
@@ -181,6 +182,8 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	loops.Go(func() { coolTail.Run(rctx) })
 	loops.Go(func() { liveTail.Run(rctx) })
 	loops.Go(func() { runCooling(rctx, cooler, coolTail, fd, logger) })
+	qs := quota.New(accountsEngine(cfg, creds), st, quota.Config{Interval: cfg.QuotaInterval, BaseURL: cfg.QuotaBaseURL}, logger)
+	loops.Go(func() { qs.Run(rctx) })
 	defer func() {
 		rcancel()
 		loops.Wait()
@@ -201,6 +204,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		System:    api.NewSystem(sup),
 		Names:     api.NewNames(st),
 		Logs:      fd,
+		Quota:     api.NewQuota(accts, qs),
 		Tail:      liveTail,
 		Auth:      auth.NewService(st, nil),
 		Log:       logger,

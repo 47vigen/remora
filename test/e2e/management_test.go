@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -54,7 +55,8 @@ func (a *admin) do(method, path, body string) (int, []byte) {
 	if body != "" {
 		r = strings.NewReader(body)
 	}
-	req, err := http.NewRequestWithContext(a.t.Context(), method, remoraURL(a.t, path), r)
+	// WithoutCancel: t.Cleanup runs after t.Context() is cancelled.
+	req, err := http.NewRequestWithContext(context.WithoutCancel(a.t.Context()), method, remoraURL(a.t, path), r)
 	if err != nil {
 		a.t.Fatalf("%s %s: %v", method, path, err)
 	}

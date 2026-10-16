@@ -241,6 +241,24 @@ func (e ProviderKind) Valid() bool {
 	}
 }
 
+// Defines values for QuotaSnapshotSource.
+const (
+	Passive QuotaSnapshotSource = "passive"
+	Poll    QuotaSnapshotSource = "poll"
+)
+
+// Valid indicates whether the value is a known member of the QuotaSnapshotSource enum.
+func (e QuotaSnapshotSource) Valid() bool {
+	switch e {
+	case Passive:
+		return true
+	case Poll:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RoutingStrategy.
 const (
 	FillFirst  RoutingStrategy = "fill-first"
@@ -773,6 +791,80 @@ type ProviderTestResult struct {
 	Ok        bool   `json:"ok"`
 }
 
+// QuotaAccount defines model for QuotaAccount.
+type QuotaAccount struct {
+	Account Account        `json:"account"`
+	Quota   *QuotaSnapshot `json:"quota,omitempty"`
+}
+
+// QuotaProvider defines model for QuotaProvider.
+type QuotaProvider struct {
+	Accounts  []QuotaAccount `json:"accounts"`
+	Available int            `json:"available"`
+	Cooling   int            `json:"cooling"`
+	Exhausted int            `json:"exhausted"`
+
+	// NextReset The earliest future reset of an exhausted window, else of any window.
+	NextReset *time.Time `json:"next_reset,omitempty"`
+	Provider  string     `json:"provider"`
+
+	// SignIn Enabled accounts that need a new sign-in. Each enabled account is counted once.
+	SignIn int `json:"sign_in"`
+
+	// Supported Whether remora can read this provider's quota.
+	Supported bool `json:"supported"`
+}
+
+// QuotaRefresh Exactly one of account_id and provider.
+type QuotaRefresh struct {
+	AccountId *string `json:"account_id,omitempty"`
+	Provider  *string `json:"provider,omitempty"`
+}
+
+// QuotaRefreshResult defines model for QuotaRefreshResult.
+type QuotaRefreshResult struct {
+	Queued  []string `json:"queued"`
+	Skipped []string `json:"skipped"`
+}
+
+// QuotaSnapshot defines model for QuotaSnapshot.
+type QuotaSnapshot struct {
+	// CheckedAt The last check, successful or not.
+	CheckedAt time.Time `json:"checked_at"`
+
+	// Error Why the last check failed; empty when it succeeded.
+	Error string `json:"error"`
+
+	// FetchedAt When the windows were observed; absent when never.
+	FetchedAt    *time.Time `json:"fetched_at,omitempty"`
+	LimitReached bool       `json:"limit_reached"`
+
+	// Plan Empty when unknown.
+	Plan string `json:"plan"`
+
+	// Source "poll" when remora asked the provider; "passive" when read from recent traffic.
+	Source  QuotaSnapshotSource `json:"source"`
+	Windows []QuotaWindow       `json:"windows"`
+}
+
+// QuotaSnapshotSource "poll" when remora asked the provider; "passive" when read from recent traffic.
+type QuotaSnapshotSource string
+
+// QuotaWindow defines model for QuotaWindow.
+type QuotaWindow struct {
+	// Remaining The fraction left; null when the provider did not report it.
+	Remaining *float64 `json:"remaining"`
+
+	// ResetsAt Null when unknown or when the window does not reset.
+	ResetsAt *time.Time `json:"resets_at"`
+
+	// Scope A model family or model ("gemini", "claude-gpt", "opus"); empty for the whole account.
+	Scope string `json:"scope"`
+
+	// Window "5h", "weekly", or the window's length in minutes.
+	Window string `json:"window"`
+}
+
 // RoutingStrategy Which member (alias) or account (subscription provider) a request tries first; "busy" counts the requests started in the last 60 seconds, and ties go to declared order. `priority`: the first live member in order / the highest priority tier, rotating inside it. `fill-first`: the same as priority for an alias / one account at a time, priority high first, then oldest. `round-robin`: a rotation over the live members / accounts. `random`: uniform over the live members / accounts. `p2c`: two live members / accounts at random, the less busy one wins. `least-used`: the least busy live member / account. An alias without a strategy is `priority`; it is always set in an answer.
 type RoutingStrategy string
 
@@ -1099,6 +1191,9 @@ type CreateProviderJSONRequestBody = Provider
 
 // UpdateProviderJSONRequestBody defines body for UpdateProvider for application/json ContentType.
 type UpdateProviderJSONRequestBody = Provider
+
+// RefreshQuotaJSONRequestBody defines body for RefreshQuota for application/json ContentType.
+type RefreshQuotaJSONRequestBody = QuotaRefresh
 
 // ChangePasswordJSONRequestBody defines body for ChangePassword for application/json ContentType.
 type ChangePasswordJSONRequestBody = PasswordChange
@@ -1525,6 +1620,31 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /api/providers/{name}/test (the `TestProvider` operationId).
 	TestProvider(ctx context.Context, name ProviderName, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetQuota Every subscription account's quota, merged with its status and cooldowns, grouped by provider.
+	//
+	// Only providers with accounts are listed. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
+	//
+	// Corresponds with GET /api/quota (the `GetQuota` operationId).
+	GetQuota(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RefreshQuotaWithBody Queue quota checks of one account or of every enabled account of one provider.
+	//
+	// Checks run one at a time in the background. An account checked less than a minute ago, or disabled, is skipped.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/quota/refresh (the `RefreshQuota` operationId).
+	RefreshQuotaWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RefreshQuota Queue quota checks of one account or of every enabled account of one provider.
+	//
+	// Checks run one at a time in the background. An account checked less than a minute ago, or disabled, is skipped.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/quota/refresh (the `RefreshQuota` operationId).
+	RefreshQuota(ctx context.Context, body RefreshQuotaJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ChangePasswordWithBody Change the admin password.
 	//
@@ -2471,6 +2591,61 @@ func (c *Client) UpdateProvider(ctx context.Context, name ProviderName, body Upd
 // Corresponds with POST /api/providers/{name}/test (the `TestProvider` operationId).
 func (c *Client) TestProvider(ctx context.Context, name ProviderName, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewTestProviderRequest(c.Server, name)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetQuota Every subscription account's quota, merged with its status and cooldowns, grouped by provider.
+//
+// Only providers with accounts are listed. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
+//
+// Corresponds with GET /api/quota (the `GetQuota` operationId).
+func (c *Client) GetQuota(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetQuotaRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RefreshQuotaWithBody Queue quota checks of one account or of every enabled account of one provider.
+//
+// Checks run one at a time in the background. An account checked less than a minute ago, or disabled, is skipped.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/quota/refresh (the `RefreshQuota` operationId).
+func (c *Client) RefreshQuotaWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRefreshQuotaRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RefreshQuota Queue quota checks of one account or of every enabled account of one provider.
+//
+// Checks run one at a time in the background. An account checked less than a minute ago, or disabled, is skipped.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/quota/refresh (the `RefreshQuota` operationId).
+func (c *Client) RefreshQuota(ctx context.Context, body RefreshQuotaJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRefreshQuotaRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -4567,6 +4742,73 @@ func NewTestProviderRequest(server string, name ProviderName) (*http.Request, er
 	return req, nil
 }
 
+// NewGetQuotaRequest constructs an http.Request for the GetQuota method
+func NewGetQuotaRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/quota")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewRefreshQuotaRequest calls the generic RefreshQuota builder with application/json body
+func NewRefreshQuotaRequest(server string, body RefreshQuotaJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRefreshQuotaRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewRefreshQuotaRequestWithBody constructs an http.Request for the RefreshQuota method, with any body, and a specified content type
+func NewRefreshQuotaRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/quota/refresh")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewChangePasswordRequest calls the generic ChangePassword builder with application/json body
 func NewChangePasswordRequest(server string, body ChangePasswordJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -5341,6 +5583,33 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /api/providers/{name}/test (the `TestProvider` operationId).
 	TestProviderWithResponse(ctx context.Context, name ProviderName, reqEditors ...RequestEditorFn) (*TestProviderResponse, error)
+
+	// GetQuotaWithResponse Every subscription account's quota, merged with its status and cooldowns, grouped by provider.
+	//
+	// Only providers with accounts are listed. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/quota (the `GetQuota` operationId).
+	GetQuotaWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetQuotaResponse, error)
+
+	// RefreshQuotaWithBodyWithResponse Queue quota checks of one account or of every enabled account of one provider.
+	//
+	// Checks run one at a time in the background. An account checked less than a minute ago, or disabled, is skipped.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/quota/refresh (the `RefreshQuota` operationId).
+	RefreshQuotaWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RefreshQuotaResponse, error)
+
+	// RefreshQuotaWithResponse Queue quota checks of one account or of every enabled account of one provider.
+	//
+	// Checks run one at a time in the background. An account checked less than a minute ago, or disabled, is skipped.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/quota/refresh (the `RefreshQuota` operationId).
+	RefreshQuotaWithResponse(ctx context.Context, body RefreshQuotaJSONRequestBody, reqEditors ...RequestEditorFn) (*RefreshQuotaResponse, error)
 
 	// ChangePasswordWithBodyWithResponse Change the admin password.
 	//
@@ -7325,6 +7594,102 @@ func (r TestProviderResponse) ContentType() string {
 	return ""
 }
 
+type GetQuotaResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *[]QuotaProvider
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetQuotaResponse) GetJSON200() *[]QuotaProvider {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetQuotaResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetQuotaResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetQuotaResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetQuotaResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetQuotaResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type RefreshQuotaResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *QuotaRefreshResult
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r RefreshQuotaResponse) GetJSON202() *QuotaRefreshResult {
+	return r.JSON202
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r RefreshQuotaResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r RefreshQuotaResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RefreshQuotaResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RefreshQuotaResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RefreshQuotaResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ChangePasswordResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -8331,6 +8696,51 @@ func (c *ClientWithResponses) TestProviderWithResponse(ctx context.Context, name
 		return nil, err
 	}
 	return ParseTestProviderResponse(rsp)
+}
+
+// GetQuotaWithResponse Every subscription account's quota, merged with its status and cooldowns, grouped by provider.
+//
+// Only providers with accounts are listed. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/quota (the `GetQuota` operationId).
+func (c *ClientWithResponses) GetQuotaWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetQuotaResponse, error) {
+	rsp, err := c.GetQuota(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetQuotaResponse(rsp)
+}
+
+// RefreshQuotaWithBodyWithResponse Queue quota checks of one account or of every enabled account of one provider.
+//
+// Checks run one at a time in the background. An account checked less than a minute ago, or disabled, is skipped.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/quota/refresh (the `RefreshQuota` operationId).
+func (c *ClientWithResponses) RefreshQuotaWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RefreshQuotaResponse, error) {
+	rsp, err := c.RefreshQuotaWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRefreshQuotaResponse(rsp)
+}
+
+// RefreshQuotaWithResponse Queue quota checks of one account or of every enabled account of one provider.
+//
+// Checks run one at a time in the background. An account checked less than a minute ago, or disabled, is skipped.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/quota/refresh (the `RefreshQuota` operationId).
+func (c *ClientWithResponses) RefreshQuotaWithResponse(ctx context.Context, body RefreshQuotaJSONRequestBody, reqEditors ...RequestEditorFn) (*RefreshQuotaResponse, error) {
+	rsp, err := c.RefreshQuota(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRefreshQuotaResponse(rsp)
 }
 
 // ChangePasswordWithBodyWithResponse Change the admin password.
@@ -9793,6 +10203,72 @@ func ParseTestProviderResponse(rsp *http.Response) (*TestProviderResponse, error
 	return response, nil
 }
 
+// ParseGetQuotaResponse parses an HTTP response from a GetQuotaWithResponse call
+func ParseGetQuotaResponse(rsp *http.Response) (*GetQuotaResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetQuotaResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []QuotaProvider
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRefreshQuotaResponse parses an HTTP response from a RefreshQuotaWithResponse call
+func ParseRefreshQuotaResponse(rsp *http.Response) (*RefreshQuotaResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RefreshQuotaResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest QuotaRefreshResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseChangePasswordResponse parses an HTTP response from a ChangePasswordWithResponse call
 func ParseChangePasswordResponse(rsp *http.Response) (*ChangePasswordResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -10108,6 +10584,12 @@ type ServerInterface interface {
 	// TestProvider Send a small request to the provider and report the result.
 	// (POST /api/providers/{name}/test)
 	TestProvider(w http.ResponseWriter, r *http.Request, name ProviderName)
+	// GetQuota Every subscription account's quota, merged with its status and cooldowns, grouped by provider.
+	// (GET /api/quota)
+	GetQuota(w http.ResponseWriter, r *http.Request)
+	// RefreshQuota Queue quota checks of one account or of every enabled account of one provider.
+	// (POST /api/quota/refresh)
+	RefreshQuota(w http.ResponseWriter, r *http.Request)
 	// ChangePassword Change the admin password.
 	// (PUT /api/settings/password)
 	ChangePassword(w http.ResponseWriter, r *http.Request)
@@ -11425,6 +11907,34 @@ func (siw *ServerInterfaceWrapper) TestProvider(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// GetQuota operation middleware
+func (siw *ServerInterfaceWrapper) GetQuota(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetQuota(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RefreshQuota operation middleware
+func (siw *ServerInterfaceWrapper) RefreshQuota(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RefreshQuota(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ChangePassword operation middleware
 func (siw *ServerInterfaceWrapper) ChangePassword(w http.ResponseWriter, r *http.Request) {
 
@@ -11785,6 +12295,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/accounts/pool", wrapper.GetAccountPool)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/accounts/strategies", wrapper.ListAccountStrategies)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/accounts/strategies/{provider}", wrapper.SetAccountStrategy)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/quota", wrapper.GetQuota)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/quota/refresh", wrapper.RefreshQuota)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/accounts/logins", wrapper.StartAccountLogin)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/accounts/logins/{state}", wrapper.CancelAccountLogin)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/accounts/logins/{state}", wrapper.GetAccountLogin)
@@ -13400,6 +13912,83 @@ func (response TestProviderdefaultJSONResponse) VisitTestProviderResponse(w http
 	return err
 }
 
+type GetQuotaRequestObject struct {
+}
+
+type GetQuotaResponseObject interface {
+	VisitGetQuotaResponse(w http.ResponseWriter) error
+}
+
+type GetQuota200JSONResponse []QuotaProvider
+
+func (response GetQuota200JSONResponse) VisitGetQuotaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetQuotadefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetQuotadefaultJSONResponse) VisitGetQuotaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RefreshQuotaRequestObject struct {
+	Body *RefreshQuotaJSONRequestBody
+}
+
+type RefreshQuotaResponseObject interface {
+	VisitRefreshQuotaResponse(w http.ResponseWriter) error
+}
+
+type RefreshQuota202JSONResponse QuotaRefreshResult
+
+func (response RefreshQuota202JSONResponse) VisitRefreshQuotaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RefreshQuotadefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response RefreshQuotadefaultJSONResponse) VisitRefreshQuotaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ChangePasswordRequestObject struct {
 	Body *ChangePasswordJSONRequestBody
 }
@@ -13746,6 +14335,12 @@ type StrictServerInterface interface {
 	// TestProvider Send a small request to the provider and report the result.
 	// (POST /api/providers/{name}/test)
 	TestProvider(ctx context.Context, request TestProviderRequestObject) (TestProviderResponseObject, error)
+	// GetQuota Every subscription account's quota, merged with its status and cooldowns, grouped by provider.
+	// (GET /api/quota)
+	GetQuota(ctx context.Context, request GetQuotaRequestObject) (GetQuotaResponseObject, error)
+	// RefreshQuota Queue quota checks of one account or of every enabled account of one provider.
+	// (POST /api/quota/refresh)
+	RefreshQuota(ctx context.Context, request RefreshQuotaRequestObject) (RefreshQuotaResponseObject, error)
 	// ChangePassword Change the admin password.
 	// (PUT /api/settings/password)
 	ChangePassword(ctx context.Context, request ChangePasswordRequestObject) (ChangePasswordResponseObject, error)
@@ -14942,6 +15537,61 @@ func (sh *strictHandler) TestProvider(w http.ResponseWriter, r *http.Request, na
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(TestProviderResponseObject); ok {
 		if err := validResponse.VisitTestProviderResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetQuota operation middleware
+func (sh *strictHandler) GetQuota(w http.ResponseWriter, r *http.Request) {
+	var request GetQuotaRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetQuota(ctx, request.(GetQuotaRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetQuota")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetQuotaResponseObject); ok {
+		if err := validResponse.VisitGetQuotaResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RefreshQuota operation middleware
+func (sh *strictHandler) RefreshQuota(w http.ResponseWriter, r *http.Request) {
+	var request RefreshQuotaRequestObject
+
+	var body RefreshQuotaJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RefreshQuota(ctx, request.(RefreshQuotaRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RefreshQuota")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RefreshQuotaResponseObject); ok {
+		if err := validResponse.VisitRefreshQuotaResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

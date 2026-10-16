@@ -10,6 +10,7 @@ import (
 	"github.com/47vigen/remora/internal/auth"
 	"github.com/47vigen/remora/internal/config"
 	"github.com/47vigen/remora/internal/engine/bifrost"
+	"github.com/47vigen/remora/internal/quota"
 	"github.com/47vigen/remora/internal/reconcile"
 	"github.com/47vigen/remora/internal/store"
 )
@@ -90,7 +91,7 @@ func toAPIError(err error) apiError {
 	for _, target := range []error{
 		accounts.ErrUnknownProvider, accounts.ErrBadRedirect, accounts.ErrNotPasteFlow, accounts.ErrBadCredential,
 		alias.ErrCycle, alias.ErrDepth, alias.ErrUnknownMember, alias.ErrEmpty, alias.ErrInvalidName, reconcile.ErrInvalid,
-		config.ErrInvalid,
+		config.ErrInvalid, quota.ErrUnsupported, quota.ErrRefreshTarget,
 	} {
 		if errors.Is(err, target) {
 			return apiError{http.StatusBadRequest, typeInvalidRequest, "invalid_request", innermost(err, target).Error()}

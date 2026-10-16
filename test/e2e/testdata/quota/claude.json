@@ -1,0 +1,7 @@
+{
+  "type": "claude",
+  "email": "claude@example.test",
+  "access_token": "fake-claude-token",
+  "refresh_token": "fake-claude-refresh",
+  "expired": "2099-01-01T00:00:00Z"
+}

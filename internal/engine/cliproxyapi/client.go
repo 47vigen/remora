@@ -187,6 +187,13 @@ func (c *Client) RefreshCredential(ctx context.Context, name string) error {
 	return c.do(ctx, http.MethodPost, "/credentials/refresh", in, nil)
 }
 
+// APICall sends one request upstream as the credential in.AuthIndex and returns the upstream's answer.
+func (c *Client) APICall(ctx context.Context, in APICallRequest) (APICallResponse, error) {
+	var out APICallResponse
+	err := c.do(ctx, http.MethodPost, "/requests/api-call", in, &out)
+	return out, err
+}
+
 // ResetCooldown clears the engine's cooldown state for the credential with this auth index.
 func (c *Client) ResetCooldown(ctx context.Context, authIndex string) error {
 	in := struct {

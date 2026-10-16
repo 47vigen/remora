@@ -333,6 +333,50 @@ paths:
         default:
           $ref: "#/components/responses/Error"
 
+  /api/quota:
+    get:
+      tags: [accounts]
+      operationId: getQuota
+      summary: Every subscription account's quota, merged with its status and cooldowns, grouped by provider.
+      description: >-
+        Only providers with accounts are listed. A provider whose quota remora cannot read has `supported` false and
+        its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
+      responses:
+        "200":
+          description: One entry per provider, sorted by name.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/QuotaProvider"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/quota/refresh:
+    post:
+      tags: [accounts]
+      operationId: refreshQuota
+      summary: Queue quota checks of one account or of every enabled account of one provider.
+      description: >-
+        Checks run one at a time in the background. An account checked less than a minute ago, or disabled, is
+        skipped.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuotaRefresh"
+      responses:
+        "202":
+          description: What was queued and what was skipped.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotaRefreshResult"
+        default:
+          $ref: "#/components/responses/Error"
+
   /api/accounts/logins:
     post:
       tags: [accounts]
@@ -1254,6 +1298,108 @@ components:
         reason:
           type: string
           description: '"missing", "signed out", or the provider''s message.'
+    QuotaWindow:
+      type: object
+      required: [scope, window, remaining, resets_at]
+      properties:
+        scope:
+          type: string
+          description: A model family or model ("gemini", "claude-gpt", "opus"); empty for the whole account.
+        window:
+          type: string
+          description: '"5h", "weekly", or the window''s length in minutes.'
+        remaining:
+          type: [number, "null"]
+          format: double
+          minimum: 0
+          maximum: 1
+          description: The fraction left; null when the provider did not report it.
+        resets_at:
+          type: [string, "null"]
+          format: date-time
+          description: Null when unknown or when the window does not reset.
+    QuotaSnapshot:
+      type: object
+      required: [plan, windows, limit_reached, source, checked_at, error]
+      properties:
+        plan:
+          type: string
+          description: Empty when unknown.
+        windows:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuotaWindow"
+        limit_reached:
+          type: boolean
+        source:
+          type: string
+          enum: [poll, passive]
+          description: '"poll" when remora asked the provider; "passive" when read from recent traffic.'
+        fetched_at:
+          type: string
+          format: date-time
+          description: When the windows were observed; absent when never.
+        checked_at:
+          type: string
+          format: date-time
+          description: The last check, successful or not.
+        error:
+          type: string
+          description: Why the last check failed; empty when it succeeded.
+    QuotaAccount:
+      type: object
+      required: [account]
+      properties:
+        account:
+          $ref: "#/components/schemas/Account"
+        quota:
+          $ref: "#/components/schemas/QuotaSnapshot"
+    QuotaProvider:
+      type: object
+      required: [provider, supported, available, exhausted, cooling, sign_in, accounts]
+      properties:
+        provider:
+          type: string
+        supported:
+          type: boolean
+          description: Whether remora can read this provider's quota.
+        available:
+          type: integer
+        exhausted:
+          type: integer
+        cooling:
+          type: integer
+        sign_in:
+          type: integer
+          description: Enabled accounts that need a new sign-in. Each enabled account is counted once.
+        next_reset:
+          type: string
+          format: date-time
+          description: The earliest future reset of an exhausted window, else of any window.
+        accounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuotaAccount"
+    QuotaRefresh:
+      type: object
+      description: Exactly one of account_id and provider.
+      properties:
+        account_id:
+          type: string
+        provider:
+          type: string
+    QuotaRefreshResult:
+      type: object
+      required: [queued, skipped]
+      properties:
+        queued:
+          type: array
+          items:
+            type: string
+        skipped:
+          type: array
+          items:
+            type: string
     Account:
       type: object
       required: [id, provider, enabled, priority, status, quota, models]

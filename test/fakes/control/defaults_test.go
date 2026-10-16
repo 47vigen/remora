@@ -501,3 +501,28 @@ func TestDefaultAuthKey(t *testing.T) {
 		t.Error("no data object")
 	}
 }
+
+func TestQuotaDefaults(t *testing.T) {
+	srv := newDefaultsServer(t)
+	for _, tt := range []struct{ method, path, want string }{
+		{http.MethodPost, "/v1internal:retrieveUserQuotaSummary", control.DefaultQuotaAntigravitySummary},
+		{http.MethodPost, "/v1internal:loadCodeAssist", control.DefaultQuotaAntigravityLoad},
+		{http.MethodGet, "/manifest/latest-arm64-mac.yml", control.DefaultQuotaAntigravityManifest},
+		{http.MethodGet, "/backend-api/wham/usage", control.DefaultQuotaCodexUsage},
+		{http.MethodGet, "/api/oauth/usage", control.DefaultQuotaClaudeUsage},
+	} {
+		req, err := http.NewRequestWithContext(t.Context(), tt.method, srv.URL+"/u/quota"+tt.path, strings.NewReader("{}"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || string(b) != tt.want {
+			t.Errorf("%s %s = %d %s", tt.method, tt.path, resp.StatusCode, b)
+		}
+	}
+}

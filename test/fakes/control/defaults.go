@@ -50,6 +50,12 @@ func Defaults() map[string]http.HandlerFunc {
 		RouteTypeSafeSystemOne: defaultSystemOne,
 		RouteModels:            defaultModelList,
 		RouteOpenRouterAuthKey: defaultAuthKey,
+
+		RouteQuotaAntigravitySummary:  fixed("application/json", DefaultQuotaAntigravitySummary),
+		RouteQuotaAntigravityLoad:     fixed("application/json", DefaultQuotaAntigravityLoad),
+		RouteQuotaAntigravityManifest: fixed("text/yaml", DefaultQuotaAntigravityManifest),
+		RouteQuotaCodexUsage:          fixed("application/json", DefaultQuotaCodexUsage),
+		RouteQuotaClaudeUsage:         fixed("application/json", DefaultQuotaClaudeUsage),
 	}
 }
 

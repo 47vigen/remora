@@ -63,7 +63,7 @@ jobs:
         working-directory: engines/cliproxyapi
         run: CGO_ENABLED=1 go build -buildvcs=false -trimpath -ldflags "-X main.Version=$CLIPROXYAPI_VERSION" -o "$RUNNER_TEMP/cliproxyapi" ./cmd/server
       - name: Engine contract tests
-        run: REMORA_CLIPROXYAPI_BIN="$RUNNER_TEMP/cliproxyapi" go test -race -tags engine ./internal/engine/cliproxyapi/
+        run: REMORA_CLIPROXYAPI_BIN="$RUNNER_TEMP/cliproxyapi" go test -race -tags engine ./internal/engine/cliproxyapi/ ./internal/quota/
 
   web:
     if: ${{ !(startsWith(github.head_ref, 'release-please--') && github.event.pull_request.user.login == 'remora-bot-47vigen[bot]' && github.event.pull_request.head.repo.full_name == github.repository) }}

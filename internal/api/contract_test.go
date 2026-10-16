@@ -102,7 +102,7 @@ func TestEveryResourceOperationExists(t *testing.T) {
 		"listProviders", "createProvider", "getProvider", "updateProvider", "deleteProvider", "testProvider",
 		// accounts
 		"listAccounts", "getAccountPool", "startAccountLogin", "getAccountLogin", "completeAccountLogin", "cancelAccountLogin",
-		"updateAccount", "deleteAccount", "resetAccountCooldown", "importAccount", "listAccountStrategies", "setAccountStrategy",
+		"updateAccount", "deleteAccount", "resetAccountCooldown", "importAccount", "getQuota", "refreshQuota", "listAccountStrategies", "setAccountStrategy",
 		// aliases
 		"listAliases", "createAlias", "getAlias", "updateAlias", "deleteAlias", "getAliasChain", "compileAlias",
 		"listCooling",
@@ -117,8 +117,8 @@ func TestEveryResourceOperationExists(t *testing.T) {
 		// config
 		"exportConfig", "planConfig", "applyConfig",
 	}
-	if len(want) != 48 {
-		t.Fatalf("expected list has %d ids, want 48", len(want))
+	if len(want) != 50 {
+		t.Fatalf("expected list has %d ids, want 50", len(want))
 	}
 	var got []string
 	for _, item := range doc.Paths.Map() {

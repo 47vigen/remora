@@ -18,6 +18,7 @@ import { Route as AppKeysIndexRouteImport } from './routes/_app/keys/index'
 import { Route as AppLogsIndexRouteImport } from './routes/_app/logs/index'
 import { Route as AppProvidersIndexRouteImport } from './routes/_app/providers/index'
 import { Route as AppProvidersProviderIdRouteImport } from './routes/_app/providers/$providerId'
+import { Route as AppQuotaIndexRouteImport } from './routes/_app/quota/index'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
 
 const AppRoute = AppRouteImport.update({
@@ -64,6 +65,11 @@ const AppProvidersProviderIdRoute = AppProvidersProviderIdRouteImport.update({
   path: '/providers/$providerId',
   getParentRoute: () => AppRoute,
 } as any)
+const AppQuotaIndexRoute = AppQuotaIndexRouteImport.update({
+  id: '/quota/',
+  path: '/quota/',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
   id: '/settings/',
   path: '/settings/',
@@ -79,6 +85,7 @@ export interface FileRoutesByFullPath {
   '/keys/': typeof AppKeysIndexRoute
   '/logs/': typeof AppLogsIndexRoute
   '/providers/': typeof AppProvidersIndexRoute
+  '/quota/': typeof AppQuotaIndexRoute
   '/settings/': typeof AppSettingsIndexRoute
 }
 export interface FileRoutesByTo {
@@ -90,6 +97,7 @@ export interface FileRoutesByTo {
   '/keys': typeof AppKeysIndexRoute
   '/logs': typeof AppLogsIndexRoute
   '/providers': typeof AppProvidersIndexRoute
+  '/quota': typeof AppQuotaIndexRoute
   '/settings': typeof AppSettingsIndexRoute
 }
 export interface FileRoutesById {
@@ -103,6 +111,7 @@ export interface FileRoutesById {
   '/_app/keys/': typeof AppKeysIndexRoute
   '/_app/logs/': typeof AppLogsIndexRoute
   '/_app/providers/': typeof AppProvidersIndexRoute
+  '/_app/quota/': typeof AppQuotaIndexRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
 }
 export interface FileRouteTypes {
@@ -116,6 +125,7 @@ export interface FileRouteTypes {
     | '/keys/'
     | '/logs/'
     | '/providers/'
+    | '/quota/'
     | '/settings/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -127,6 +137,7 @@ export interface FileRouteTypes {
     | '/keys'
     | '/logs'
     | '/providers'
+    | '/quota'
     | '/settings'
   id:
     | '__root__'
@@ -139,6 +150,7 @@ export interface FileRouteTypes {
     | '/_app/keys/'
     | '/_app/logs/'
     | '/_app/providers/'
+    | '/_app/quota/'
     | '/_app/settings/'
   fileRoutesById: FileRoutesById
 }
@@ -212,6 +224,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppProvidersProviderIdRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/quota/': {
+      id: '/_app/quota/'
+      path: '/quota'
+      fullPath: '/quota/'
+      preLoaderRoute: typeof AppQuotaIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/settings/': {
       id: '/_app/settings/'
       path: '/settings'
@@ -230,6 +249,7 @@ interface AppRouteChildren {
   AppKeysIndexRoute: typeof AppKeysIndexRoute
   AppLogsIndexRoute: typeof AppLogsIndexRoute
   AppProvidersIndexRoute: typeof AppProvidersIndexRoute
+  AppQuotaIndexRoute: typeof AppQuotaIndexRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
 }
 
@@ -241,6 +261,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppKeysIndexRoute: AppKeysIndexRoute,
   AppLogsIndexRoute: AppLogsIndexRoute,
   AppProvidersIndexRoute: AppProvidersIndexRoute,
+  AppQuotaIndexRoute: AppQuotaIndexRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,
 }
 

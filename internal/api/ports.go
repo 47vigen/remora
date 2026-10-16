@@ -7,6 +7,7 @@ import (
 	"github.com/47vigen/remora/internal/accounts"
 	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/config"
+	"github.com/47vigen/remora/internal/quota"
 )
 
 // Ports: one small interface per resource. Handlers talk only to these, so they are tested with in-memory fakes;
@@ -84,6 +85,12 @@ type Accounts interface {
 	// Reconcile applies it after the commit.
 	SetStrategy(ctx context.Context, provider string, st alias.Strategy) error
 	Reconcile(ctx context.Context) error
+}
+
+// Quotas reads subscription accounts' quota and queues checks. Account ids are decimal strings.
+type Quotas interface {
+	Overview(ctx context.Context) ([]quota.ProviderView, error)
+	Refresh(ctx context.Context, accountID, provider string) (queued, skipped []string, err error)
 }
 
 // EngineVersion names one engine and its release tag.
