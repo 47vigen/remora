@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.0](https://github.com/47vigen/remora/compare/v0.2.1...v0.3.0) (2026-10-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* a remora.yaml or API "strategy: round-robin" now rotates through the live members; aliases stored by earlier versions were migrated to "random", which keeps their behaviour.
+* a remora.yaml or API "strategy: round-robin" now rotates through the live members; aliases stored by earlier versions were migrated to "random", which keeps their behaviour.
+
+### Features
+
+* account quota monitoring and the Quota page ([#49](https://github.com/47vigen/remora/issues/49)) ([e0b5f42](https://github.com/47vigen/remora/commit/e0b5f42c72825741f2194d36aeadcb62d7032564))
+* MCP server for operating remora from an agent ([#52](https://github.com/47vigen/remora/issues/52)) ([753f754](https://github.com/47vigen/remora/commit/753f7547d1ce76f94412088c35adf025b918f33e))
+* routing strategies per alias and per account pool ([#51](https://github.com/47vigen/remora/issues/51)) ([b494a13](https://github.com/47vigen/remora/commit/b494a139fb76556b4ccc766a1119ae752c8f17df))
+
 ## [0.2.1](https://github.com/47vigen/remora/compare/v0.2.0...v0.2.1) (2026-10-16)
 
 
