@@ -14,9 +14,10 @@ import (
 )
 
 // New returns the MCP server with every tool, each calling c.
-func New(c gen.ClientWithResponsesInterface) *sdk.Server {
+func New(c *gen.ClientWithResponses) *sdk.Server {
 	s := sdk.NewServer(&sdk.Implementation{Name: "remora", Version: version.Version}, nil)
 	addOverview(s, c)
+	addRead(s, c)
 	return s
 }
 
@@ -47,6 +48,11 @@ func check[T any](status int, ok *T, e *gen.Error, err error) (*T, error) {
 	}
 	return nil, fmt.Errorf("HTTP %d", status)
 }
+
+// toolError is an error whose text is a sentence for the agent, capitalised and punctuated.
+type toolError string
+
+func (e toolError) Error() string { return string(e) }
 
 // response is what every generated response has.
 type response interface {

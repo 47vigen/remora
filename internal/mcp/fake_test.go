@@ -28,8 +28,9 @@ type fakeAPI struct {
 }
 
 type answer struct {
-	status int
-	body   string
+	status      int
+	contentType string
+	body        string
 }
 
 func newFakeAPI(t *testing.T) *fakeAPI {
@@ -42,10 +43,10 @@ func newFakeAPI(t *testing.T) *fakeAPI {
 		a, ok := f.answers[r.Method+" "+r.URL.Path]
 		f.mu.Unlock()
 		if !ok {
-			a = answer{http.StatusNotFound, `{"error":{"message":"Unknown path or method.","type":"not_found_error","code":"not_found"}}`}
+			a = answer{http.StatusNotFound, "application/json", `{"error":{"message":"Unknown path or method.","type":"not_found_error","code":"not_found"}}`}
 		}
 		if a.body != "" {
-			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Type", a.contentType)
 		}
 		w.WriteHeader(a.status)
 		_, _ = io.WriteString(w, a.body)
@@ -55,9 +56,13 @@ func newFakeAPI(t *testing.T) *fakeAPI {
 }
 
 func (f *fakeAPI) on(pattern string, status int, body string) {
+	f.onType(pattern, status, "application/json", body)
+}
+
+func (f *fakeAPI) onType(pattern string, status int, contentType, body string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.answers[pattern] = answer{status, body}
+	f.answers[pattern] = answer{status, contentType, body}
 }
 
 func (f *fakeAPI) requests() []recorded {

@@ -11,7 +11,7 @@ import (
 
 // readTools and writeTools are every tool New registers; Tasks 3–5 extend them.
 var (
-	readTools  = []string{"remora_overview"}
+	readTools  = []string{"remora_overview", "remora_inspect", "remora_logs", "remora_stats", "remora_alias_compile", "remora_provider_test", "remora_config_export"}
 	writeTools = []string{}
 )
 
