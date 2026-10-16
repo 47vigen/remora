@@ -391,6 +391,14 @@ type AccountLoginStatus struct {
 // AccountLoginStatusStatus defines model for AccountLoginStatus.Status.
 type AccountLoginStatusStatus string
 
+// AccountPool defines model for AccountPool.
+type AccountPool struct {
+	// Enabled Enabled accounts of the provider.
+	Enabled  int           `json:"enabled"`
+	Out      []PoolAccount `json:"out"`
+	Provider string        `json:"provider"`
+}
+
 // AccountQuota defines model for AccountQuota.
 type AccountQuota struct {
 	Model             *string    `json:"model,omitempty"`
@@ -679,6 +687,15 @@ type LoginRequest struct {
 type PasswordChange struct {
 	Current string `json:"current"`
 	New     string `json:"new"`
+}
+
+// PoolAccount defines model for PoolAccount.
+type PoolAccount struct {
+	Id    string `json:"id"`
+	Label string `json:"label"`
+
+	// Reason "missing", "signed out", or the provider's message.
+	Reason string `json:"reason"`
 }
 
 // Provider defines model for Provider.
@@ -1169,6 +1186,13 @@ type ClientInterface interface {
 	// Corresponds with POST /api/accounts/logins/{state}/complete (the `CompleteAccountLogin` operationId).
 	CompleteAccountLogin(ctx context.Context, state LoginState, body CompleteAccountLoginJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetAccountPool Enabled subscription accounts that dropped out of the pool, per provider.
+	//
+	// An account is out when its sign-in is missing, its refresh failed for good, or the provider signed it out or refused payment. An account cooling on a rate limit or a transient error is not out. Only providers with at least one enabled account are listed.
+	//
+	// Corresponds with GET /api/accounts/pool (the `GetAccountPool` operationId).
+	GetAccountPool(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// DeleteAccount Delete an account.
 	//
 	// Corresponds with DELETE /api/accounts/{id} (the `DeleteAccount` operationId).
@@ -1618,6 +1642,23 @@ func (c *Client) CompleteAccountLoginWithBody(ctx context.Context, state LoginSt
 // Corresponds with POST /api/accounts/logins/{state}/complete (the `CompleteAccountLogin` operationId).
 func (c *Client) CompleteAccountLogin(ctx context.Context, state LoginState, body CompleteAccountLoginJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCompleteAccountLoginRequest(c.Server, state, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetAccountPool Enabled subscription accounts that dropped out of the pool, per provider.
+//
+// An account is out when its sign-in is missing, its refresh failed for good, or the provider signed it out or refused payment. An account cooling on a rate limit or a transient error is not out. Only providers with at least one enabled account are listed.
+//
+// Corresponds with GET /api/accounts/pool (the `GetAccountPool` operationId).
+func (c *Client) GetAccountPool(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetAccountPoolRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -2730,6 +2771,33 @@ func NewCompleteAccountLoginRequestWithBody(server string, state LoginState, con
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetAccountPoolRequest constructs an http.Request for the GetAccountPool method
+func NewGetAccountPoolRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/accounts/pool")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -4707,6 +4775,15 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /api/accounts/logins/{state}/complete (the `CompleteAccountLogin` operationId).
 	CompleteAccountLoginWithResponse(ctx context.Context, state LoginState, body CompleteAccountLoginJSONRequestBody, reqEditors ...RequestEditorFn) (*CompleteAccountLoginResponse, error)
 
+	// GetAccountPoolWithResponse Enabled subscription accounts that dropped out of the pool, per provider.
+	//
+	// An account is out when its sign-in is missing, its refresh failed for good, or the provider signed it out or refused payment. An account cooling on a rate limit or a transient error is not out. Only providers with at least one enabled account are listed.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/accounts/pool (the `GetAccountPool` operationId).
+	GetAccountPoolWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetAccountPoolResponse, error)
+
 	// DeleteAccountWithResponse Delete an account.
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -5337,6 +5414,54 @@ func (r CompleteAccountLoginResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r CompleteAccountLoginResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetAccountPoolResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *[]AccountPool
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetAccountPoolResponse) GetJSON200() *[]AccountPool {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetAccountPoolResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetAccountPoolResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetAccountPoolResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetAccountPoolResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetAccountPoolResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -7242,6 +7367,21 @@ func (c *ClientWithResponses) CompleteAccountLoginWithResponse(ctx context.Conte
 	return ParseCompleteAccountLoginResponse(rsp)
 }
 
+// GetAccountPoolWithResponse Enabled subscription accounts that dropped out of the pool, per provider.
+//
+// An account is out when its sign-in is missing, its refresh failed for good, or the provider signed it out or refused payment. An account cooling on a rate limit or a transient error is not out. Only providers with at least one enabled account are listed.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/accounts/pool (the `GetAccountPool` operationId).
+func (c *ClientWithResponses) GetAccountPoolWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetAccountPoolResponse, error) {
+	rsp, err := c.GetAccountPool(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetAccountPoolResponse(rsp)
+}
+
 // DeleteAccountWithResponse Delete an account.
 //
 // Returns a wrapper object for the known response body format(s).
@@ -8086,6 +8226,39 @@ func ParseCompleteAccountLoginResponse(rsp *http.Response) (*CompleteAccountLogi
 	switch {
 	case rsp.StatusCode == 202:
 		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetAccountPoolResponse parses an HTTP response from a GetAccountPoolWithResponse call
+func ParseGetAccountPoolResponse(rsp *http.Response) (*GetAccountPoolResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetAccountPoolResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []AccountPool
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
@@ -9376,6 +9549,9 @@ type ServerInterface interface {
 	// CompleteAccountLogin Complete a login with the redirect URL the user pasted from the browser.
 	// (POST /api/accounts/logins/{state}/complete)
 	CompleteAccountLogin(w http.ResponseWriter, r *http.Request, state LoginState)
+	// GetAccountPool Enabled subscription accounts that dropped out of the pool, per provider.
+	// (GET /api/accounts/pool)
+	GetAccountPool(w http.ResponseWriter, r *http.Request)
 	// DeleteAccount Delete an account.
 	// (DELETE /api/accounts/{id})
 	DeleteAccount(w http.ResponseWriter, r *http.Request, id AccountId)
@@ -9670,6 +9846,20 @@ func (siw *ServerInterfaceWrapper) CompleteAccountLogin(w http.ResponseWriter, r
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CompleteAccountLogin(w, r, state)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAccountPool operation middleware
+func (siw *ServerInterfaceWrapper) GetAccountPool(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAccountPool(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -11060,6 +11250,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/providers/{name}", wrapper.UpdateProvider)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/providers/{name}/test", wrapper.TestProvider)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/accounts", wrapper.ListAccounts)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/accounts/pool", wrapper.GetAccountPool)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/accounts/logins", wrapper.StartAccountLogin)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/accounts/logins/{state}", wrapper.CancelAccountLogin)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/accounts/logins/{state}", wrapper.GetAccountLogin)
@@ -11310,6 +11501,44 @@ type CompleteAccountLogindefaultJSONResponse struct {
 }
 
 func (response CompleteAccountLogindefaultJSONResponse) VisitCompleteAccountLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAccountPoolRequestObject struct {
+}
+
+type GetAccountPoolResponseObject interface {
+	VisitGetAccountPoolResponse(w http.ResponseWriter) error
+}
+
+type GetAccountPool200JSONResponse []AccountPool
+
+func (response GetAccountPool200JSONResponse) VisitGetAccountPoolResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAccountPooldefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetAccountPooldefaultJSONResponse) VisitGetAccountPoolResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -12799,6 +13028,9 @@ type StrictServerInterface interface {
 	// CompleteAccountLogin Complete a login with the redirect URL the user pasted from the browser.
 	// (POST /api/accounts/logins/{state}/complete)
 	CompleteAccountLogin(ctx context.Context, request CompleteAccountLoginRequestObject) (CompleteAccountLoginResponseObject, error)
+	// GetAccountPool Enabled subscription accounts that dropped out of the pool, per provider.
+	// (GET /api/accounts/pool)
+	GetAccountPool(ctx context.Context, request GetAccountPoolRequestObject) (GetAccountPoolResponseObject, error)
 	// DeleteAccount Delete an account.
 	// (DELETE /api/accounts/{id})
 	DeleteAccount(ctx context.Context, request DeleteAccountRequestObject) (DeleteAccountResponseObject, error)
@@ -13120,6 +13352,30 @@ func (sh *strictHandler) CompleteAccountLogin(w http.ResponseWriter, r *http.Req
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CompleteAccountLoginResponseObject); ok {
 		if err := validResponse.VisitCompleteAccountLoginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAccountPool operation middleware
+func (sh *strictHandler) GetAccountPool(w http.ResponseWriter, r *http.Request) {
+	var request GetAccountPoolRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAccountPool(ctx, request.(GetAccountPoolRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAccountPool")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAccountPoolResponseObject); ok {
+		if err := validResponse.VisitGetAccountPoolResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -183,7 +183,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		return fmt.Errorf("front door url: %w", err)
 	}
 	mux := http.NewServeMux()
-	api.RegisterHealthz(mux, sup)
+	api.RegisterHealthz(mux, sup, accts)
 	mgmt := api.New(api.Deps{
 		Providers: api.NewProviders(st, rec, fd, soniox.NewClient(cfg.SonioxBaseURL, &http.Client{})),
 		Accounts:  api.NewAccounts(accts),

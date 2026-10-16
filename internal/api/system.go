@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
+	"github.com/47vigen/remora/internal/accounts"
 	"github.com/47vigen/remora/internal/api/gen"
 	"github.com/47vigen/remora/internal/supervise"
 )
@@ -15,10 +17,20 @@ type StatusSource interface {
 	Status() []supervise.EngineStatus
 }
 
+// PoolSource reports the subscription account pool. *accounts.Service implements it.
+type PoolSource interface {
+	Pool(ctx context.Context) ([]accounts.PoolStatus, error)
+}
+
+// poolTimeout bounds the pool lookup a health probe makes, so a slow engine cannot hold the probe.
+const poolTimeout = 2 * time.Second
+
 // HealthResponse is the body of GET /healthz.
 type HealthResponse struct {
 	Status string   `json:"status"`         // "ok" | "degraded"
 	Down   []string `json:"down,omitempty"` // neutral component names not up ("router", "accounts")
+	// AccountsOut counts enabled subscription accounts out of the pool. A count only: /healthz is public.
+	AccountsOut int `json:"accounts_out,omitempty"`
 }
 
 // componentNames maps an engine to the neutral name a public endpoint may show. Engine names appear only in
@@ -34,10 +46,21 @@ func componentName(engine string) string {
 }
 
 // RegisterHealthz mounts GET /healthz (200 ok, 503 degraded) on mux. It needs no auth: the image's health check
-// and orchestrators call it.
-func RegisterHealthz(mux *http.ServeMux, src StatusSource) {
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+// and orchestrators call it. Accounts out of the pool are counted but never turn it to 503: an orchestrator would
+// restart a node that is still serving. A failed pool lookup leaves the count out; an engine that is down already
+// shows in down.
+func RegisterHealthz(mux *http.ServeMux, src StatusSource, pool PoolSource) {
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		resp := HealthResponse{Status: "ok"}
+		if pool != nil {
+			ctx, cancel := context.WithTimeout(r.Context(), poolTimeout)
+			if p, err := pool.Pool(ctx); err == nil {
+				for _, s := range p {
+					resp.AccountsOut += len(s.Out)
+				}
+			}
+			cancel()
+		}
 		for _, e := range src.Status() {
 			if !e.Up {
 				resp.Down = append(resp.Down, componentName(e.Name))

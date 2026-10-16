@@ -587,6 +587,10 @@ func NewAccounts(svc *accounts.Service) Accounts { return accountsAdapter{svc: s
 
 type accountsAdapter struct{ svc *accounts.Service }
 
+func (a accountsAdapter) Pool(ctx context.Context) ([]accounts.PoolStatus, error) {
+	return a.svc.Pool(ctx)
+}
+
 // toAccount maps an account. CooldownUntil is the latest restriction on the whole credential (the engine's next
 // retry time or a credential cooldown); each model cooldown becomes a quota entry that resets when it ends, with
 // nothing remaining when its reason is quota. The engine's other quota signals are opaque and not shown.

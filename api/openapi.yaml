@@ -262,6 +262,27 @@ paths:
         default:
           $ref: "#/components/responses/Error"
 
+  /api/accounts/pool:
+    get:
+      tags: [accounts]
+      operationId: getAccountPool
+      summary: Enabled subscription accounts that dropped out of the pool, per provider.
+      description: >-
+        An account is out when its sign-in is missing, its refresh failed for good, or the provider signed it out or
+        refused payment. An account cooling on a rate limit or a transient error is not out. Only providers with at
+        least one enabled account are listed.
+      responses:
+        "200":
+          description: The pool of each subscription provider.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AccountPool"
+        default:
+          $ref: "#/components/responses/Error"
+
   /api/accounts/logins:
     post:
       tags: [accounts]
@@ -1159,6 +1180,30 @@ components:
         reset_at:
           type: string
           format: date-time
+    AccountPool:
+      type: object
+      required: [provider, enabled, out]
+      properties:
+        provider:
+          type: string
+        enabled:
+          type: integer
+          description: Enabled accounts of the provider.
+        out:
+          type: array
+          items:
+            $ref: "#/components/schemas/PoolAccount"
+    PoolAccount:
+      type: object
+      required: [id, label, reason]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        reason:
+          type: string
+          description: '"missing", "signed out", or the provider''s message.'
     Account:
       type: object
       required: [id, provider, enabled, status, quota, models]

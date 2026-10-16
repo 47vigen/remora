@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/47vigen/remora/internal/accounts"
 )
 
 type accountJSON struct {
@@ -264,5 +266,25 @@ func TestImportAccount(t *testing.T) {
 		if code != http.StatusBadRequest || errCode(t, body) != "invalid_request" {
 			t.Errorf("import %s = %d %s, want 400", b, code, body)
 		}
+	}
+}
+
+func TestGetAccountPool(t *testing.T) {
+	env := newTestEnv(t)
+	env.accounts.pool = []accounts.PoolStatus{{Provider: "antigravity", Enabled: 20, Out: []accounts.OutAccount{
+		{ID: 3, Label: "three@example.com", Reason: "signed out"}, {ID: 7, Label: "seven@example.com", Reason: "missing"},
+	}}}
+	code, body := env.do(t, env.client, http.MethodGet, "/api/accounts/pool", "")
+	want := `[{"enabled":20,"out":[{"id":"3","label":"three@example.com","reason":"signed out"},` +
+		`{"id":"7","label":"seven@example.com","reason":"missing"}],"provider":"antigravity"}]`
+	if code != http.StatusOK || strings.TrimSpace(string(body)) != want {
+		t.Fatalf("pool = %d %s", code, body)
+	}
+	if code, _ := env.do(t, http.DefaultClient, http.MethodGet, "/api/accounts/pool", ""); code != http.StatusUnauthorized {
+		t.Errorf("anonymous pool = %d, want 401", code)
+	}
+	env.accounts.pool = nil
+	if _, body := env.do(t, env.client, http.MethodGet, "/api/accounts/pool", ""); strings.TrimSpace(string(body)) != "[]" {
+		t.Errorf("empty pool = %s, want []", body)
 	}
 }

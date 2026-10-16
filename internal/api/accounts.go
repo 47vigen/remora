@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/47vigen/remora/internal/accounts"
@@ -50,6 +51,26 @@ func (s *Server) ListAccounts(ctx context.Context, req gen.ListAccountsRequestOb
 	}
 	items, total := page(out, req.Params.Limit, req.Params.Offset)
 	return gen.ListAccounts200JSONResponse{Items: items, Total: total}, nil
+}
+
+// GetAccountPool reports, per subscription provider, the enabled accounts that dropped out of the pool.
+func (s *Server) GetAccountPool(ctx context.Context, _ gen.GetAccountPoolRequestObject) (gen.GetAccountPoolResponseObject, error) {
+	if s.d.Accounts == nil {
+		return nil, errNotImplemented
+	}
+	pool, err := s.d.Accounts.Pool(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp := gen.GetAccountPool200JSONResponse{}
+	for _, p := range pool {
+		out := make([]gen.PoolAccount, 0, len(p.Out))
+		for _, a := range p.Out {
+			out = append(out, gen.PoolAccount{Id: strconv.FormatInt(a.ID, 10), Label: a.Label, Reason: a.Reason})
+		}
+		resp = append(resp, gen.AccountPool{Provider: p.Provider, Enabled: p.Enabled, Out: out})
+	}
+	return resp, nil
 }
 
 // StartAccountLogin starts an OAuth login: a sign-in page to open, or with user_code a device code to enter there.

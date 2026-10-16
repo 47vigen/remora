@@ -103,6 +103,7 @@ func (f *fakeProviders) Test(_ context.Context, name string) (ProviderTest, erro
 type fakeAccounts struct {
 	mu        sync.Mutex
 	accounts  []Account
+	pool      []accounts.PoolStatus
 	next      Login
 	logins    map[string]string // state → status
 	completed [][2]string       // (state, redirect URL)
@@ -115,6 +116,12 @@ type fakeAccounts struct {
 type fakeImport struct {
 	provider   string
 	credential []byte
+}
+
+func (f *fakeAccounts) Pool(context.Context) ([]accounts.PoolStatus, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.pool, nil
 }
 
 func (f *fakeAccounts) List(_ context.Context, provider string) ([]Account, error) {

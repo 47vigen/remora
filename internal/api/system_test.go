@@ -3,12 +3,14 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/47vigen/remora/internal/accounts"
 	"github.com/47vigen/remora/internal/supervise"
 	"github.com/47vigen/remora/internal/version"
 )
@@ -27,7 +29,7 @@ func both(cliproxyUp bool) fakeStatus {
 func serve(t *testing.T, src StatusSource, method, path string) *httptest.ResponseRecorder {
 	t.Helper()
 	mux := http.NewServeMux()
-	RegisterHealthz(mux, src)
+	RegisterHealthz(mux, src, nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), method, path, http.NoBody))
 	return rec
@@ -92,5 +94,39 @@ func TestVersionAnswersThroughServer(t *testing.T) {
 	}
 	if got.Remora != version.Version || len(got.Engines) != 2 || got.Engines[0].Name != "bifrost" {
 		t.Errorf("version = %+v", got)
+	}
+}
+
+type fakePool struct {
+	pool []accounts.PoolStatus
+	err  error
+}
+
+func (f fakePool) Pool(context.Context) ([]accounts.PoolStatus, error) { return f.pool, f.err }
+
+var twoOut = fakePool{pool: []accounts.PoolStatus{{Provider: "antigravity", Enabled: 20, Out: []accounts.OutAccount{
+	{ID: 3, Label: "acct-three", Reason: "signed out"}, {ID: 7, Label: "acct-seven", Reason: "missing"},
+}}}}
+
+func TestHealthzReportsAccountsOut(t *testing.T) {
+	healthz := func(pool PoolSource) *httptest.ResponseRecorder {
+		mux := http.NewServeMux()
+		RegisterHealthz(mux, both(true), pool)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/healthz", http.NoBody))
+		return rec
+	}
+	rec := healthz(twoOut)
+	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != `{"status":"ok","accounts_out":2}` {
+		t.Fatalf("code %d body %s", rec.Code, rec.Body)
+	}
+	for _, s := range []string{"antigravity", "acct-three", "acct-seven"} {
+		if strings.Contains(rec.Body.String(), s) {
+			t.Errorf("public /healthz names %q", s)
+		}
+	}
+	rec = healthz(fakePool{err: errors.New("engine down")})
+	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != `{"status":"ok"}` {
+		t.Fatalf("pool error: code %d body %s", rec.Code, rec.Body)
 	}
 }

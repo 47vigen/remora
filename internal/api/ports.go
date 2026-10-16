@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/47vigen/remora/internal/accounts"
 	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/config"
 )
@@ -74,6 +75,7 @@ type Accounts interface {
 	Delete(ctx context.Context, id string) error
 	ResetCooldown(ctx context.Context, id string) error
 	Import(ctx context.Context, provider string, credential []byte) (Account, error)
+	Pool(ctx context.Context) ([]accounts.PoolStatus, error)
 }
 
 // EngineVersion names one engine and its release tag.
