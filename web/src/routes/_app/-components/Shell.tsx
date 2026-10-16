@@ -1,4 +1,4 @@
-import { BranchesRight, ChartColumn, Gear, Key, ListUl, Server } from "@gravity-ui/icons";
+import { BranchesRight, ChartColumn, Gear, Key, ListUl, Server, Speedometer } from "@gravity-ui/icons";
 import { cn, Link } from "@heroui/react";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 
@@ -25,6 +25,7 @@ const GROUPS: readonly { label: string; items: readonly NavItem[] }[] = [
     label: "Route",
     items: [
       { href: "/providers", label: "Providers", icon: Server },
+      { href: "/quota", label: "Quota", icon: Speedometer },
       { href: "/aliases", label: "Aliases", icon: BranchesRight },
     ],
   },

@@ -38,8 +38,8 @@ func TestOpenAppliesMigrations(t *testing.T) {
 		t.Fatalf("user_version: %v", err)
 	}
 	// user_version counts the applied files, so a gap in the file numbers (0005 before 0004) is harmless.
-	if version != len(files) || version != 5 {
-		t.Errorf("user_version = %d, want %d (files) == 5", version, len(files))
+	if version != len(files) || version != 6 {
+		t.Errorf("user_version = %d, want %d (files) == 6", version, len(files))
 	}
 
 	for _, table := range []string{

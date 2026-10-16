@@ -94,6 +94,8 @@ store and is managed in the UI, through the management API, or with `remora.yaml
 | `REMORA_COOLING_DEFAULT` | `5m` | How long a member cools when the upstream gave no retry hint. |
 | `REMORA_COOLING_POLL` | `1s` | How often remora reads the request log for failures. |
 | `REMORA_COOLING_SUBSCRIPTION_DEFAULT` | `30s` | How long a subscription account member cools when the upstream gave no retry hint. A retry hint always wins. |
+| `REMORA_QUOTA_INTERVAL` | `15m` | How often each subscription account's quota is checked. At least `5m`; `0` turns background checks off, and the Refresh buttons still work. |
+| `REMORA_QUOTA_BASE_URL` | unset | Sends every quota check here instead of to the providers. For tests only: the checks carry the accounts' tokens. |
 | `REMORA_LOG_CONTENT` | `false` | Keep request and response bodies in the request log. Off by default: the log keeps 7 days of metadata and errors only. |
 | `REMORA_PPROF_ADDR` | unset | A loopback `host:port`, such as `127.0.0.1:6060`, that serves Go profiling (`net/http/pprof`) on its own listener. Off when unset; any other host is refused. |
 
@@ -142,6 +144,15 @@ admins only ever talk to remora: one key format, one error format, one API, one 
 
 Using consumer subscriptions through a proxy may conflict with the terms of service of the companies that offer
 them. Read those terms and decide for yourself; remora does not change them.
+
+## Account quota
+
+The **Quota** page shows, for every Antigravity, Codex and Claude account, how much of each quota window is left and
+when it resets. Other subscription providers show their status and cooldowns only. remora checks one account at a
+time, at least 2 seconds apart, through each account's own proxy, and never by sending a prompt. Codex and Claude
+accounts that served traffic recently reuse the quota headers of that traffic instead of being checked. At the
+default `REMORA_QUOTA_INTERVAL`, about 20 Antigravity accounts cost about 80 upstream calls an hour. "Unknown" means
+the provider did not report that number. A manual refresh of one account runs at most once a minute.
 
 ## Dropped parameters
 

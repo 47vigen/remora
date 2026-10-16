@@ -24,6 +24,20 @@ services:
       REMORA_COOLING_POLL: 1s
       REMORA_COOLING_DEFAULT: 1s
       REMORA_COOLING_429_COUNT: "1000"
+      # Quota checks go to the fakes through the real engine; no background polling keeps runs deterministic.
+      REMORA_QUOTA_BASE_URL: http://fakes:9090/u/quota
+      REMORA_QUOTA_INTERVAL: "0"
+    # Whatever the engine does on its own with a fixture token (a model probe, a token refresh) is refused locally
+    # and never reaches a provider.
+    extra_hosts:
+      - "daily-cloudcode-pa.googleapis.com:127.0.0.1"
+      - "cloudcode-pa.googleapis.com:127.0.0.1"
+      - "oauth2.googleapis.com:127.0.0.1"
+      - "chatgpt.com:127.0.0.1"
+      - "auth.openai.com:127.0.0.1"
+      - "api.anthropic.com:127.0.0.1"
+      - "platform.claude.com:127.0.0.1"
+      - "antigravity-hub-auto-updater-974169037036.us-central1.run.app:127.0.0.1"
     volumes:
       - ./testdata:/e2e:ro
     ports:

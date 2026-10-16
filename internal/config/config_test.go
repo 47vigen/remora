@@ -70,6 +70,7 @@ func TestLoadOverrides(t *testing.T) {
 		SonioxPollInterval:  time.Second,
 		SonioxDeadline:      30 * time.Minute,
 		SonioxSweepInterval: 10 * time.Minute,
+		QuotaInterval:       15 * time.Minute,
 	}
 	if c != want {
 		t.Errorf("Load = %+v, want %+v", c, want)
@@ -186,5 +187,32 @@ func TestConfigPerformanceSettings(t *testing.T) {
 		if _, err := Load(envFrom(env)); err == nil {
 			t.Errorf("%s: Load succeeded, want an error", name)
 		}
+	}
+}
+
+func TestLoadQuotaInterval(t *testing.T) {
+	for v, want := range map[string]time.Duration{"": 15 * time.Minute, "0": 0, "5m": 5 * time.Minute} {
+		c, err := Load(envFrom(map[string]string{"REMORA_QUOTA_INTERVAL": v}))
+		if err != nil || c.QuotaInterval != want {
+			t.Errorf("REMORA_QUOTA_INTERVAL=%q: %v, %v; want %v", v, c.QuotaInterval, err, want)
+		}
+	}
+	for _, v := range []string{"4m59s", "abc", "-1m"} {
+		_, err := Load(envFrom(map[string]string{"REMORA_QUOTA_INTERVAL": v}))
+		if err == nil || !strings.Contains(err.Error(), "REMORA_QUOTA_INTERVAL") || !strings.Contains(err.Error(), "want 0 (off) or a duration of at least 5m") {
+			t.Errorf("REMORA_QUOTA_INTERVAL=%q: err = %v", v, err)
+		}
+	}
+}
+
+func TestLoadQuotaBaseURL(t *testing.T) {
+	for _, v := range []string{"", "http://fakes:9090/u/quota"} {
+		c, err := Load(envFrom(map[string]string{"REMORA_QUOTA_BASE_URL": v}))
+		if err != nil || c.QuotaBaseURL != v {
+			t.Errorf("REMORA_QUOTA_BASE_URL=%q: %q, %v", v, c.QuotaBaseURL, err)
+		}
+	}
+	if _, err := Load(envFrom(map[string]string{"REMORA_QUOTA_BASE_URL": "ftp://x"})); err == nil || !strings.Contains(err.Error(), "REMORA_QUOTA_BASE_URL") {
+		t.Errorf("ftp base: err = %v", err)
 	}
 }

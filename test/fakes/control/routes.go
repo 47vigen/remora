@@ -20,6 +20,12 @@ const (
 	RouteSonioxTxDelete       = "soniox.transcriptions.delete" // DELETE /v1/transcriptions/{id}
 	RouteSonioxTranscript     = "soniox.transcript.get"        // GET  /v1/transcriptions/{id}/transcript
 	RouteTypeSafeSystemOne    = "typesafe.systemone"           // POST /v1/systemone
+
+	RouteQuotaAntigravitySummary  = "quota.antigravity.summary"  // POST /v1internal:retrieveUserQuotaSummary
+	RouteQuotaAntigravityLoad     = "quota.antigravity.load"     // POST /v1internal:loadCodeAssist
+	RouteQuotaAntigravityManifest = "quota.antigravity.manifest" // GET  /manifest/latest-arm64-mac.yml
+	RouteQuotaCodexUsage          = "quota.codex.usage"          // GET  /backend-api/wham/usage
+	RouteQuotaClaudeUsage         = "quota.claude.usage"         // GET  /api/oauth/usage
 )
 
 // routeSpec binds a route name to its method and path below /u/{upstream}.
@@ -49,5 +55,10 @@ func routeTable() []routeSpec {
 		{RouteSonioxTxDelete, http.MethodDelete, "/v1/transcriptions/{id}"},
 		{RouteSonioxTranscript, http.MethodGet, "/v1/transcriptions/{id}/transcript"},
 		{RouteTypeSafeSystemOne, http.MethodPost, "/v1/systemone"},
+		{RouteQuotaAntigravitySummary, http.MethodPost, "/v1internal:retrieveUserQuotaSummary"},
+		{RouteQuotaAntigravityLoad, http.MethodPost, "/v1internal:loadCodeAssist"},
+		{RouteQuotaAntigravityManifest, http.MethodGet, "/manifest/latest-arm64-mac.yml"},
+		{RouteQuotaCodexUsage, http.MethodGet, "/backend-api/wham/usage"},
+		{RouteQuotaClaudeUsage, http.MethodGet, "/api/oauth/usage"},
 	}
 }

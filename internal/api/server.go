@@ -23,6 +23,7 @@ type Deps struct {
 	System    System
 	Names     EngineNames
 	Logs      LogSource     // the front door's request log
+	Quota     Quotas        // subscription accounts' quota, through NewQuota
 	Tail      *bifrost.Tail // the one poller following it, fanned out to live log viewers
 	Auth      *auth.Service
 	Log       *slog.Logger

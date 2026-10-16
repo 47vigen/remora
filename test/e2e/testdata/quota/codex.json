@@ -1,0 +1,9 @@
+{
+  "type": "codex",
+  "email": "codex@example.test",
+  "access_token": "fake-codex-token",
+  "refresh_token": "fake-codex-refresh",
+  "id_token": "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJlbWFpbCI6ImNvZGV4QGV4YW1wbGUudGVzdCIsImh0dHBzOi8vYXBpLm9wZW5haS5jb20vYXV0aCI6eyJjaGF0Z3B0X2FjY291bnRfaWQiOiJhY2N0LWUyZSIsImNoYXRncHRfcGxhbl90eXBlIjoicGx1cyJ9fQ.dW5zaWduZWQ",
+  "account_id": "acct-e2e",
+  "expired": "2099-01-01T00:00:00Z"
+}

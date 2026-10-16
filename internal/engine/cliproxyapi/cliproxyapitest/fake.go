@@ -55,6 +55,7 @@ type Fake struct {
 	cbState      string
 	cbRedirect   string
 	nextUserCode int
+	tokens       map[string]string
 }
 
 // NewServer starts a fake that accepts the management secret and stops it when the test ends.
@@ -66,6 +67,7 @@ func NewServer(t *testing.T, secret string) *Fake {
 		creds:    map[string]*credential{},
 		calls:    map[string]int{},
 		config:   map[string]any{"config-version": float64(8)},
+		tokens:   map[string]string{},
 	}
 	srv := httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(srv.Close)
@@ -105,6 +107,14 @@ func (f *Fake) AddCredential(c cliproxyapi.Credential) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.putLocked(c, nil)
+}
+
+// SetToken sets what "$TOKEN$" becomes in an api-call as the named credential; the default is "tok-" + its auth
+// index.
+func (f *Fake) SetToken(name, token string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.tokens[name] = token
 }
 
 // SetModels sets the models a credential serves.
@@ -217,6 +227,10 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	// The engine takes OAuth callbacks without the management secret: they are validated by their pending state.
 	if path != "/oauth/callback" && !f.authorized(r) {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid management key"})
+		return
+	}
+	if r.Method == http.MethodPost && path == "/requests/api-call" {
+		f.apiCall(w, r) // sends upstream, so it takes the lock only around its lookups
 		return
 	}
 	f.mu.Lock()
@@ -609,6 +623,79 @@ func (f *Fake) resetCooldown(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusNotFound, map[string]any{"error": "auth not found"})
+}
+
+func (f *Fake) apiCall(w http.ResponseWriter, r *http.Request) {
+	var req cliproxyapi.APICallRequest
+	f.mu.Lock()
+	f.calls["/requests/api-call"]++
+	f.mu.Unlock()
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid body"})
+		return
+	}
+	method := strings.ToUpper(strings.TrimSpace(req.Method))
+	raw := strings.TrimSpace(req.URL)
+	switch u, err := url.Parse(raw); {
+	case method == "":
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "missing method"})
+		return
+	case raw == "":
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "missing url"})
+		return
+	case err != nil || u.Scheme == "" || u.Host == "":
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid url"})
+		return
+	}
+	token := func() (string, bool) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		for name, cr := range f.creds {
+			if cr.c.AuthIndex == req.AuthIndex {
+				if t, ok := f.tokens[name]; ok {
+					return t, true
+				}
+				return "tok-" + cr.c.AuthIndex, true
+			}
+		}
+		return "", false
+	}
+	headers := map[string]string{}
+	for k, v := range req.Header {
+		if strings.Contains(v, "$TOKEN$") {
+			t, ok := token()
+			if !ok {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "auth credential not found for auth_index"})
+				return
+			}
+			v = strings.ReplaceAll(v, "$TOKEN$", t)
+		}
+		headers[k] = v
+	}
+	var body io.Reader
+	if req.Data != "" {
+		body = strings.NewReader(req.Data)
+	}
+	up, err := http.NewRequestWithContext(r.Context(), method, raw, body)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "failed to build request"})
+		return
+	}
+	for k, v := range headers {
+		up.Header.Set(k, v)
+	}
+	resp, err := http.DefaultClient.Do(up)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "request failed"})
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "failed to read response"})
+		return
+	}
+	writeJSON(w, http.StatusOK, cliproxyapi.APICallResponse{StatusCode: resp.StatusCode, Header: resp.Header, Body: string(data)})
 }
 
 func (f *Fake) patchConfig(w http.ResponseWriter, r *http.Request) {

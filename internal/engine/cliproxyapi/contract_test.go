@@ -9,6 +9,7 @@ package cliproxyapi_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -609,4 +610,67 @@ func TestContractCodexResponsesDrops(t *testing.T) {
 		t.Errorf("CodexDroppedParams = %q, want %q", reported, want)
 	}
 	checkDropped(t, reported, body, rec)
+}
+
+// unsignedJWT is a JWT with payload claims and no signature check; the engine only decodes the payload.
+func unsignedJWT(t *testing.T, claims map[string]any) string {
+	t.Helper()
+	enc := base64.RawURLEncoding.EncodeToString
+	return enc([]byte(`{"alg":"none","typ":"JWT"}`)) + "." + enc(mustJSON(t, claims)) + "." + enc([]byte("sig"))
+}
+
+func TestContractAPICall(t *testing.T) {
+	e := startEngine(t)
+	ctx := context.Background()
+	var gotAuth string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusTeapot)
+		_, _ = w.Write([]byte(`{"ok":1}`))
+	}))
+	t.Cleanup(up.Close)
+
+	idToken := unsignedJWT(t, map[string]any{"https://api.openai.com/auth": map[string]any{"chatgpt_account_id": "acct-c"}})
+	if err := e.client.UploadCredential(ctx, "codex-c.json", mustJSON(t, map[string]any{
+		"type": "codex", "email": "c@example.test", "access_token": "tok-c", "id_token": idToken,
+	})); err != nil {
+		t.Fatalf("UploadCredential codex: %v", err)
+	}
+	if err := e.client.UploadCredential(ctx, "antigravity-c.json", mustJSON(t, map[string]any{
+		"type": "antigravity", "email": "g@example.test", "access_token": "tok-g", "project_id": "p-c",
+		"expired": "2099-01-01T00:00:00Z",
+	})); err != nil {
+		t.Fatalf("UploadCredential antigravity: %v", err)
+	}
+	creds, err := e.client.Credentials(ctx)
+	if err != nil {
+		t.Fatalf("Credentials: %v", err)
+	}
+	var codex cliproxyapi.Credential
+	var project string
+	for _, c := range creds {
+		switch c.Name {
+		case "codex-c.json":
+			codex = c
+		case "antigravity-c.json":
+			project = c.ProjectID
+		}
+	}
+	if codex.IDToken == nil || codex.IDToken.ChatGPTAccountID != "acct-c" {
+		t.Errorf("codex id_token = %+v", codex.IDToken)
+	}
+	if project != "p-c" {
+		t.Errorf("antigravity project_id = %q, want p-c", project)
+	}
+
+	got, err := e.client.APICall(ctx, cliproxyapi.APICallRequest{
+		AuthIndex: codex.AuthIndex, Method: http.MethodGet, URL: up.URL + "/usage", ProxyURL: "direct",
+		Header: map[string]string{"Authorization": "Bearer $TOKEN$"},
+	})
+	if err != nil {
+		t.Fatalf("APICall: %v", err)
+	}
+	if got.StatusCode != http.StatusTeapot || got.Body != `{"ok":1}` || gotAuth != "Bearer tok-c" {
+		t.Errorf("APICall = %+v, upstream saw %q", got, gotAuth)
+	}
 }
