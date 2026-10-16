@@ -31,7 +31,7 @@ func TestEventFrom(t *testing.T) {
 		{
 			name: "429 on the OAuth engine, with a retry hint",
 			in:   bifrost.Log{ID: "r2", Timestamp: t0, Provider: "remora-oauth", Model: "codex/gpt-x", Status: "error", ErrorDetails: failure(429, 3000)},
-			want: Event{ID: "r2", At: t0, Target: alias.Target{Provider: "codex", Model: "gpt-x"}, StatusCode: 429, RetryAfter: 3 * time.Second},
+			want: Event{ID: "r2", At: t0, Target: alias.Target{Provider: "codex", Model: "gpt-x"}, StatusCode: 429, RetryAfter: 3 * time.Second, Subscription: true},
 			ok:   true,
 		},
 		{

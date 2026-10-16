@@ -288,3 +288,32 @@ func TestSnapshotSortedByUntil(t *testing.T) {
 		t.Fatalf("Snapshot order = %v, want %v", got, want)
 	}
 }
+
+func TestSubscriptionDefaultCooldown(t *testing.T) {
+	cases := []struct {
+		name         string
+		subscription bool
+		retryAfter   time.Duration
+		want         time.Duration
+	}{
+		{"subscription without a hint", true, 0, DefaultSubscriptionCooldown},
+		{"subscription with a hint", true, 2 * time.Minute, 2 * time.Minute},
+		{"API key without a hint", false, 0, DefaultCooldown},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cl, _, _ := newCooler(t)
+			e := ev(a, 402, t0)
+			e.Subscription, e.RetryAfter = c.subscription, c.retryAfter
+			if err := cl.Observe(context.Background(), e); err != nil {
+				t.Fatal(err)
+			}
+			if got := cl.Snapshot(); len(got) != 1 || !got[0].Until.Equal(t0.Add(c.want)) {
+				t.Fatalf("Snapshot = %+v, want until %v", got, t0.Add(c.want))
+			}
+		})
+	}
+	if DefaultSubscriptionCooldown != 30*time.Second {
+		t.Errorf("DefaultSubscriptionCooldown = %v, want 30s", DefaultSubscriptionCooldown)
+	}
+}

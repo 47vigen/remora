@@ -141,6 +141,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	rec.Also = []func(context.Context) error{accts.Reconcile}
 	cooler := cooling.New(cooling.Config{
 		Threshold: cfg.Cooling.Count429, Window: cfg.Cooling.Window429, Default: cfg.Cooling.Default,
+		SubscriptionDefault: cfg.Cooling.SubscriptionDefault,
 	}, rec.Sync, nil, logger)
 	rec.Filter = cooler.Filter
 	if err := rec.SyncAll(ctx); err != nil {
