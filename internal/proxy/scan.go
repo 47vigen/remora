@@ -16,6 +16,8 @@ type bodySpans struct {
 	messages  span // the last top-level key equal to "messages" under case folding, as encoding/json picks it
 	input     span // the same for "input"
 	firstUser span // the first element of messages, else of an input array, that is an object with "role": "user"
+	// promptCacheKey is the top-level "prompt_cache_key", spelled exactly so, when its value is a string.
+	promptCacheKey span
 	// messagesNotList is set when any "messages" (under case folding) holds something other than a list or null.
 	messagesNotList bool
 }
@@ -57,6 +59,8 @@ func scanBody(raw []byte) (model string, sp bodySpans, err error) {
 			}
 		case strings.EqualFold(k, "input"):
 			sp.input = v
+		case k == "prompt_cache_key" && raw[v.start] == '"':
+			sp.promptCacheKey = v
 		}
 		return true
 	})
@@ -76,6 +80,15 @@ func scanBody(raw []byte) (model string, sp bodySpans, err error) {
 		sp.firstUser = firstUserIn(raw, sp.input)
 	}
 	return model, sp, nil
+}
+
+// promptCacheKeyIn is the body's prompt_cache_key, or "" when it has none.
+func (sp bodySpans) promptCacheKeyIn(raw []byte) string {
+	var k string
+	if sp.promptCacheKey.end > 0 {
+		_ = json.Unmarshal(raw[sp.promptCacheKey.start:sp.promptCacheKey.end], &k)
+	}
+	return k
 }
 
 // firstUserIn is the first element of the array at arr that is an object whose top-level "role" is the string

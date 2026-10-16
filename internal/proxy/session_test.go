@@ -2,9 +2,14 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -118,4 +123,102 @@ func TestOpencodeSessionGolden(t *testing.T) {
 	if a == b {
 		t.Errorf("a messages value that is not a list must give a random id, got %q twice", a)
 	}
+}
+
+// affinityOf is the affinity key of a body scanned the way the proxy scans it.
+func affinityOf(h http.Header, vk string, body []byte) string {
+	_, sp, _ := scanBody(body)
+	return affinityKey(h, vk, sp.promptCacheKeyIn(body), affinitySource(body, sp))
+}
+
+func TestAffinityKeyPrecedence(t *testing.T) {
+	format := regexp.MustCompile(`^aff_[0-9a-f]{32}$`)
+	body := []byte(`{"model":"m","prompt_cache_key":"p1","messages":[{"role":"user","content":"x"}]}`)
+	cases := []struct {
+		name string
+		h    http.Header
+		want string
+	}{
+		{"session id first", hdr(headerSessionID, "s1", headerOpencodeSession, "o1"), "s1"},
+		{"then opencode", hdr(headerOpencodeSession, "o1"), "o1"},
+		{"then prompt_cache_key", http.Header{}, "p1"},
+	}
+	for _, c := range cases {
+		if got := affinityOf(c.h, "vk", body); got != c.want {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+	if got := affinityOf(http.Header{}, "vk", []byte(`{"model":"m","messages":[{"role":"user","content":"x"}]}`)); !format.MatchString(got) {
+		t.Errorf("derived key %q", got)
+	}
+	if got := affinityOf(http.Header{}, "vk", []byte(`{"model":"m","input":[1,2]}`)); got != "" {
+		t.Errorf("no user message must give no key: %q", got)
+	}
+	if got := affinityOf(http.Header{}, "vk", []byte(`{"model":"m","prompt_cache_key":7,"messages":[]}`)); got != "" {
+		t.Errorf("a non-string prompt_cache_key must be ignored: %q", got)
+	}
+}
+
+func TestAffinityKeyIgnoresSystemPrompt(t *testing.T) {
+	none := http.Header{}
+	sys := `{"role":"system","content":"a long shared system prompt"}`
+	a := affinityOf(none, "vk", []byte(`{"model":"m","messages":[`+sys+`,{"role":"user","content":"سلام"}]}`))
+	b := affinityOf(none, "vk", []byte(`{"model":"m","messages":[`+sys+`,{"role":"user","content":"سلام2"}]}`))
+	a3 := affinityOf(none, "vk", []byte(`{"model":"m","messages":[`+sys+`,{"role":"user","content":"سلام"},{"role":"assistant","content":"hi"},{"role":"user","content":"next"}]}`))
+	otherSys := affinityOf(none, "vk", []byte(`{"model":"m","messages":[{"role":"system","content":"other"},{"role":"user","content":"سلام"}]}`))
+	if a == b || a != a3 || a != otherSys {
+		t.Fatalf("keys must follow the first user message: a=%q b=%q a3=%q otherSys=%q", a, b, a3, otherSys)
+	}
+	r1 := affinityOf(none, "vk", []byte(`{"model":"m","instructions":"be brief","input":"hello"}`))
+	r2 := affinityOf(none, "vk", []byte(`{"model":"m","input":"hello"}`))
+	if r1 == "" || r1 != r2 {
+		t.Fatalf("responses string input: %q %q", r1, r2)
+	}
+	if affinityOf(none, "a", []byte(`{"model":"m","input":"hello"}`)) == affinityOf(none, "b", []byte(`{"model":"m","input":"hello"}`)) {
+		t.Fatal("two client keys must not share a derived key")
+	}
+}
+
+func TestAffinityKeyRejectsUnusableClientID(t *testing.T) {
+	body := []byte(`{"model":"m","prompt_cache_key":"p1"}`)
+	for _, bad := range []string{strings.Repeat("a", maxSessionLen+1), "a\nb"} {
+		if got := affinityOf(hdr(headerSessionID, bad), "vk", body); got != "p1" {
+			t.Errorf("unusable id %q: got %q, want the next source", bad[:3], got)
+		}
+	}
+}
+
+func TestRewriteSetsAffinity(t *testing.T) {
+	rewritten := func(h http.Header, body string) http.Header {
+		in := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", nil)
+		in.Header = h
+		info := &reqInfo{in: in, upstream: "/v1/chat/completions", vk: "vk", body: []byte(body)}
+		_, info.spans, _ = scanBody(info.body)
+		in = in.WithContext(context.WithValue(in.Context(), reqInfoKey{}, info))
+		out := in.Clone(in.Context())
+		out.Header = h.Clone()
+		p := &Proxy{upstream: &url.URL{Scheme: "http", Host: "front"}}
+		p.rewrite(&httputil.ProxyRequest{In: in, Out: out})
+		return out.Header
+	}
+	chat := `{"model":"m","messages":[{"role":"user","content":"x"}]}`
+	if got := rewritten(hdr(headerSessionID, "abc"), chat).Get(headerForwardAffinity); got != "abc" {
+		t.Errorf("affinity = %q, want abc", got)
+	}
+	if got := rewritten(hdr(headerForwardAffinity, "evil"), `{"model":"m","input":[1]}`).Get(headerForwardAffinity); got != "" {
+		t.Errorf("a forged header must not pass: %q", got)
+	}
+	h := rewritten(http.Header{}, `{"model":"emb","input":[1,2]}`)
+	if h.Get(headerForwardAffinity) != "" || h.Get(headerForwardSession) == "" {
+		t.Errorf("embeddings: affinity %q, session %q", h.Get(headerForwardAffinity), h.Get(headerForwardSession))
+	}
+}
+
+// hdr builds a canonical header from name, value pairs, as a server would receive it.
+func hdr(kv ...string) http.Header {
+	h := http.Header{}
+	for i := 0; i+1 < len(kv); i += 2 {
+		h.Set(kv[i], kv[i+1])
+	}
+	return h
 }

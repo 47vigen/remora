@@ -319,6 +319,9 @@ func (p *Proxy) rewrite(pr *httputil.ProxyRequest) {
 
 	setUpstreamHeaders(pr.Out.Header, info.vk)
 	pr.Out.Header.Set(headerForwardSession, opencodeSession(pr.In.Header, info.body, info.spans))
+	if k := affinityKey(pr.In.Header, info.vk, info.spans.promptCacheKeyIn(info.body), affinitySource(info.body, info.spans)); k != "" {
+		pr.Out.Header.Set(headerForwardAffinity, k)
+	}
 }
 
 // setUpstreamHeaders replaces every client credential and engine control header in h with remora's own.
