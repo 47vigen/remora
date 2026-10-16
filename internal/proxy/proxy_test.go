@@ -208,6 +208,16 @@ func errCode(t *testing.T, body []byte) string {
 	return e.Error.Code
 }
 
+func TestProxy_UpstreamPool(t *testing.T) {
+	p := New(&url.URL{Scheme: "http", Host: "127.0.0.1:1"}, nil, slog.New(slog.DiscardHandler))
+	if p.transport.MaxIdleConns != upstreamIdleConns || p.transport.MaxIdleConnsPerHost != upstreamIdleConns {
+		t.Errorf("idle pool = %d/%d, want %d", p.transport.MaxIdleConns, p.transport.MaxIdleConnsPerHost, upstreamIdleConns)
+	}
+	if upstreamIdleConns != 1024 {
+		t.Errorf("upstreamIdleConns = %d, want 1024", upstreamIdleConns)
+	}
+}
+
 func TestProxy_Auth(t *testing.T) {
 	f := newFixture(t)
 	cases := []struct {
