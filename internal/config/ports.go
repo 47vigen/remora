@@ -83,3 +83,11 @@ type Keys interface {
 	MatchesValue(ctx context.Context, id, value string) (bool, error)
 	Delete(ctx context.Context, id string) error
 }
+
+// AccountStrategies reads and sets each subscription provider's account strategy. SetStrategy called under a Batch
+// context writes on the batch's transaction; Reconcile then applies the committed strategies to the engine.
+type AccountStrategies interface {
+	Strategies(ctx context.Context) (map[string]alias.Strategy, error) // every subscription provider, round-robin by default
+	SetStrategy(ctx context.Context, provider string, st alias.Strategy) error
+	Reconcile(ctx context.Context) error
+}

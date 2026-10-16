@@ -192,12 +192,12 @@ func (c *converter) aliases() {
 		case d.ContextCamel != nil:
 			a.ContextWindow = int(*d.ContextCamel)
 		}
-		switch d.Strategy {
-		case "", "priority":
-		case string(alias.StrategyRoundRobin):
+		switch st := alias.Strategy(d.Strategy); {
+		case st == "" || st == alias.StrategyPriority:
+		case st.Valid():
 			a.Strategy = d.Strategy
 		default:
-			c.warn("alias %s: strategy %s becomes ordered fallback", combo.Name, d.Strategy)
+			c.warn("alias %s: strategy %s becomes priority", combo.Name, d.Strategy)
 		}
 		for i, raw := range d.Models {
 			m, ok := c.member(raw)

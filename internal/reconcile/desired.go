@@ -19,11 +19,31 @@ const (
 	vkPrefix   = "remora:key:"
 )
 
-// maxFallbacks bounds a round-robin alias's fallback chain.
-const maxFallbacks = 3
-
 // RuleName is the routing rule name of an alias.
 func RuleName(alias string) string { return rulePrefix + alias }
+
+// MemberRuleName is the routing rule name of a spreading alias's n-th live member, n from 1. "#" never appears in an
+// alias name.
+func MemberRuleName(alias string, n int) string { return RuleName(alias) + "#" + strconv.Itoa(n) }
+
+// firstHeaderCEL is how a rule's CEL tests the proxy's pick: a missing key is an evaluation error, which skips the
+// rule, so the key is tested first.
+const firstHeaderCEL = `"x-remora-first" in headers && headers["x-remora-first"]`
+
+// MemberRuleCEL matches a request for the alias whose X-Remora-First names ref.
+func MemberRuleCEL(alias, ref string) string {
+	return RuleCEL(alias) + " && " + firstHeaderCEL + " == " + strconv.Quote(ref)
+}
+
+// DefaultRuleCEL matches a request for the alias whose X-Remora-First names none of the live refs (or is absent).
+// Excluding exactly the member values keeps one alias's rules mutually exclusive, so their priorities do not matter.
+func DefaultRuleCEL(alias string, refs []string) string {
+	quoted := make([]string, len(refs))
+	for i, r := range refs {
+		quoted[i] = strconv.Quote(r)
+	}
+	return RuleCEL(alias) + " && !(" + firstHeaderCEL + " in [" + strings.Join(quoted, ", ") + "])"
+}
 
 // VirtualKeyName is the virtual key name of a client key.
 func VirtualKeyName(clientKeyID string) string { return vkPrefix + clientKeyID }
@@ -68,8 +88,9 @@ type desiredRule struct {
 type desiredState struct {
 	Providers []desiredProvider // store providers, then internal ones
 	VKs       []desiredVK
-	Rules     []desiredRule // internal rules, then alias rules by alias name
-	Aliases   []string      // every alias in the store, sorted
+	Rules     []desiredRule          // internal rules, then alias rules by alias name
+	Aliases   []string               // every alias in the store, sorted
+	Chains    map[string]alias.Chain // live chains of the spreading aliases with member rules
 	Skipped   map[string]error
 }
 
@@ -116,7 +137,7 @@ func (r *Reconciler) desired(ctx context.Context, tx *store.Tx, strict bool) (*d
 		return nil, err
 	}
 
-	d := &desiredState{Skipped: map[string]error{}}
+	d := &desiredState{Skipped: map[string]error{}, Chains: map[string]alias.Chain{}}
 	reserved := map[string]bool{}
 	for _, n := range r.Reserved {
 		reserved[n] = true
@@ -187,7 +208,7 @@ func (r *Reconciler) desired(ctx context.Context, tx *store.Tx, strict bool) (*d
 	}
 	slices.Sort(d.Aliases)
 	for _, name := range d.Aliases {
-		rule, err := r.aliasRule(aliases, name, isTarget, fallbackOK, reserved)
+		rules, chain, err := r.aliasRules(aliases, name, isTarget, fallbackOK, reserved)
 		if err != nil {
 			if strict {
 				return nil, err
@@ -195,7 +216,10 @@ func (r *Reconciler) desired(ctx context.Context, tx *store.Tx, strict bool) (*d
 			d.Skipped[name] = err
 			continue
 		}
-		d.Rules = append(d.Rules, desiredRule{Object: ruleObject(name), Alias: name, Rule: rule})
+		d.Rules = append(d.Rules, rules...)
+		if chain != nil {
+			d.Chains[name] = *chain
+		}
 	}
 	return d, nil
 }
@@ -254,25 +278,27 @@ func engineBaseURL(raw string) string {
 	return strings.TrimRight(u.String(), "/")
 }
 
-// aliasRule validates one alias and builds its routing rule: the compiled chain is validated whole, Filter drops
-// cooling members, and members on a reserved (subscription) provider are mapped by ToEngineTarget. The first target is the rule's target, the rest
-// are its fallbacks. A round-robin alias spreads the first try over the whole chain and falls back through all of it,
-// since the engine keeps one fallback chain whichever target it picked.
-func (r *Reconciler) aliasRule(all map[string]alias.Alias, name string, isTarget, fallbackOK func(string) bool, reserved map[string]bool) (bifrost.RoutingRule, error) {
+// aliasRules validates one alias and builds its routing rules: the compiled chain is validated whole, Filter drops
+// cooling members, and members on a reserved (subscription) provider are mapped by ToEngineTarget. The default rule
+// targets the first member and falls back through the rest. A spreading alias with two or more distinct live members
+// also gets one rule per member, selected by the proxy's X-Remora-First: its target is that member and its fallbacks
+// the other members rotated from it, since the engine keeps one fallback chain per rule. Only the default rule
+// carries Alias: it owns the stored rule id.
+func (r *Reconciler) aliasRules(all map[string]alias.Alias, name string, isTarget, fallbackOK func(string) bool, reserved map[string]bool) ([]desiredRule, *alias.Chain, error) {
 	if err := alias.ValidName(name); err != nil {
-		return bifrost.RoutingRule{}, fmt.Errorf("%w: %w", ErrInvalid, err)
+		return nil, nil, fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
 	targets, err := alias.Compile(all, name, r.MaxDepth)
 	if err != nil {
-		return bifrost.RoutingRule{}, fmt.Errorf("%w: alias %q: %w", ErrInvalid, name, err)
+		return nil, nil, fmt.Errorf("%w: alias %q: %w", ErrInvalid, name, err)
 	}
 	for _, t := range targets {
 		if !isTarget(t.Provider) {
-			return bifrost.RoutingRule{}, invalid("alias %q: member %s/%s: no provider %q", name, t.Provider, t.Model, t.Provider)
+			return nil, nil, invalid("alias %q: member %s/%s: no provider %q", name, t.Provider, t.Model, t.Provider)
 		}
 		// The engine refuses a rule whose target or fallback names a provider without a key.
 		if !fallbackOK(t.Provider) {
-			return bifrost.RoutingRule{}, invalid("alias %q: member %s/%s: provider %q has no key", name, t.Provider, t.Model, t.Provider)
+			return nil, nil, invalid("alias %q: member %s/%s: provider %q has no key", name, t.Provider, t.Model, t.Provider)
 		}
 	}
 	if r.Filter != nil && len(targets) > 0 {
@@ -280,23 +306,37 @@ func (r *Reconciler) aliasRule(all map[string]alias.Alias, name string, isTarget
 			targets = kept
 		}
 	}
-	rule := bifrost.RoutingRule{Name: RuleName(name), CEL: RuleCEL(name)}
+	st := all[name].Strategy
+	if st.Spreads() {
+		// Two member rules with one header value would shadow each other: first occurrence wins.
+		seen := map[alias.Target]bool{}
+		targets = slices.DeleteFunc(slices.Clone(targets), func(t alias.Target) bool {
+			dup := seen[t]
+			seen[t] = true
+			return dup
+		})
+	}
 	routes := make([]bifrost.Route, len(targets))
+	refs := make([]string, len(targets))
 	for i, t := range targets {
+		refs[i] = t.Provider + "/" + t.Model
 		if reserved[t.Provider] {
 			t = ToEngineTarget(t)
 		}
 		routes[i] = bifrost.Route(t)
 	}
-	rule.Target = routes[0]
-	switch {
-	case len(routes) == 1:
-	case all[name].Strategy == alias.StrategyRoundRobin:
-		// The front door cannot tell which spread member it picked, so the chain may repeat it; a cap keeps a failing
-		// request from walking every member, each a full round through the OAuth engine's accounts.
-		rule.Spread, rule.Fallbacks = routes[1:], routes[:min(len(routes), maxFallbacks)]
-	default:
-		rule.Fallbacks = routes[1:]
+	def := bifrost.RoutingRule{Name: RuleName(name), CEL: RuleCEL(name), Target: routes[0], Fallbacks: routes[1:]}
+	if !st.Spreads() || len(routes) < 2 {
+		return []desiredRule{{Object: ruleObject(name), Alias: name, Rule: def}}, nil, nil
 	}
-	return rule, nil
+	def.CEL = DefaultRuleCEL(name, refs)
+	out := []desiredRule{{Object: ruleObject(name), Alias: name, Rule: def}}
+	for i := range routes {
+		n := strconv.Itoa(i + 1)
+		out = append(out, desiredRule{Object: ruleObject(name) + "#" + n, Rule: bifrost.RoutingRule{
+			Name: MemberRuleName(name, i+1), CEL: MemberRuleCEL(name, refs[i]),
+			Target: routes[i], Fallbacks: append(slices.Clone(routes[i+1:]), routes[:i]...),
+		}})
+	}
+	return out, &alias.Chain{Strategy: st, Members: refs}, nil
 }

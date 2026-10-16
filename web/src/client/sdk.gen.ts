@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { ApplyConfigData, ApplyConfigErrors, ApplyConfigResponses, CancelAccountLoginData, CancelAccountLoginErrors, CancelAccountLoginResponses, ChangePasswordData, ChangePasswordErrors, ChangePasswordResponses, CompileAliasData, CompileAliasErrors, CompileAliasResponses, CompleteAccountLoginData, CompleteAccountLoginErrors, CompleteAccountLoginResponses, CreateAliasData, CreateAliasErrors, CreateAliasResponses, CreateApiTokenData, CreateApiTokenErrors, CreateApiTokenResponses, CreateKeyData, CreateKeyErrors, CreateKeyResponses, CreateProviderData, CreateProviderErrors, CreateProviderResponses, DeleteAccountData, DeleteAccountErrors, DeleteAccountResponses, DeleteAliasData, DeleteAliasErrors, DeleteAliasResponses, DeleteApiTokenData, DeleteApiTokenErrors, DeleteApiTokenResponses, DeleteKeyData, DeleteKeyErrors, DeleteKeyResponses, DeleteProviderData, DeleteProviderErrors, DeleteProviderResponses, ExportConfigData, ExportConfigErrors, ExportConfigResponses, GetAccountLoginData, GetAccountLoginErrors, GetAccountLoginResponses, GetAccountPoolData, GetAccountPoolErrors, GetAccountPoolResponses, GetAliasChainData, GetAliasChainErrors, GetAliasChainResponses, GetAliasData, GetAliasErrors, GetAliasResponses, GetHealthData, GetHealthErrors, GetHealthResponses, GetKeyData, GetKeyErrors, GetKeyResponses, GetKeyUsageData, GetKeyUsageErrors, GetKeyUsageResponses, GetLogData, GetLogErrors, GetLogResponses, GetProviderData, GetProviderErrors, GetProviderResponses, GetQuotaData, GetQuotaErrors, GetQuotaResponses, GetSessionData, GetSessionErrors, GetSessionResponses, GetStatsData, GetStatsErrors, GetStatsResponses, GetVersionData, GetVersionErrors, GetVersionResponses, ImportAccountData, ImportAccountErrors, ImportAccountResponses, ListAccountsData, ListAccountsErrors, ListAccountsResponses, ListAliasesData, ListAliasesErrors, ListAliasesResponses, ListApiTokensData, ListApiTokensErrors, ListApiTokensResponses, ListCoolingData, ListCoolingErrors, ListCoolingResponses, ListKeysData, ListKeysErrors, ListKeysResponses, ListLogsData, ListLogsErrors, ListLogsResponses, ListProvidersData, ListProvidersErrors, ListProvidersResponses, LoginData, LoginErrors, LoginResponses, LogoutData, LogoutErrors, LogoutResponses, PlanConfigData, PlanConfigErrors, PlanConfigResponses, RefreshQuotaData, RefreshQuotaErrors, RefreshQuotaResponses, ResetAccountCooldownData, ResetAccountCooldownErrors, ResetAccountCooldownResponses, StartAccountLoginData, StartAccountLoginErrors, StartAccountLoginResponses, TestProviderData, TestProviderErrors, TestProviderResponses, UpdateAccountData, UpdateAccountErrors, UpdateAccountResponses, UpdateAliasData, UpdateAliasErrors, UpdateAliasResponses, UpdateKeyData, UpdateKeyErrors, UpdateKeyResponses, UpdateProviderData, UpdateProviderErrors, UpdateProviderResponses } from './types.gen';
+import type { ApplyConfigData, ApplyConfigErrors, ApplyConfigResponses, CancelAccountLoginData, CancelAccountLoginErrors, CancelAccountLoginResponses, ChangePasswordData, ChangePasswordErrors, ChangePasswordResponses, CompileAliasData, CompileAliasErrors, CompileAliasResponses, CompleteAccountLoginData, CompleteAccountLoginErrors, CompleteAccountLoginResponses, CreateAliasData, CreateAliasErrors, CreateAliasResponses, CreateApiTokenData, CreateApiTokenErrors, CreateApiTokenResponses, CreateKeyData, CreateKeyErrors, CreateKeyResponses, CreateProviderData, CreateProviderErrors, CreateProviderResponses, DeleteAccountData, DeleteAccountErrors, DeleteAccountResponses, DeleteAliasData, DeleteAliasErrors, DeleteAliasResponses, DeleteApiTokenData, DeleteApiTokenErrors, DeleteApiTokenResponses, DeleteKeyData, DeleteKeyErrors, DeleteKeyResponses, DeleteProviderData, DeleteProviderErrors, DeleteProviderResponses, ExportConfigData, ExportConfigErrors, ExportConfigResponses, GetAccountLoginData, GetAccountLoginErrors, GetAccountLoginResponses, GetAccountPoolData, GetAccountPoolErrors, GetAccountPoolResponses, GetAliasChainData, GetAliasChainErrors, GetAliasChainResponses, GetAliasData, GetAliasErrors, GetAliasResponses, GetHealthData, GetHealthErrors, GetHealthResponses, GetKeyData, GetKeyErrors, GetKeyResponses, GetKeyUsageData, GetKeyUsageErrors, GetKeyUsageResponses, GetLogData, GetLogErrors, GetLogResponses, GetProviderData, GetProviderErrors, GetProviderResponses, GetQuotaData, GetQuotaErrors, GetQuotaResponses, GetSessionData, GetSessionErrors, GetSessionResponses, GetStatsData, GetStatsErrors, GetStatsResponses, GetVersionData, GetVersionErrors, GetVersionResponses, ImportAccountData, ImportAccountErrors, ImportAccountResponses, ListAccountsData, ListAccountsErrors, ListAccountsResponses, ListAccountStrategiesData, ListAccountStrategiesErrors, ListAccountStrategiesResponses, ListAliasesData, ListAliasesErrors, ListAliasesResponses, ListApiTokensData, ListApiTokensErrors, ListApiTokensResponses, ListCoolingData, ListCoolingErrors, ListCoolingResponses, ListKeysData, ListKeysErrors, ListKeysResponses, ListLogsData, ListLogsErrors, ListLogsResponses, ListProvidersData, ListProvidersErrors, ListProvidersResponses, LoginData, LoginErrors, LoginResponses, LogoutData, LogoutErrors, LogoutResponses, PlanConfigData, PlanConfigErrors, PlanConfigResponses, RefreshQuotaData, RefreshQuotaErrors, RefreshQuotaResponses, ResetAccountCooldownData, ResetAccountCooldownErrors, ResetAccountCooldownResponses, SetAccountStrategyData, SetAccountStrategyErrors, SetAccountStrategyResponses, StartAccountLoginData, StartAccountLoginErrors, StartAccountLoginResponses, TestProviderData, TestProviderErrors, TestProviderResponses, UpdateAccountData, UpdateAccountErrors, UpdateAccountResponses, UpdateAliasData, UpdateAliasErrors, UpdateAliasResponses, UpdateKeyData, UpdateKeyErrors, UpdateKeyResponses, UpdateProviderData, UpdateProviderErrors, UpdateProviderResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -181,6 +181,36 @@ export const getAccountPool = <ThrowOnError extends boolean = false>(options?: O
 });
 
 /**
+ * The routing strategy of every subscription provider's account pool.
+ */
+export const listAccountStrategies = <ThrowOnError extends boolean = false>(options?: Options<ListAccountStrategiesData, ThrowOnError>): RequestResult<ListAccountStrategiesResponses, ListAccountStrategiesErrors, ThrowOnError> => (options?.client ?? client).get<ListAccountStrategiesResponses, ListAccountStrategiesErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: 'remora_session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/api/accounts/strategies',
+    ...options
+});
+
+/**
+ * Set which account of a subscription provider serves a request.
+ */
+export const setAccountStrategy = <ThrowOnError extends boolean = false>(options: Options<SetAccountStrategyData, ThrowOnError>): RequestResult<SetAccountStrategyResponses, SetAccountStrategyErrors, ThrowOnError> => (options.client ?? client).put<SetAccountStrategyResponses, SetAccountStrategyErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: 'remora_session',
+            type: 'apiKey'
+        }, { scheme: 'bearer', type: 'http' }],
+    url: '/api/accounts/strategies/{provider}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
  * Every subscription account's quota, merged with its status and cooldowns, grouped by provider.
  *
  * Only providers with accounts are listed. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
@@ -305,7 +335,7 @@ export const deleteAccount = <ThrowOnError extends boolean = false>(options: Opt
 });
 
 /**
- * Enable or disable an account.
+ * Enable or disable an account, or set its priority.
  */
 export const updateAccount = <ThrowOnError extends boolean = false>(options: Options<UpdateAccountData, ThrowOnError>): RequestResult<UpdateAccountResponses, UpdateAccountErrors, ThrowOnError> => (options.client ?? client).patch<UpdateAccountResponses, UpdateAccountErrors, ThrowOnError>({
     security: [{

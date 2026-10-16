@@ -361,10 +361,106 @@ func TestApplyProviderKeysWithoutPrune(t *testing.T) {
 
 func TestApplyNothingSkipsTheBatch(t *testing.T) {
 	w := newWorld()
-	s := NewService(fakeProviders{w}, fakeAliases{w}, fakeKeys{w}, func(context.Context, func(context.Context) error) error {
+	s := NewService(fakeProviders{w}, fakeAliases{w}, fakeKeys{w}, fakeAccountStrategies{w}, func(context.Context, func(context.Context) error) error {
 		return errors.New("engine unavailable")
 	})
 	if applied, err := s.Apply(context.Background(), File{}, nil, true); err != nil || len(applied) != 0 {
 		t.Fatalf("applied %v, err %v; want a no-op apply to succeed without the engine", applied, err)
+	}
+}
+
+func TestPlanOmittedStrategyMatchesPriority(t *testing.T) {
+	w := populated()
+	doc, _ := exportDoc(t, w)
+	for _, a := range doc.Aliases {
+		if a.Name == "fast" && a.Strategy != "" {
+			t.Fatalf("fast exported with strategy %q, want omitted", a.Strategy)
+		}
+	}
+	plan, err := w.service().Plan(context.Background(), doc, nil, true)
+	if err != nil || len(plan) != 0 {
+		t.Errorf("omitted vs stored priority: plan = %+v, %v", plan, err)
+	}
+	w.aliases["inner"] = alias.Alias{Name: "inner", Kind: alias.KindChat, Members: members("up-a/m1"), Strategy: alias.StrategyRandom}
+	plan, err = w.service().Plan(context.Background(), doc, nil, true)
+	if err != nil || !reflect.DeepEqual(plan, []Change{{Op: "update", Kind: "alias", Name: "inner", Fields: []string{"strategy"}}}) {
+		t.Errorf("random vs round-robin: plan = %+v, %v", plan, err)
+	}
+}
+
+func TestExportOmitsPriority(t *testing.T) {
+	w := populated()
+	w.aliases["emb"] = alias.Alias{Name: "emb", Kind: alias.KindEmbeddings, Members: members("up-a/emb-1"), Strategy: alias.StrategyP2C}
+	doc, _ := exportDoc(t, w)
+	got := map[string]string{}
+	for _, a := range doc.Aliases {
+		got[a.Name] = a.Strategy
+	}
+	if want := map[string]string{"emb": "p2c", "fast": "", "inner": "round-robin"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("exported strategies = %v, want %v", got, want)
+	}
+}
+
+func TestPlanAccountStrategies(t *testing.T) {
+	w := populated()
+	doc, _ := exportDoc(t, w)
+	doc.AccountStrategies = map[string]string{"codex": "p2c"}
+	changes, err := w.service().Plan(context.Background(), doc, nil, true)
+	if want := []Change{{Op: "update", Kind: "account_strategy", Name: "codex", Fields: []string{"strategy"}}}; err != nil || !reflect.DeepEqual(changes, want) {
+		t.Errorf("differing: %+v, %v", changes, err)
+	}
+	w.strats["codex"] = alias.StrategyP2C
+	if changes, err := w.service().Plan(context.Background(), doc, nil, true); err != nil || len(changes) != 0 {
+		t.Errorf("equal: %+v, %v", changes, err)
+	}
+	w.strats["grok"] = alias.StrategyP2C
+	doc.AccountStrategies = nil
+	changes, err = w.service().Plan(context.Background(), doc, nil, true)
+	want := []Change{
+		{Op: "update", Kind: "account_strategy", Name: "codex", Fields: []string{"strategy"}},
+		{Op: "update", Kind: "account_strategy", Name: "grok", Fields: []string{"strategy"}},
+	}
+	if err != nil || !reflect.DeepEqual(changes, want) {
+		t.Errorf("prune resets: %+v, %v", changes, err)
+	}
+	if changes, err := w.service().Plan(context.Background(), doc, nil, false); err != nil || len(changes) != 0 {
+		t.Errorf("without prune an omitted provider is kept: %+v, %v", changes, err)
+	}
+}
+
+func TestApplyAccountStrategyAtomic(t *testing.T) {
+	w := populated()
+	doc, _ := exportDoc(t, w)
+	doc.Aliases[1].ContextWindow = 1000 // fast
+	doc.AccountStrategies = map[string]string{"codex": "least-used"}
+	doc.Keys = doc.Keys[:2] // prune deletes "off" after the strategy is written
+	w.failOn = "delete key off"
+	if _, err := w.service().Apply(context.Background(), doc, nil, true); err == nil {
+		t.Fatal("Apply succeeded")
+	}
+	if w.aliases["fast"].ContextWindow != 131072 || len(w.strats) != 0 || w.nudged != 0 {
+		t.Errorf("after a failed apply: fast %+v, strategies %v, nudged %d", w.aliases["fast"], w.strats, w.nudged)
+	}
+	w.failOn = ""
+	if _, err := w.service().Apply(context.Background(), doc, nil, true); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if w.strats["codex"] != alias.StrategyLeastUsed || w.nudged != 1 {
+		t.Errorf("after apply: strategies %v, nudged %d", w.strats, w.nudged)
+	}
+}
+
+func TestExportAccountStrategies(t *testing.T) {
+	w := populated()
+	if doc, _ := exportDoc(t, w); doc.AccountStrategies != nil {
+		t.Errorf("none set: %v", doc.AccountStrategies)
+	}
+	w.strats = map[string]alias.Strategy{"codex": alias.StrategyP2C, "grok": alias.StrategyRoundRobin}
+	doc, b := exportDoc(t, w)
+	if !reflect.DeepEqual(doc.AccountStrategies, map[string]string{"codex": "p2c"}) {
+		t.Errorf("exported %v", doc.AccountStrategies)
+	}
+	if err := checkSchema(b); err != nil {
+		t.Errorf("schema: %v", err)
 	}
 }

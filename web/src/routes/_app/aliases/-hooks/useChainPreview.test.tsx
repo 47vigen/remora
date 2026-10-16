@@ -6,7 +6,14 @@ import type { AliasDraft } from "../-lib/alias-form";
 import { client } from "../../../../client/client.gen";
 import { useChainPreview } from "./useChainPreview";
 
-const draft: AliasDraft = { name: "fast", kind: "chat", members: ["or/x"], capabilities: [], contextWindow: null };
+const draft: AliasDraft = {
+  name: "fast",
+  kind: "chat",
+  members: ["or/x"],
+  capabilities: [],
+  contextWindow: null,
+  strategy: "priority",
+};
 
 function wrapper({ children }: { children: ReactNode }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -39,7 +46,13 @@ test("compiles the draft once typing pauses and maps cooling targets", async () 
   expect(fetch).toHaveBeenCalledTimes(1);
   const req = fetch.mock.calls[0]![0] as Request;
   expect(new URL(req.url).pathname).toBe("/api/aliases/compile");
-  expect(await req.json()).toEqual({ name: "fast", kind: "chat", members: ["or/x"], capabilities: [] });
+  expect(await req.json()).toEqual({
+    name: "fast",
+    kind: "chat",
+    members: ["or/x"],
+    capabilities: [],
+    strategy: "priority",
+  });
 });
 
 test("a refused compile becomes the error message", async () => {

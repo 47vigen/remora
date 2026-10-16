@@ -43,21 +43,6 @@ func (e AccountLoginStatusStatus) Valid() bool {
 	}
 }
 
-// Defines values for AliasStrategy.
-const (
-	RoundRobin AliasStrategy = "round-robin"
-)
-
-// Valid indicates whether the value is a known member of the AliasStrategy enum.
-func (e AliasStrategy) Valid() bool {
-	switch e {
-	case RoundRobin:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for AliasKind.
 const (
 	Chat          AliasKind = "chat"
@@ -274,6 +259,36 @@ func (e QuotaSnapshotSource) Valid() bool {
 	}
 }
 
+// Defines values for RoutingStrategy.
+const (
+	FillFirst  RoutingStrategy = "fill-first"
+	LeastUsed  RoutingStrategy = "least-used"
+	P2c        RoutingStrategy = "p2c"
+	Priority   RoutingStrategy = "priority"
+	Random     RoutingStrategy = "random"
+	RoundRobin RoutingStrategy = "round-robin"
+)
+
+// Valid indicates whether the value is a known member of the RoutingStrategy enum.
+func (e RoutingStrategy) Valid() bool {
+	switch e {
+	case FillFirst:
+		return true
+	case LeastUsed:
+		return true
+	case P2c:
+		return true
+	case Priority:
+		return true
+	case Random:
+		return true
+	case RoundRobin:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SessionVia.
 const (
 	SessionViaSession SessionVia = "session"
@@ -357,15 +372,18 @@ func (e GetStatsParamsGroupBy) Valid() bool {
 
 // Account defines model for Account.
 type Account struct {
-	CooldownUntil *time.Time     `json:"cooldown_until,omitempty"`
-	Email         *string        `json:"email,omitempty"`
-	Enabled       bool           `json:"enabled"`
-	Id            string         `json:"id"`
-	Message       *string        `json:"message,omitempty"`
-	Models        []string       `json:"models"`
-	Provider      string         `json:"provider"`
-	Quota         []AccountQuota `json:"quota"`
-	Status        string         `json:"status"`
+	CooldownUntil *time.Time `json:"cooldown_until,omitempty"`
+	Email         *string    `json:"email,omitempty"`
+	Enabled       bool       `json:"enabled"`
+	Id            string     `json:"id"`
+	Message       *string    `json:"message,omitempty"`
+	Models        []string   `json:"models"`
+
+	// Priority Higher is tried first under the provider's `priority` and `fill-first` strategies; default 0.
+	Priority int            `json:"priority"`
+	Provider string         `json:"provider"`
+	Quota    []AccountQuota `json:"quota"`
+	Status   string         `json:"status"`
 }
 
 // AccountImport defines model for AccountImport.
@@ -424,9 +442,24 @@ type AccountQuota struct {
 	ResetAt           *time.Time `json:"reset_at,omitempty"`
 }
 
+// AccountStrategy defines model for AccountStrategy.
+type AccountStrategy struct {
+	Provider string `json:"provider"`
+
+	// Strategy Which member (alias) or account (subscription provider) a request tries first; "busy" counts the requests started in the last 60 seconds, and ties go to declared order. `priority`: the first live member in order / the highest priority tier, rotating inside it. `fill-first`: the same as priority for an alias / one account at a time, priority high first, then oldest. `round-robin`: a rotation over the live members / accounts. `random`: uniform over the live members / accounts. `p2c`: two live members / accounts at random, the less busy one wins. `least-used`: the least busy live member / account. An alias without a strategy is `priority`; it is always set in an answer.
+	Strategy RoutingStrategy `json:"strategy"`
+}
+
+// AccountStrategyList defines model for AccountStrategyList.
+type AccountStrategyList struct {
+	Items []AccountStrategy `json:"items"`
+	Total int               `json:"total"`
+}
+
 // AccountUpdate defines model for AccountUpdate.
 type AccountUpdate struct {
-	Enabled bool `json:"enabled"`
+	Enabled  *bool `json:"enabled,omitempty"`
+	Priority *int  `json:"priority,omitempty"`
 }
 
 // Alias defines model for Alias.
@@ -440,12 +473,9 @@ type Alias struct {
 	Members []string `json:"members"`
 	Name    string   `json:"name"`
 
-	// Strategy `round-robin` spreads requests over the compiled members at random with equal weight, falling back in order; absent, the members are tried in order.
-	Strategy *AliasStrategy `json:"strategy,omitempty"`
+	// Strategy Which member (alias) or account (subscription provider) a request tries first; "busy" counts the requests started in the last 60 seconds, and ties go to declared order. `priority`: the first live member in order / the highest priority tier, rotating inside it. `fill-first`: the same as priority for an alias / one account at a time, priority high first, then oldest. `round-robin`: a rotation over the live members / accounts. `random`: uniform over the live members / accounts. `p2c`: two live members / accounts at random, the less busy one wins. `least-used`: the least busy live member / account. An alias without a strategy is `priority`; it is always set in an answer.
+	Strategy *RoutingStrategy `json:"strategy,omitempty"`
 }
-
-// AliasStrategy `round-robin` spreads requests over the compiled members at random with equal weight, falling back in order; absent, the members are tried in order.
-type AliasStrategy string
 
 // AliasChain defines model for AliasChain.
 type AliasChain struct {
@@ -835,6 +865,9 @@ type QuotaWindow struct {
 	Window string `json:"window"`
 }
 
+// RoutingStrategy Which member (alias) or account (subscription provider) a request tries first; "busy" counts the requests started in the last 60 seconds, and ties go to declared order. `priority`: the first live member in order / the highest priority tier, rotating inside it. `fill-first`: the same as priority for an alias / one account at a time, priority high first, then oldest. `round-robin`: a rotation over the live members / accounts. `random`: uniform over the live members / accounts. `p2c`: two live members / accounts at random, the less busy one wins. `least-used`: the least busy live member / account. An alias without a strategy is `priority`; it is always set in an answer.
+type RoutingStrategy string
+
 // Session defines model for Session.
 type Session struct {
 	Authenticated bool       `json:"authenticated"`
@@ -965,6 +998,21 @@ type ListAccountsParams struct {
 
 	// Provider A subscription provider, e.g. `codex`.
 	Provider *string `form:"provider,omitempty" json:"provider,omitempty"`
+}
+
+// ListAccountStrategiesParams defines parameters for ListAccountStrategies.
+type ListAccountStrategiesParams struct {
+	// Limit The page size.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset The number of items to skip.
+	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// SetAccountStrategyJSONBody defines parameters for SetAccountStrategy.
+type SetAccountStrategyJSONBody struct {
+	// Strategy Which member (alias) or account (subscription provider) a request tries first; "busy" counts the requests started in the last 60 seconds, and ties go to declared order. `priority`: the first live member in order / the highest priority tier, rotating inside it. `fill-first`: the same as priority for an alias / one account at a time, priority high first, then oldest. `round-robin`: a rotation over the live members / accounts. `random`: uniform over the live members / accounts. `p2c`: two live members / accounts at random, the less busy one wins. `least-used`: the least busy live member / account. An alias without a strategy is `priority`; it is always set in an answer.
+	Strategy RoutingStrategy `json:"strategy"`
 }
 
 // ListAliasesParams defines parameters for ListAliases.
@@ -1107,6 +1155,9 @@ type StartAccountLoginJSONRequestBody = AccountLoginStart
 
 // CompleteAccountLoginJSONRequestBody defines body for CompleteAccountLogin for application/json ContentType.
 type CompleteAccountLoginJSONRequestBody = AccountLoginComplete
+
+// SetAccountStrategyJSONRequestBody defines body for SetAccountStrategy for application/json ContentType.
+type SetAccountStrategyJSONRequestBody SetAccountStrategyJSONBody
 
 // UpdateAccountJSONRequestBody defines body for UpdateAccount for application/json ContentType.
 type UpdateAccountJSONRequestBody = AccountUpdate
@@ -1288,19 +1339,38 @@ type ClientInterface interface {
 	// Corresponds with GET /api/accounts/pool (the `GetAccountPool` operationId).
 	GetAccountPool(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListAccountStrategies The routing strategy of every subscription provider's account pool.
+	//
+	// Corresponds with GET /api/accounts/strategies (the `ListAccountStrategies` operationId).
+	ListAccountStrategies(ctx context.Context, params *ListAccountStrategiesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetAccountStrategyWithBody Set which account of a subscription provider serves a request.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /api/accounts/strategies/{provider} (the `SetAccountStrategy` operationId).
+	SetAccountStrategyWithBody(ctx context.Context, provider string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetAccountStrategy Set which account of a subscription provider serves a request.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PUT /api/accounts/strategies/{provider} (the `SetAccountStrategy` operationId).
+	SetAccountStrategy(ctx context.Context, provider string, body SetAccountStrategyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// DeleteAccount Delete an account.
 	//
 	// Corresponds with DELETE /api/accounts/{id} (the `DeleteAccount` operationId).
 	DeleteAccount(ctx context.Context, id AccountId, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// UpdateAccountWithBody Enable or disable an account.
+	// UpdateAccountWithBody Enable or disable an account, or set its priority.
 	//
 	// Takes any type of body and a specified content type.
 	//
 	// Corresponds with PATCH /api/accounts/{id} (the `UpdateAccount` operationId).
 	UpdateAccountWithBody(ctx context.Context, id AccountId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// UpdateAccount Enable or disable an account.
+	// UpdateAccount Enable or disable an account, or set its priority.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -1789,6 +1859,55 @@ func (c *Client) GetAccountPool(ctx context.Context, reqEditors ...RequestEditor
 	return c.Client.Do(req)
 }
 
+// ListAccountStrategies The routing strategy of every subscription provider's account pool.
+//
+// Corresponds with GET /api/accounts/strategies (the `ListAccountStrategies` operationId).
+func (c *Client) ListAccountStrategies(ctx context.Context, params *ListAccountStrategiesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListAccountStrategiesRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetAccountStrategyWithBody Set which account of a subscription provider serves a request.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /api/accounts/strategies/{provider} (the `SetAccountStrategy` operationId).
+func (c *Client) SetAccountStrategyWithBody(ctx context.Context, provider string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetAccountStrategyRequestWithBody(c.Server, provider, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetAccountStrategy Set which account of a subscription provider serves a request.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PUT /api/accounts/strategies/{provider} (the `SetAccountStrategy` operationId).
+func (c *Client) SetAccountStrategy(ctx context.Context, provider string, body SetAccountStrategyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetAccountStrategyRequest(c.Server, provider, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // DeleteAccount Delete an account.
 //
 // Corresponds with DELETE /api/accounts/{id} (the `DeleteAccount` operationId).
@@ -1804,7 +1923,7 @@ func (c *Client) DeleteAccount(ctx context.Context, id AccountId, reqEditors ...
 	return c.Client.Do(req)
 }
 
-// UpdateAccountWithBody Enable or disable an account.
+// UpdateAccountWithBody Enable or disable an account, or set its priority.
 //
 // Takes any type of body and a specified content type.
 //
@@ -1821,7 +1940,7 @@ func (c *Client) UpdateAccountWithBody(ctx context.Context, id AccountId, conten
 	return c.Client.Do(req)
 }
 
-// UpdateAccount Enable or disable an account.
+// UpdateAccount Enable or disable an account, or set its priority.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -2973,6 +3092,119 @@ func NewGetAccountPoolRequest(server string) (*http.Request, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewListAccountStrategiesRequest constructs an http.Request for the ListAccountStrategies method
+func NewListAccountStrategiesRequest(server string, params *ListAccountStrategiesParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/accounts/strategies")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Offset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "offset", *params.Offset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewSetAccountStrategyRequest calls the generic SetAccountStrategy builder with application/json body
+func NewSetAccountStrategyRequest(server string, provider string, body SetAccountStrategyJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSetAccountStrategyRequestWithBody(server, provider, "application/json", bodyReader)
+}
+
+// NewSetAccountStrategyRequestWithBody constructs an http.Request for the SetAccountStrategy method, with any body, and a specified content type
+func NewSetAccountStrategyRequestWithBody(server string, provider string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "provider", provider, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/accounts/strategies/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -5026,6 +5258,27 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /api/accounts/pool (the `GetAccountPool` operationId).
 	GetAccountPoolWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetAccountPoolResponse, error)
 
+	// ListAccountStrategiesWithResponse The routing strategy of every subscription provider's account pool.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/accounts/strategies (the `ListAccountStrategies` operationId).
+	ListAccountStrategiesWithResponse(ctx context.Context, params *ListAccountStrategiesParams, reqEditors ...RequestEditorFn) (*ListAccountStrategiesResponse, error)
+
+	// SetAccountStrategyWithBodyWithResponse Set which account of a subscription provider serves a request.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/accounts/strategies/{provider} (the `SetAccountStrategy` operationId).
+	SetAccountStrategyWithBodyWithResponse(ctx context.Context, provider string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetAccountStrategyResponse, error)
+
+	// SetAccountStrategyWithResponse Set which account of a subscription provider serves a request.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/accounts/strategies/{provider} (the `SetAccountStrategy` operationId).
+	SetAccountStrategyWithResponse(ctx context.Context, provider string, body SetAccountStrategyJSONRequestBody, reqEditors ...RequestEditorFn) (*SetAccountStrategyResponse, error)
+
 	// DeleteAccountWithResponse Delete an account.
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -5033,14 +5286,14 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with DELETE /api/accounts/{id} (the `DeleteAccount` operationId).
 	DeleteAccountWithResponse(ctx context.Context, id AccountId, reqEditors ...RequestEditorFn) (*DeleteAccountResponse, error)
 
-	// UpdateAccountWithBodyWithResponse Enable or disable an account.
+	// UpdateAccountWithBodyWithResponse Enable or disable an account, or set its priority.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with PATCH /api/accounts/{id} (the `UpdateAccount` operationId).
 	UpdateAccountWithBodyWithResponse(ctx context.Context, id AccountId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateAccountResponse, error)
 
-	// UpdateAccountWithResponse Enable or disable an account.
+	// UpdateAccountWithResponse Enable or disable an account, or set its priority.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -5731,6 +5984,102 @@ func (r GetAccountPoolResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetAccountPoolResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListAccountStrategiesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *AccountStrategyList
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListAccountStrategiesResponse) GetJSON200() *AccountStrategyList {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ListAccountStrategiesResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ListAccountStrategiesResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListAccountStrategiesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListAccountStrategiesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListAccountStrategiesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type SetAccountStrategyResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *AccountStrategy
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r SetAccountStrategyResponse) GetJSON200() *AccountStrategy {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r SetAccountStrategyResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r SetAccountStrategyResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r SetAccountStrategyResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SetAccountStrategyResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r SetAccountStrategyResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -7747,6 +8096,45 @@ func (c *ClientWithResponses) GetAccountPoolWithResponse(ctx context.Context, re
 	return ParseGetAccountPoolResponse(rsp)
 }
 
+// ListAccountStrategiesWithResponse The routing strategy of every subscription provider's account pool.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/accounts/strategies (the `ListAccountStrategies` operationId).
+func (c *ClientWithResponses) ListAccountStrategiesWithResponse(ctx context.Context, params *ListAccountStrategiesParams, reqEditors ...RequestEditorFn) (*ListAccountStrategiesResponse, error) {
+	rsp, err := c.ListAccountStrategies(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListAccountStrategiesResponse(rsp)
+}
+
+// SetAccountStrategyWithBodyWithResponse Set which account of a subscription provider serves a request.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/accounts/strategies/{provider} (the `SetAccountStrategy` operationId).
+func (c *ClientWithResponses) SetAccountStrategyWithBodyWithResponse(ctx context.Context, provider string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetAccountStrategyResponse, error) {
+	rsp, err := c.SetAccountStrategyWithBody(ctx, provider, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetAccountStrategyResponse(rsp)
+}
+
+// SetAccountStrategyWithResponse Set which account of a subscription provider serves a request.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/accounts/strategies/{provider} (the `SetAccountStrategy` operationId).
+func (c *ClientWithResponses) SetAccountStrategyWithResponse(ctx context.Context, provider string, body SetAccountStrategyJSONRequestBody, reqEditors ...RequestEditorFn) (*SetAccountStrategyResponse, error) {
+	rsp, err := c.SetAccountStrategy(ctx, provider, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetAccountStrategyResponse(rsp)
+}
+
 // DeleteAccountWithResponse Delete an account.
 //
 // Returns a wrapper object for the known response body format(s).
@@ -7760,7 +8148,7 @@ func (c *ClientWithResponses) DeleteAccountWithResponse(ctx context.Context, id 
 	return ParseDeleteAccountResponse(rsp)
 }
 
-// UpdateAccountWithBodyWithResponse Enable or disable an account.
+// UpdateAccountWithBodyWithResponse Enable or disable an account, or set its priority.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -7773,7 +8161,7 @@ func (c *ClientWithResponses) UpdateAccountWithBodyWithResponse(ctx context.Cont
 	return ParseUpdateAccountResponse(rsp)
 }
 
-// UpdateAccountWithResponse Enable or disable an account.
+// UpdateAccountWithResponse Enable or disable an account, or set its priority.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -8665,6 +9053,72 @@ func ParseGetAccountPoolResponse(rsp *http.Response) (*GetAccountPoolResponse, e
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest []AccountPool
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListAccountStrategiesResponse parses an HTTP response from a ListAccountStrategiesWithResponse call
+func ParseListAccountStrategiesResponse(rsp *http.Response) (*ListAccountStrategiesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListAccountStrategiesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AccountStrategyList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSetAccountStrategyResponse parses an HTTP response from a SetAccountStrategyWithResponse call
+func ParseSetAccountStrategyResponse(rsp *http.Response) (*SetAccountStrategyResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SetAccountStrategyResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AccountStrategy
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -10028,10 +10482,16 @@ type ServerInterface interface {
 	// GetAccountPool Enabled subscription accounts that dropped out of the pool, per provider.
 	// (GET /api/accounts/pool)
 	GetAccountPool(w http.ResponseWriter, r *http.Request)
+	// ListAccountStrategies The routing strategy of every subscription provider's account pool.
+	// (GET /api/accounts/strategies)
+	ListAccountStrategies(w http.ResponseWriter, r *http.Request, params ListAccountStrategiesParams)
+	// SetAccountStrategy Set which account of a subscription provider serves a request.
+	// (PUT /api/accounts/strategies/{provider})
+	SetAccountStrategy(w http.ResponseWriter, r *http.Request, provider string)
 	// DeleteAccount Delete an account.
 	// (DELETE /api/accounts/{id})
 	DeleteAccount(w http.ResponseWriter, r *http.Request, id AccountId)
-	// UpdateAccount Enable or disable an account.
+	// UpdateAccount Enable or disable an account, or set its priority.
 	// (PATCH /api/accounts/{id})
 	UpdateAccount(w http.ResponseWriter, r *http.Request, id AccountId)
 	// ResetAccountCooldown Clear an account's cooldown so it serves requests again.
@@ -10342,6 +10802,78 @@ func (siw *ServerInterfaceWrapper) GetAccountPool(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetAccountPool(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListAccountStrategies operation middleware
+func (siw *ServerInterfaceWrapper) ListAccountStrategies(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListAccountStrategiesParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAccountStrategies(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetAccountStrategy operation middleware
+func (siw *ServerInterfaceWrapper) SetAccountStrategy(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "provider" -------------
+	var provider string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "provider", r.PathValue("provider"), &provider, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "provider", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetAccountStrategy(w, r, provider)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -11761,6 +12293,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/providers/{name}/test", wrapper.TestProvider)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/accounts", wrapper.ListAccounts)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/accounts/pool", wrapper.GetAccountPool)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/accounts/strategies", wrapper.ListAccountStrategies)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/accounts/strategies/{provider}", wrapper.SetAccountStrategy)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/quota", wrapper.GetQuota)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/quota/refresh", wrapper.RefreshQuota)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/accounts/logins", wrapper.StartAccountLogin)
@@ -12051,6 +12585,85 @@ type GetAccountPooldefaultJSONResponse struct {
 }
 
 func (response GetAccountPooldefaultJSONResponse) VisitGetAccountPoolResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAccountStrategiesRequestObject struct {
+	Params ListAccountStrategiesParams
+}
+
+type ListAccountStrategiesResponseObject interface {
+	VisitListAccountStrategiesResponse(w http.ResponseWriter) error
+}
+
+type ListAccountStrategies200JSONResponse AccountStrategyList
+
+func (response ListAccountStrategies200JSONResponse) VisitListAccountStrategiesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAccountStrategiesdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListAccountStrategiesdefaultJSONResponse) VisitListAccountStrategiesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetAccountStrategyRequestObject struct {
+	Provider string `json:"provider"`
+	Body     *SetAccountStrategyJSONRequestBody
+}
+
+type SetAccountStrategyResponseObject interface {
+	VisitSetAccountStrategyResponse(w http.ResponseWriter) error
+}
+
+type SetAccountStrategy200JSONResponse AccountStrategy
+
+func (response SetAccountStrategy200JSONResponse) VisitSetAccountStrategyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetAccountStrategydefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response SetAccountStrategydefaultJSONResponse) VisitSetAccountStrategyResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -13620,10 +14233,16 @@ type StrictServerInterface interface {
 	// GetAccountPool Enabled subscription accounts that dropped out of the pool, per provider.
 	// (GET /api/accounts/pool)
 	GetAccountPool(ctx context.Context, request GetAccountPoolRequestObject) (GetAccountPoolResponseObject, error)
+	// ListAccountStrategies The routing strategy of every subscription provider's account pool.
+	// (GET /api/accounts/strategies)
+	ListAccountStrategies(ctx context.Context, request ListAccountStrategiesRequestObject) (ListAccountStrategiesResponseObject, error)
+	// SetAccountStrategy Set which account of a subscription provider serves a request.
+	// (PUT /api/accounts/strategies/{provider})
+	SetAccountStrategy(ctx context.Context, request SetAccountStrategyRequestObject) (SetAccountStrategyResponseObject, error)
 	// DeleteAccount Delete an account.
 	// (DELETE /api/accounts/{id})
 	DeleteAccount(ctx context.Context, request DeleteAccountRequestObject) (DeleteAccountResponseObject, error)
-	// UpdateAccount Enable or disable an account.
+	// UpdateAccount Enable or disable an account, or set its priority.
 	// (PATCH /api/accounts/{id})
 	UpdateAccount(ctx context.Context, request UpdateAccountRequestObject) (UpdateAccountResponseObject, error)
 	// ResetAccountCooldown Clear an account's cooldown so it serves requests again.
@@ -13971,6 +14590,65 @@ func (sh *strictHandler) GetAccountPool(w http.ResponseWriter, r *http.Request) 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetAccountPoolResponseObject); ok {
 		if err := validResponse.VisitGetAccountPoolResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListAccountStrategies operation middleware
+func (sh *strictHandler) ListAccountStrategies(w http.ResponseWriter, r *http.Request, params ListAccountStrategiesParams) {
+	var request ListAccountStrategiesRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListAccountStrategies(ctx, request.(ListAccountStrategiesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListAccountStrategies")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListAccountStrategiesResponseObject); ok {
+		if err := validResponse.VisitListAccountStrategiesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetAccountStrategy operation middleware
+func (sh *strictHandler) SetAccountStrategy(w http.ResponseWriter, r *http.Request, provider string) {
+	var request SetAccountStrategyRequestObject
+
+	request.Provider = provider
+
+	var body SetAccountStrategyJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetAccountStrategy(ctx, request.(SetAccountStrategyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetAccountStrategy")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetAccountStrategyResponseObject); ok {
+		if err := validResponse.VisitSetAccountStrategyResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

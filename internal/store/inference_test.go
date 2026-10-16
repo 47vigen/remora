@@ -354,7 +354,7 @@ func TestAliases(t *testing.T) {
 		t.Errorf("alias_members after DeleteAlias = (%d, %v), want 0", n, err)
 	}
 
-	fast := alias.Alias{Name: "fast", Kind: alias.KindEmbeddings, Members: []alias.Member{{Ref: "up-a/m1"}}}
+	fast := alias.Alias{Name: "fast", Kind: alias.KindEmbeddings, Members: []alias.Member{{Ref: "up-a/m1"}}, Strategy: alias.StrategyPriority}
 	write(t, s, func(ctx context.Context, tx *Tx) error {
 		if err := tx.PutAlias(ctx, fast); err != nil {
 			return err
@@ -381,6 +381,17 @@ func TestAliases(t *testing.T) {
 	}
 	if err := s.Write(ctx, func(tx *Tx) error { return tx.SetAliasRuleID(ctx, "nope", "r") }); !errors.Is(err, ErrNotFound) {
 		t.Errorf("SetAliasRuleID(nope) err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestPutAliasDefaultsStrategy(t *testing.T) {
+	s := openSealed(t)
+	write(t, s, func(ctx context.Context, tx *Tx) error {
+		return tx.PutAlias(ctx, alias.Alias{Name: "a", Kind: alias.KindChat, Members: []alias.Member{{Ref: "up-a/m1"}}})
+	})
+	all, err := s.Aliases(t.Context())
+	if err != nil || all["a"].Strategy != alias.StrategyPriority {
+		t.Errorf("Aliases = (%+v, %v), want strategy priority", all, err)
 	}
 }
 

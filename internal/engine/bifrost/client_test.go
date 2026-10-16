@@ -187,20 +187,6 @@ func TestClient_Requests(t *testing.T) {
 			"targets":   []any{map[string]any{"provider": "up-a", "model": "m1", "weight": 1.0}},
 			"fallbacks": []any{map[string]any{"provider": "up-b", "model": "m1"}},
 		}, nil},
-		{"create spread rule", func(c *Client) error {
-			_, err := c.CreateRoutingRule(ctx, RoutingRule{
-				Name: "remora:alias:fast", CEL: `model == "fast"`,
-				Target: Route{"up-a", "m1"}, Spread: []Route{{"up-b", "m1"}, {"up-c", "m1"}, {"up-d", "m1"}},
-			})
-			return err
-		}, "POST", "/api/routing/rules", map[string]any{
-			"targets": []any{
-				map[string]any{"provider": "up-a", "model": "m1", "weight": 0.25},
-				map[string]any{"provider": "up-b", "model": "m1", "weight": 0.25},
-				map[string]any{"provider": "up-c", "model": "m1", "weight": 0.25},
-				map[string]any{"provider": "up-d", "model": "m1", "weight": 0.25},
-			},
-		}, nil},
 		{"update rule", func(c *Client) error {
 			return c.UpdateRoutingRule(ctx, RoutingRule{
 				ID: "r1", Name: "remora:alias:fast", CEL: `model == "fast"`, Target: Route{"up-a", "m1"}, Priority: 3,
@@ -388,7 +374,8 @@ func TestClient_ListsDecode(t *testing.T) {
 	}
 	wantRules := []RoutingRule{
 		{
-			ID: "r1", Name: "n", CEL: "c", Priority: 2, Target: Route{"up-a", "m1"}, Spread: []Route{{"up-x", "m9"}},
+			ID: "r1", Name: "n", CEL: "c", Priority: 2, Target: Route{"up-a", "m1"}, // an old spread rule reads as its first target
+
 			Fallbacks: []Route{{"up-b", "org/m2"}, {"up-c", "m3"}},
 		},
 		{ID: "r2", Name: "o", CEL: "true", Target: Route{"remora-oauth", ""}},
@@ -457,5 +444,12 @@ func TestIsStandardProvider(t *testing.T) {
 		if got := IsStandardProvider(name); got != want {
 			t.Errorf("IsStandardProvider(%q) = %v, want %v", name, got, want)
 		}
+	}
+}
+
+func TestRuleWireSingleTarget(t *testing.T) {
+	w := ruleWire(RoutingRule{Name: "n", CEL: "c", Target: Route{"up-a", "m1"}, Fallbacks: []Route{{"up-b", "m1"}}})
+	if len(w.Targets) != 1 || w.Targets[0].Provider != "up-a" || *w.Targets[0].Model != "m1" || w.Targets[0].Weight != 1 {
+		t.Errorf("targets = %+v, want one at weight 1", w.Targets)
 	}
 }

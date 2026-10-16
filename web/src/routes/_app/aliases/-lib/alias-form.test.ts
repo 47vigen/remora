@@ -1,6 +1,8 @@
 import type { Alias } from "../../../../client";
 import {
+  ALIAS_STRATEGIES,
   type AliasDraft,
+  EMPTY_DRAFT,
   aliasFromDraft,
   chainNodes,
   draftFromAlias,
@@ -17,6 +19,7 @@ const d: AliasDraft = {
   members: ["openrouter/x", "free"],
   capabilities: [],
   contextWindow: null,
+  strategy: "priority",
 };
 
 test("valid", () => expect(validateAliasDraft(d)).toEqual({}));
@@ -49,12 +52,31 @@ test("memberOptions merges sources with the same name and skips duplicates", () 
 });
 test("draft and alias convert both ways; an empty context window is left out", () => {
   const alias = aliasFromDraft({ ...d, name: " fast " });
-  expect(alias).toEqual({ name: "fast", kind: "chat", members: ["openrouter/x", "free"], capabilities: [] });
+  expect(alias).toEqual({
+    name: "fast",
+    kind: "chat",
+    members: ["openrouter/x", "free"],
+    capabilities: [],
+    strategy: "priority",
+  });
   expect(draftFromAlias({ ...alias, context_window: 8000 })).toEqual({ ...d, contextWindow: 8000 });
 });
 test("a loaded strategy survives a save", () => {
-  const alias: Alias = { name: "fast", kind: "chat", members: ["or/x"], capabilities: [], strategy: "round-robin" };
+  const alias: Alias = { name: "fast", kind: "chat", members: ["or/x"], capabilities: [], strategy: "p2c" };
   expect(aliasFromDraft(draftFromAlias(alias))).toEqual(alias);
+});
+test("a new draft is priority, and a save always sends the strategy", () => {
+  expect(EMPTY_DRAFT.strategy).toBe("priority");
+  const { strategy: _, ...withoutStrategy } = { name: "x", kind: "chat", members: ["or/x"], capabilities: [] } as Alias;
+  expect(aliasFromDraft(draftFromAlias(withoutStrategy)).strategy).toBe("priority");
+  expect(ALIAS_STRATEGIES.map((s) => s.id)).toEqual([
+    "priority",
+    "fill-first",
+    "round-robin",
+    "random",
+    "p2c",
+    "least-used",
+  ]);
 });
 test("toAliasTargets marks cooling targets", () => {
   expect(

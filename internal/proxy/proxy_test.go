@@ -1006,3 +1006,71 @@ func TestProxy_NonStreamStripsExtraFields(t *testing.T) {
 		t.Fatal("an OAuth engine header reached the client")
 	}
 }
+
+// withSpread stores alias "spread" (random over up-a, up-b, up-c) and gives the proxy a picker that always picks
+// up-b/m1 for it.
+func (f *fixture) withSpread(t *testing.T) *Picker {
+	t.Helper()
+	ctx := context.Background()
+	err := f.st.Write(ctx, func(tx *store.Tx) error {
+		return tx.PutAlias(ctx, alias.Alias{
+			Name: "spread", Kind: alias.KindChat, Strategy: alias.StrategyRandom,
+			Members: []alias.Member{{Ref: "up-a/m1"}, {Ref: "up-b/m1"}, {Ref: "up-c/m1"}},
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := NewPicker(nil, func(int) int { return 1 })
+	p.SetChains(map[string]alias.Chain{"spread": {Strategy: alias.StrategyRandom, Members: []string{"up-a/m1", "up-b/m1", "up-c/m1"}}})
+	f.px.Picker = p
+	return p
+}
+
+func TestRewriteReplacesClientFirstHeader(t *testing.T) {
+	f := newFixture(t)
+	f.withSpread(t)
+	for _, name := range []string{"X-Remora-First", "x-remora-first", "X-REMORA-FIRST"} {
+		for _, tc := range []struct{ model, want string }{{"spread", "up-b/m1"}, {"fast", ""}, {"up-a/m1", ""}} {
+			resp := f.do(t, http.MethodPost, "/v1/chat/completions", keyFull, "application/json", chatBody(tc.model),
+				map[string]string{name: "up-c/m1"})
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("%s: status = %d %s", tc.model, resp.StatusCode, resp.Body)
+			}
+			if got := f.seen().header.Values(alias.FirstHeader); (tc.want == "" && len(got) != 0) || (tc.want != "" && (len(got) != 1 || got[0] != tc.want)) {
+				t.Errorf("%s with %s: upstream saw %q, want %q", tc.model, name, got, tc.want)
+			}
+		}
+	}
+}
+
+func TestStartedCountsServedBy(t *testing.T) {
+	f := newFixture(t)
+	p := f.withSpread(t)
+	f.px.OnResponse(ServedByHook(func(provider, model string) string {
+		if provider == "remora-oauth" {
+			return model
+		}
+		return ""
+	}))
+	serve := func(provider, model string) {
+		f.upstream(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set(headerRoutingProvider, provider)
+			w.Header().Set(headerRoutingModel, model)
+			okJSON(w, r)
+		})
+		if resp := f.do(t, http.MethodPost, "/v1/chat/completions", keyFull, "application/json", chatBody("spread"), nil); resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d", resp.StatusCode)
+		}
+	}
+	serve("up-b", "m1") // picked up-b/m1, but count where it landed
+	serve("up-c", "m1")
+	if a, b, c := p.starts("up-a/m1"), p.starts("up-b/m1"), p.starts("up-c/m1"); a != 0 || b != 1 || c != 1 {
+		t.Errorf("starts a=%d b=%d c=%d, want 0 1 1", a, b, c)
+	}
+	p.SetChains(map[string]alias.Chain{"spread": {Strategy: alias.StrategyRandom, Members: []string{"up-a/m1", "codex/m"}}})
+	serve("remora-oauth", "codex/m") // the renamed served-by value is what counts
+	if got := p.starts("codex/m"); got != 1 {
+		t.Errorf("starts(codex/m) = %d, want 1", got)
+	}
+}

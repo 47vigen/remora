@@ -54,6 +54,7 @@ type Quota struct {
 type Account struct {
 	ID, Provider, Email, Status, Message string
 	Enabled                              bool
+	Priority                             int
 	CooldownUntil                        *time.Time
 	Quota                                []Quota
 	Models                               []string
@@ -77,6 +78,13 @@ type Accounts interface {
 	ResetCooldown(ctx context.Context, id string) error
 	Import(ctx context.Context, provider string, credential []byte) (Account, error)
 	Pool(ctx context.Context) ([]accounts.PoolStatus, error)
+	SetPriority(ctx context.Context, id string, priority int) error
+	// Strategies lists every subscription provider's strategy, round-robin when none is set.
+	Strategies(ctx context.Context) (map[string]alias.Strategy, error)
+	// SetStrategy stores a provider's strategy and applies it; inside a Batch it joins the batch's transaction and
+	// Reconcile applies it after the commit.
+	SetStrategy(ctx context.Context, provider string, st alias.Strategy) error
+	Reconcile(ctx context.Context) error
 }
 
 // Quotas reads subscription accounts' quota and queues checks. Account ids are decimal strings.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 )
 
 // ApplyError is the failure of one change during Apply.
@@ -48,6 +49,11 @@ func (s *Service) Apply(ctx context.Context, want File, sec Secrets, prune bool)
 	}
 	if err != nil {
 		return []Change{}, err
+	}
+	// The engine follows the committed strategies through the accounts reconciler, which retries on its own loop, so
+	// an engine failure here never turns a committed apply into an error.
+	if s.as != nil && slices.ContainsFunc(applied, func(c Change) bool { return c.Kind == "account_strategy" }) {
+		_ = s.as.Reconcile(ctx)
 	}
 	return applied, nil
 }

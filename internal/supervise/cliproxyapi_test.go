@@ -2,6 +2,7 @@ package supervise
 
 import (
 	"os"
+	"reflect"
 	"testing"
 
 	"go.yaml.in/yaml/v3"
@@ -11,7 +12,8 @@ import (
 // start, so they hold even when a management write lands in the engine's blind window right after it boots.
 func TestCLIProxyAPIEngineRendersSettings(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := CLIProxyAPIEngine(testConfig(dir), testCreds); err != nil {
+	strategies := map[string]string{"codex": "p2c", "xai": "round-robin"}
+	if _, err := CLIProxyAPIEngine(testConfig(dir), testCreds, strategies); err != nil {
 		t.Fatalf("CLIProxyAPIEngine: %v", err)
 	}
 	raw, err := os.ReadFile(dir + "/cliproxyapi/config.yaml") //nolint:gosec // G304: a path under t.TempDir().
@@ -52,6 +54,9 @@ func TestCLIProxyAPIEngineRendersSettings(t *testing.T) {
 		{[]string{"oauth", "providers", "antigravity", "connection-pool", "enabled"}, true},
 		{[]string{"oauth", "providers", "antigravity", "connection-pool", "idle-conn-timeout"}, "90s"},
 		{[]string{"oauth", "providers", "antigravity", "connection-pool", "max-idle-conns-per-host"}, 8},
+	}
+	if got := get("routing", "provider-strategies"); !reflect.DeepEqual(got, map[string]any{"codex": "p2c", "xai": "round-robin"}) {
+		t.Errorf("routing.provider-strategies = %#v", got)
 	}
 	for _, c := range checks {
 		if got := get(c.path...); got != c.want {

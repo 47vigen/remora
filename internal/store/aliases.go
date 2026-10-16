@@ -1,6 +1,7 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 
@@ -88,7 +89,7 @@ ON CONFLICT (name) DO UPDATE SET
   context_window = excluded.context_window,
   strategy = excluded.strategy,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
-		a.Name, string(a.Kind), encodeList(a.Capabilities), a.ContextWindow, string(a.Strategy))
+		a.Name, string(a.Kind), encodeList(a.Capabilities), a.ContextWindow, string(cmp.Or(a.Strategy, alias.StrategyPriority)))
 	if err != nil {
 		return fmt.Errorf("store: put alias %q: %w", a.Name, mapErr(err))
 	}

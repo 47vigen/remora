@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -385,46 +386,225 @@ func TestSync_NestedAliasFlattened(t *testing.T) {
 	}
 }
 
-func TestSync_RoundRobinAliasSpreadsTheFirstTry(t *testing.T) {
+func spreading(name string, st alias.Strategy, refs ...string) alias.Alias {
+	a := chat(name, refs...)
+	a.Strategy = st
+	return a
+}
+
+var upABC = []store.Provider{custom("up-a"), custom("up-b"), custom("up-c")}
+
+func route(ref string) bifrost.Route {
+	p, m, _ := strings.Cut(ref, "/")
+	return bifrost.Route{Provider: p, Model: m}
+}
+
+func routes(refs ...string) []bifrost.Route {
+	out := make([]bifrost.Route, 0, len(refs))
+	for _, r := range refs {
+		out = append(out, route(r))
+	}
+	return out
+}
+
+// memberRules returns the n member rules of alias name, failing unless exactly n exist with one rule each.
+func (h *harness) memberRules(t *testing.T, name string, n int) []bifrost.RoutingRule {
+	t.Helper()
+	var out []bifrost.RoutingRule
+	for i := 1; i <= n; i++ {
+		rs := h.eng.RulesNamed(MemberRuleName(name, i))
+		if len(rs) != 1 {
+			t.Fatalf("rules %s = %+v", MemberRuleName(name, i), rs)
+		}
+		out = append(out, rs[0])
+	}
+	if rs := h.eng.RulesNamed(MemberRuleName(name, n+1)); len(rs) != 0 {
+		t.Fatalf("extra member rule %s = %+v", MemberRuleName(name, n+1), rs)
+	}
+	return out
+}
+
+func TestSync_SpreadingAliasRulePerMember(t *testing.T) {
 	h := newHarness(t)
-	rr := chat("spread", "inner", "up-c/m1")
-	rr.Strategy = alias.StrategyRoundRobin
-	h.write(t, putAll([]store.Provider{custom("up-a"), custom("up-b"), custom("up-c")},
-		chat("inner", "up-a/m1", "up-b/m1"), rr))
+	refs := []string{"up-a/m1", "up-b/m1", "up-c/m1"}
+	h.write(t, putAll(upABC, spreading("spread", alias.StrategyRandom, refs...)))
 	h.sync(t)
-	rules := h.eng.RulesNamed(RuleName("spread"))
-	if len(rules) != 1 {
-		t.Fatalf("rules = %+v", rules)
+	def := h.eng.RulesNamed(RuleName("spread"))
+	if len(def) != 1 || def[0].CEL != DefaultRuleCEL("spread", refs) || def[0].Target != route(refs[0]) ||
+		!reflect.DeepEqual(def[0].Fallbacks, routes(refs[1], refs[2])) {
+		t.Fatalf("default rule = %+v", def)
 	}
-	r := rules[0]
-	chain := []bifrost.Route{{Provider: "up-a", Model: "m1"}, {Provider: "up-b", Model: "m1"}, {Provider: "up-c", Model: "m1"}}
-	if r.Target != chain[0] || !reflect.DeepEqual(r.Spread, chain[1:]) || !reflect.DeepEqual(r.Fallbacks, chain) {
-		t.Errorf("rule = %+v, want target %v spread %v fallbacks %v", r, chain[0], chain[1:], chain)
+	ms := h.memberRules(t, "spread", 3)
+	prios := map[int]bool{def[0].Priority: true}
+	for i, r := range ms {
+		want := append(slices.Clone(refs[i+1:]), refs[:i]...)
+		if r.CEL != MemberRuleCEL("spread", refs[i]) || r.Target != route(refs[i]) || !reflect.DeepEqual(r.Fallbacks, routes(want...)) {
+			t.Errorf("member rule %d = %+v, want target %s fallbacks %v", i+1, r, refs[i], want)
+		}
+		prios[r.Priority] = true
 	}
-	if inner := h.eng.RulesNamed(RuleName("inner")); len(inner) != 1 || len(inner[0].Spread) != 0 {
-		t.Errorf("inner rule = %+v, want ordered fallback", inner)
+	if len(prios) != 4 {
+		t.Errorf("priorities not distinct: %v", prios)
+	}
+	ids, _ := h.st.AliasRuleIDs(context.Background())
+	if ids["spread"] != def[0].ID {
+		t.Errorf("stored rule id %q, want the default rule's %q", ids["spread"], def[0].ID)
+	}
+	h.eng.Mutations()
+	h.sync(t)
+	if got := h.eng.Mutations(); len(got) != 0 {
+		t.Errorf("second Sync made calls %q", ops(got))
 	}
 }
 
-func TestSync_RoundRobinFallbacksCapped(t *testing.T) {
+func TestSync_SpreadingAliasDeduplicatesChain(t *testing.T) {
 	h := newHarness(t)
-	names := []string{"up-a", "up-b", "up-c", "up-d", "up-e"}
-	var provs []store.Provider
-	var members []string
-	for _, n := range names {
-		provs = append(provs, custom(n))
-		members = append(members, n+"/m1")
-	}
-	rr := chat("spread", members...)
-	rr.Strategy = alias.StrategyRoundRobin
-	h.write(t, putAll(provs, rr, chat("ordered", members...)))
+	var got map[string]alias.Chain
+	h.rec.Publish = func(c map[string]alias.Chain) { got = c }
+	h.write(t, putAll(upABC, chat("inner", "up-a/m1", "up-b/m1"), spreading("outer", alias.StrategyP2C, "inner", "up-a/m1")))
 	h.sync(t)
-	r := h.eng.RulesNamed(RuleName("spread"))[0]
-	if len(r.Spread) != 4 || len(r.Fallbacks) != maxFallbacks || maxFallbacks != 3 {
-		t.Errorf("round-robin rule: spread %d fallbacks %d, want 4 and 3", len(r.Spread), len(r.Fallbacks))
+	h.memberRules(t, "outer", 2)
+	if want := (alias.Chain{Strategy: alias.StrategyP2C, Members: []string{"up-a/m1", "up-b/m1"}}); !reflect.DeepEqual(got["outer"], want) {
+		t.Errorf("published %+v, want %+v", got["outer"], want)
 	}
-	if o := h.eng.RulesNamed(RuleName("ordered"))[0]; len(o.Fallbacks) != 4 {
-		t.Errorf("ordered rule fallbacks = %d, want all 4: an ordered chain is the user's explicit order", len(o.Fallbacks))
+}
+
+func TestSync_SpreadingAliasOneLiveMember(t *testing.T) {
+	h := newHarness(t)
+	var got map[string]alias.Chain
+	h.rec.Publish = func(c map[string]alias.Chain) { got = c }
+	h.rec.Filter = func(chain []alias.Target) []alias.Target {
+		return slices.DeleteFunc(chain, func(t alias.Target) bool { return t.Provider != "up-a" })
+	}
+	h.write(t, putAll(upABC, spreading("spread", alias.StrategyRoundRobin, "up-a/m1", "up-b/m1", "up-c/m1")))
+	h.sync(t)
+	if def := h.eng.RulesNamed(RuleName("spread")); len(def) != 1 || def[0].CEL != RuleCEL("spread") || len(def[0].Fallbacks) != 0 {
+		t.Errorf("default rule = %+v", def)
+	}
+	h.memberRules(t, "spread", 0)
+	if _, ok := got["spread"]; ok || got == nil {
+		t.Errorf("published %+v, want a map without spread", got)
+	}
+}
+
+func TestSync_SpreadingAliasAllCooling(t *testing.T) {
+	h := newHarness(t)
+	h.rec.Filter = func([]alias.Target) []alias.Target { return nil }
+	h.write(t, putAll(upABC, spreading("spread", alias.StrategyLeastUsed, "up-a/m1", "up-b/m1", "up-c/m1")))
+	h.sync(t)
+	h.memberRules(t, "spread", 3)
+}
+
+func TestSync_CoolingMemberLosesItsRule(t *testing.T) {
+	h := newHarness(t)
+	var got map[string]alias.Chain
+	h.rec.Publish = func(c map[string]alias.Chain) { got = c }
+	h.write(t, putAll(upABC, spreading("spread", alias.StrategyRandom, "up-a/m1", "up-b/m1", "up-c/m1")))
+	h.sync(t)
+	h.rec.Filter = func(chain []alias.Target) []alias.Target {
+		return slices.DeleteFunc(chain, func(t alias.Target) bool { return t.Provider == "up-b" })
+	}
+	h.sync(t)
+	ms := h.memberRules(t, "spread", 2)
+	if ms[1].Target != route("up-c/m1") || !reflect.DeepEqual(ms[1].Fallbacks, routes("up-a/m1")) {
+		t.Errorf("member rule 2 = %+v", ms[1])
+	}
+	if !reflect.DeepEqual(got["spread"].Members, []string{"up-a/m1", "up-c/m1"}) {
+		t.Errorf("published %+v", got["spread"])
+	}
+}
+
+func TestSync_PriorityAndFillFirstOneRule(t *testing.T) {
+	for _, st := range []alias.Strategy{alias.StrategyPriority, alias.StrategyFillFirst} {
+		h := newHarness(t)
+		var got map[string]alias.Chain
+		h.rec.Publish = func(c map[string]alias.Chain) { got = c }
+		h.write(t, putAll(upABC, spreading("ordered", st, "up-a/m1", "up-b/m1", "up-c/m1")))
+		h.sync(t)
+		if def := h.eng.RulesNamed(RuleName("ordered")); len(def) != 1 || def[0].CEL != RuleCEL("ordered") || len(def[0].Fallbacks) != 2 {
+			t.Errorf("%s: rule = %+v", st, def)
+		}
+		h.memberRules(t, "ordered", 0)
+		if len(got) != 0 {
+			t.Errorf("%s: published %+v", st, got)
+		}
+	}
+}
+
+func TestSync_StrategyChangeRemovesMemberRules(t *testing.T) {
+	h := newHarness(t)
+	h.write(t, putAll(upABC, spreading("spread", alias.StrategyRandom, "up-a/m1", "up-b/m1", "up-c/m1")))
+	h.sync(t)
+	h.write(t, putAll(nil, spreading("spread", alias.StrategyPriority, "up-a/m1", "up-b/m1", "up-c/m1")))
+	h.sync(t)
+	h.memberRules(t, "spread", 0)
+	var n int
+	if err := h.st.DB().QueryRowContext(context.Background(), "SELECT count(*) FROM engine_sync WHERE object LIKE 'rule:spread#%'").Scan(&n); err != nil || n != 0 {
+		t.Errorf("engine_sync member rows = (%d, %v), want 0", n, err)
+	}
+}
+
+func TestSync_SubscriptionMemberRule(t *testing.T) {
+	h := newHarness(t)
+	h.withOAuth()
+	h.write(t, putAll(upABC, spreading("spread", alias.StrategyRandom, "codex/m", "up-a/m1")))
+	h.sync(t)
+	ms := h.memberRules(t, "spread", 2)
+	if ms[0].CEL != MemberRuleCEL("spread", "codex/m") || ms[0].Target != (bifrost.Route{Provider: bifrost.OAuthProvider, Model: "codex/m"}) {
+		t.Errorf("member rule 1 = %+v", ms[0])
+	}
+	if !reflect.DeepEqual(ms[1].Fallbacks, []bifrost.Route{{Provider: bifrost.OAuthProvider, Model: "codex/m"}}) {
+		t.Errorf("member rule 2 = %+v", ms[1])
+	}
+}
+
+func TestPublishOnlyAfterCommit(t *testing.T) {
+	h := newHarness(t)
+	var calls []map[string]alias.Chain
+	h.rec.Publish = func(c map[string]alias.Chain) { calls = append(calls, c) }
+	h.write(t, putAll(upABC, spreading("spread", alias.StrategyRandom, "up-a/m1", "up-b/m1", "up-c/m1")))
+	h.sync(t)
+	want := map[string]alias.Chain{"spread": {Strategy: alias.StrategyRandom, Members: []string{"up-a/m1", "up-b/m1", "up-c/m1"}}}
+	if len(calls) != 1 || !reflect.DeepEqual(calls[0], want) {
+		t.Fatalf("after Sync: %+v", calls)
+	}
+
+	ctx := context.Background()
+	if err := h.rec.Change(ctx, func(context.Context, *store.Tx) error { return errors.New("refused") }); err == nil {
+		t.Fatal("failed Change succeeded")
+	}
+	if len(calls) != 1 {
+		t.Fatalf("failed Change published: %+v", calls)
+	}
+
+	err := h.rec.Batch(ctx, func(ctx context.Context) error {
+		if err := h.rec.Change(ctx, putAll(nil, spreading("two", alias.StrategyP2C, "up-a/m2", "up-b/m2"))); err != nil {
+			return err
+		}
+		if len(calls) != 1 {
+			t.Errorf("published inside the batch: %+v", calls)
+		}
+		return h.rec.Change(ctx, putAll(nil, chat("plain", "up-c/m3")))
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 2 || len(calls[1]) != 2 {
+		t.Errorf("after Batch: %+v", calls)
+	}
+}
+
+func TestDefaultRuleCELExcludesOnlyLiveMembers(t *testing.T) {
+	refs := []string{"up-a/m1", `up-b/we"ird`}
+	want := RuleCEL("x") + ` && !("x-remora-first" in headers && headers["x-remora-first"] in ["up-a/m1", "up-b/we\"ird"])`
+	if got := DefaultRuleCEL("x", refs); got != want {
+		t.Errorf("DefaultRuleCEL = %s\nwant %s", got, want)
+	}
+	if got, want := MemberRuleCEL("x", `up-b/we"ird`), RuleCEL("x")+` && "x-remora-first" in headers && headers["x-remora-first"] == "up-b/we\"ird"`; got != want {
+		t.Errorf("MemberRuleCEL = %s\nwant %s", got, want)
+	}
+	if got := MemberRuleName("x", 2); got != RuleName("x")+"#2" {
+		t.Errorf("MemberRuleName = %s", got)
 	}
 }
 

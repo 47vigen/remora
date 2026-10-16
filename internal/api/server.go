@@ -43,7 +43,11 @@ var _ gen.StrictServerInterface = (*Server)(nil)
 func New(d Deps) *Server {
 	s := &Server{d: d, now: time.Now}
 	if d.Providers != nil && d.Aliases != nil && d.Keys != nil && d.Batch != nil {
-		s.cfg = config.NewService(d.Providers, d.Aliases, d.Keys, d.Batch)
+		var as config.AccountStrategies
+		if d.Accounts != nil {
+			as = d.Accounts
+		}
+		s.cfg = config.NewService(d.Providers, d.Aliases, d.Keys, as, d.Batch)
 	}
 	return s
 }

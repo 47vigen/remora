@@ -160,6 +160,15 @@ func (c *Client) SetCredentialPrefix(ctx context.Context, name, prefix string) e
 	return c.do(ctx, http.MethodPatch, "/credentials/fields", in, nil)
 }
 
+// SetCredentialPriority sets a credential's priority tier.
+func (c *Client) SetCredentialPriority(ctx context.Context, name string, priority int) error {
+	in := struct {
+		Name     string `json:"name"`
+		Priority int    `json:"priority"`
+	}{name, priority}
+	return c.do(ctx, http.MethodPatch, "/credentials/fields", in, nil)
+}
+
 // UploadCredential writes a credential file. name must end in ".json"; data is the file's JSON.
 func (c *Client) UploadCredential(ctx context.Context, name string, data []byte) error {
 	return c.send(ctx, http.MethodPost, "/credentials?"+query("name", name), data, nil)

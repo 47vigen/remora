@@ -73,6 +73,7 @@ for c in 1 10 100; do
 	reset
 	run "chat c=$c" -url "$remora/v1/chat/completions" -model fast -c "$c"
 done
+reset; run "chat spread c=10" -url "$remora/v1/chat/completions" -model spread-01 -c 10
 reset
 run "chat 256KiB c=50" -url "$remora/v1/chat/completions" -model fast -c 50 -body-kb 256
 for c in 100 500; do

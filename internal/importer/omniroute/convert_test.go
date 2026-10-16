@@ -172,9 +172,34 @@ func TestConvertCombos(t *testing.T) {
 			"",
 		},
 		{
-			"other strategy", `{"models":["p/m","q/m"],"strategy":"least-used"}`,
+			"fill-first", `{"models":["p/m","q/m"],"strategy":"fill-first"}`,
+			config.FileAlias{Name: "x", Kind: "chat", Members: []string{"p/m", "q/m"}, Strategy: "fill-first"},
+			"",
+		},
+		{
+			"random", `{"models":["p/m","q/m"],"strategy":"random"}`,
+			config.FileAlias{Name: "x", Kind: "chat", Members: []string{"p/m", "q/m"}, Strategy: "random"},
+			"",
+		},
+		{
+			"p2c", `{"models":["p/m","q/m"],"strategy":"p2c"}`,
+			config.FileAlias{Name: "x", Kind: "chat", Members: []string{"p/m", "q/m"}, Strategy: "p2c"},
+			"",
+		},
+		{
+			"least-used", `{"models":["p/m","q/m"],"strategy":"least-used"}`,
+			config.FileAlias{Name: "x", Kind: "chat", Members: []string{"p/m", "q/m"}, Strategy: "least-used"},
+			"",
+		},
+		{
+			"no strategy", `{"models":["p/m"],"strategy":""}`,
+			config.FileAlias{Name: "x", Kind: "chat", Members: []string{"p/m"}},
+			"",
+		},
+		{
+			"other strategy", `{"models":["p/m","q/m"],"strategy":"strict-random"}`,
 			config.FileAlias{Name: "x", Kind: "chat", Members: []string{"p/m", "q/m"}},
-			"alias x: strategy least-used becomes ordered fallback",
+			"alias x: strategy strict-random becomes priority",
 		},
 		{
 			"provider id prefix on the model", `{"models":[{"model":"openai-compatible-chat-n1/m","providerId":"openai-compatible-chat-n1"}]}`,

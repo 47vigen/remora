@@ -196,6 +196,10 @@ export type Account = {
     provider: string;
     email?: string;
     enabled: boolean;
+    /**
+     * Higher is tried first under the provider's `priority` and `fill-first` strategies; default 0.
+     */
+    priority: number;
     status: string;
     message?: string;
     cooldown_until?: string;
@@ -209,7 +213,18 @@ export type AccountList = {
 };
 
 export type AccountUpdate = {
-    enabled: boolean;
+    enabled?: boolean;
+    priority?: number;
+};
+
+export type AccountStrategy = {
+    provider: string;
+    strategy: RoutingStrategy;
+};
+
+export type AccountStrategyList = {
+    items: Array<AccountStrategy>;
+    total: number;
 };
 
 export type AccountImport = {
@@ -258,11 +273,13 @@ export type Alias = {
      */
     capabilities: Array<string>;
     context_window?: number;
-    /**
-     * `round-robin` spreads requests over the compiled members at random with equal weight, falling back in order; absent, the members are tried in order.
-     */
-    strategy?: 'round-robin';
+    strategy?: RoutingStrategy;
 };
+
+/**
+ * Which member (alias) or account (subscription provider) a request tries first; "busy" counts the requests started in the last 60 seconds, and ties go to declared order. `priority`: the first live member in order / the highest priority tier, rotating inside it. `fill-first`: the same as priority for an alias / one account at a time, priority high first, then oldest. `round-robin`: a rotation over the live members / accounts. `random`: uniform over the live members / accounts. `p2c`: two live members / accounts at random, the less busy one wins. `least-used`: the least busy live member / account. An alias without a strategy is `priority`; it is always set in an answer.
+ */
+export type RoutingStrategy = 'priority' | 'fill-first' | 'round-robin' | 'random' | 'p2c' | 'least-used';
 
 export type AliasList = {
     items: Array<Alias>;
@@ -1000,6 +1017,76 @@ export type GetAccountPoolResponses = {
 };
 
 export type GetAccountPoolResponse = GetAccountPoolResponses[keyof GetAccountPoolResponses];
+
+export type ListAccountStrategiesData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * The page size.
+         */
+        limit?: number;
+        /**
+         * The number of items to skip.
+         */
+        offset?: number;
+    };
+    url: '/api/accounts/strategies';
+};
+
+export type ListAccountStrategiesErrors = {
+    /**
+     * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     *
+     */
+    default: Error;
+};
+
+export type ListAccountStrategiesError = ListAccountStrategiesErrors[keyof ListAccountStrategiesErrors];
+
+export type ListAccountStrategiesResponses = {
+    /**
+     * Every subscription provider, sorted by name; `round-robin` unless set.
+     */
+    200: AccountStrategyList;
+};
+
+export type ListAccountStrategiesResponse = ListAccountStrategiesResponses[keyof ListAccountStrategiesResponses];
+
+export type SetAccountStrategyData = {
+    body: {
+        strategy: RoutingStrategy;
+    };
+    path: {
+        /**
+         * A subscription provider, e.g. `codex`.
+         */
+        provider: string;
+    };
+    query?: never;
+    url: '/api/accounts/strategies/{provider}';
+};
+
+export type SetAccountStrategyErrors = {
+    /**
+     * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     *
+     */
+    default: Error;
+};
+
+export type SetAccountStrategyError = SetAccountStrategyErrors[keyof SetAccountStrategyErrors];
+
+export type SetAccountStrategyResponses = {
+    /**
+     * The provider's strategy as stored.
+     */
+    200: AccountStrategy;
+};
+
+export type SetAccountStrategyResponse = SetAccountStrategyResponses[keyof SetAccountStrategyResponses];
 
 export type GetQuotaData = {
     body?: never;

@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 
@@ -38,13 +40,13 @@ func TestOpenAppliesMigrations(t *testing.T) {
 		t.Fatalf("user_version: %v", err)
 	}
 	// user_version counts the applied files, so a gap in the file numbers (0005 before 0004) is harmless.
-	if version != len(files) || version != 6 {
-		t.Errorf("user_version = %d, want %d (files) == 6", version, len(files))
+	if version != len(files) || version != 8 {
+		t.Errorf("user_version = %d, want %d (files) == 8", version, len(files))
 	}
 
 	for _, table := range []string{
 		"settings", "engine_state", "providers", "provider_keys", "client_keys", "aliases", "alias_members", "engine_sync",
-		"accounts", "sessions", "api_tokens",
+		"accounts", "sessions", "api_tokens", "account_strategies",
 	} {
 		var n int
 		err := s.DB().QueryRowContext(ctx,
@@ -70,6 +72,51 @@ func TestOpenAppliesMigrations(t *testing.T) {
 	}
 	if fk != 1 {
 		t.Errorf("foreign_keys = %d, want 1", fk)
+	}
+}
+
+func TestMigrationRenamesStrategies(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "remora.db")
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	names, err := migrations()
+	if err != nil {
+		t.Fatalf("migrations: %v", err)
+	}
+	old := slices.Index(names, "0006_alias_strategy.sql") + 1
+	for i, name := range names[:old] {
+		body, err := migrationFS.ReadFile("migrations/" + name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if _, err := db.ExecContext(ctx, string(body)); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+		if _, err := db.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", i+1)); err != nil {
+			t.Fatalf("user_version: %v", err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO aliases (name, kind, strategy) VALUES ('a', 'chat', 'round-robin'), ('b', 'chat', '')`); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	all, err := s.Aliases(ctx)
+	if err != nil || all["a"].Strategy != alias.StrategyRandom || all["b"].Strategy != alias.StrategyPriority {
+		t.Errorf("Aliases = (%+v, %v), want a random, b priority", all, err)
+	}
+	if v, err := userVersion(ctx, s.DB()); err != nil || v != len(names) {
+		t.Errorf("user_version = (%d, %v), want %d", v, err, len(names))
 	}
 }
 

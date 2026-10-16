@@ -49,6 +49,8 @@ type Proxy struct {
 	// Ready, when set, reports whether the front door holds the store's state; until it does, /v1 answers 503
 	// instead of meeting missing or stale providers, rules or keys. serve sets it to the reconciler's Synced.
 	Ready func() bool
+	// Picker, when set, picks the first member of a spreading alias's request (X-Remora-First).
+	Picker *Picker
 }
 
 // New returns a Proxy in front of the front door at upstream (its inference routes), reading keys and aliases from
@@ -133,6 +135,7 @@ type reqInfo struct {
 	shape    shape
 	model    string
 	isAlias  bool
+	first    string // X-Remora-First to send, "" for none
 	vk       string
 	body     []byte
 	spans    bodySpans // where the parts of body the proxy reads sit; zero for multipart
@@ -253,6 +256,9 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt route, sh sha
 	}
 	info.isAlias = isAlias
 	body := raw
+	if isAlias && p.Picker != nil {
+		info.first = p.Picker.Pick(model)
+	}
 	if isAlias {
 		if body, err = withModel(raw, sp, r.Header.Get("Content-Type"), alias.EngineModel(model)); err != nil {
 			errModelRequired.write(w, sh)
@@ -318,18 +324,22 @@ func (p *Proxy) rewrite(pr *httputil.ProxyRequest) {
 	pr.Out.Host = u.Host
 
 	setUpstreamHeaders(pr.Out.Header, info.vk)
+	if info.first != "" {
+		pr.Out.Header.Set(alias.FirstHeader, info.first)
+	}
 	pr.Out.Header.Set(headerForwardSession, opencodeSession(pr.In.Header, info.body, info.spans))
 	if k := affinityKey(pr.In.Header, info.vk, info.spans.promptCacheKeyIn(info.body), affinitySource(info.body, info.spans)); k != "" {
 		pr.Out.Header.Set(headerForwardAffinity, k)
 	}
 }
 
-// setUpstreamHeaders replaces every client credential and engine control header in h with remora's own.
+// setUpstreamHeaders replaces every client credential and engine control header in h with remora's own. No client
+// may set X-Remora-First: it selects a front-door rule.
 func setUpstreamHeaders(h http.Header, vk string) {
 	for name := range h {
 		switch l := strings.ToLower(name); {
 		// Expect: the body is already read, so the front door must not be asked to confirm it.
-		case l == "authorization", l == "x-api-key", l == "cookie", l == "accept-encoding", l == "expect",
+		case l == "authorization", l == "x-api-key", l == "cookie", l == "accept-encoding", l == "expect", l == "x-remora-first",
 			strings.HasPrefix(l, "x-bf-"), strings.Contains(l, "bifrost"):
 			delete(h, name)
 		}
@@ -364,6 +374,9 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 		h(info.in, info.body, resp)
 	}
 	setDroppedParams(resp.Header, info)
+	if p.Picker != nil {
+		p.Picker.Started(resp.Header.Get(headerServedBy))
+	}
 	// Nothing reads the request body past this point; a stream may run for minutes.
 	info.body, info.spans = nil, bodySpans{}
 	return nil

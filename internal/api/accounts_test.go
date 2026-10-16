@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/47vigen/remora/internal/alias"
+
 	"github.com/47vigen/remora/internal/accounts"
 )
 
@@ -15,6 +17,7 @@ type accountJSON struct {
 	Provider      string     `json:"provider"`
 	Email         string     `json:"email"`
 	Enabled       bool       `json:"enabled"`
+	Priority      *int       `json:"priority"`
 	Status        string     `json:"status"`
 	Message       string     `json:"message"`
 	CooldownUntil *time.Time `json:"cooldown_until"`
@@ -286,5 +289,62 @@ func TestGetAccountPool(t *testing.T) {
 	env.accounts.pool = nil
 	if _, body := env.do(t, env.client, http.MethodGet, "/api/accounts/pool", ""); strings.TrimSpace(string(body)) != "[]" {
 		t.Errorf("empty pool = %s, want []", body)
+	}
+}
+
+func TestListAccountStrategies(t *testing.T) {
+	env := newTestEnv(t)
+	env.accounts.strats = map[string]alias.Strategy{"codex": alias.StrategyP2C}
+	code, body := env.do(t, env.client, http.MethodGet, "/api/accounts/strategies", "")
+	if code != http.StatusOK {
+		t.Fatalf("list = %d %s", code, body)
+	}
+	want := `{"items":[{"provider":"antigravity","strategy":"round-robin"},{"provider":"codex","strategy":"p2c"},{"provider":"grok","strategy":"round-robin"}],"total":3}`
+	if strings.TrimSpace(string(body)) != want {
+		t.Errorf("list = %s\nwant %s", body, want)
+	}
+}
+
+func TestSetAccountStrategy(t *testing.T) {
+	env := newTestEnv(t)
+	code, body := env.do(t, env.client, http.MethodPut, "/api/accounts/strategies/codex", `{"strategy":"p2c"}`)
+	if code != http.StatusOK || strings.TrimSpace(string(body)) != `{"provider":"codex","strategy":"p2c"}` {
+		t.Fatalf("put = %d %s", code, body)
+	}
+	if env.accounts.strats["codex"] != alias.StrategyP2C {
+		t.Errorf("stored %v", env.accounts.strats)
+	}
+	code, body = env.do(t, env.client, http.MethodPut, "/api/accounts/strategies/codex", `{"strategy":"bogus"}`)
+	if code != http.StatusBadRequest || !strings.Contains(string(body), "strategy must be one of priority, fill-first, round-robin, random, p2c, least-used") {
+		t.Errorf("bogus strategy = %d %s", code, body)
+	}
+	if code, body := env.do(t, env.client, http.MethodPut, "/api/accounts/strategies/nope", `{"strategy":"p2c"}`); code != http.StatusBadRequest {
+		t.Errorf("unknown provider = %d %s", code, body)
+	}
+}
+
+func TestUpdateAccountPartial(t *testing.T) {
+	env := newTestEnv(t)
+	env.accounts.accounts = []Account{{ID: "7", Provider: "codex", Enabled: true, Status: "active"}}
+	code, body := env.do(t, env.client, http.MethodPatch, "/api/accounts/7", `{"priority":4}`)
+	if code != http.StatusOK {
+		t.Fatalf("priority = %d %s", code, body)
+	}
+	var a accountJSON
+	decode(t, body, &a)
+	if a.Priority == nil || *a.Priority != 4 || !a.Enabled {
+		t.Errorf("answer = %s", body)
+	}
+	if _, toggled := env.accounts.enabled["7"]; toggled || env.accounts.priority["7"] != 4 {
+		t.Errorf("priority edit: enabled calls %v, priority %v", env.accounts.enabled, env.accounts.priority)
+	}
+	if code, body := env.do(t, env.client, http.MethodPatch, "/api/accounts/7", `{"enabled":false}`); code != http.StatusOK {
+		t.Fatalf("enabled = %d %s", code, body)
+	}
+	if len(env.accounts.priority) != 1 || env.accounts.enabled["7"] {
+		t.Errorf("enabled edit: priority calls %v, enabled %v", env.accounts.priority, env.accounts.enabled)
+	}
+	if code, body := env.do(t, env.client, http.MethodPatch, "/api/accounts/7", `{}`); code != http.StatusBadRequest {
+		t.Errorf("empty body = %d %s", code, body)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -22,6 +23,8 @@ type File struct {
 	Providers []FileProvider `yaml:"providers"`
 	Aliases   []FileAlias    `yaml:"aliases"`
 	Keys      []FileKey      `yaml:"keys"`
+	// AccountStrategies is the routing strategy per subscription provider; an omitted provider is round-robin.
+	AccountStrategies map[string]string `yaml:"account_strategies,omitempty"`
 }
 
 // FileProvider is an upstream provider and its keys.
@@ -47,7 +50,7 @@ type FileAlias struct {
 	Members       []string `yaml:"members"`
 	Capabilities  []string `yaml:"capabilities,omitempty"`
 	ContextWindow int      `yaml:"context_window,omitempty"`
-	Strategy      string   `yaml:"strategy,omitempty"` // "round-robin" spreads requests; omitted tries members in order
+	Strategy      string   `yaml:"strategy,omitempty"` // one of alias.Strategies; omitted is priority
 }
 
 // FileKey is a client key. Value is "env:NAME"; when it is omitted on a new key, apply generates one and prints it
@@ -172,8 +175,17 @@ func (f File) Validate() error {
 		if a.ContextWindow < 0 {
 			fail("%s.context_window: must not be negative", at)
 		}
-		if !alias.Strategy(a.Strategy).Valid() {
-			fail("%s.strategy: %q is not round-robin; omit it for ordered fallback", at, a.Strategy)
+		if a.Strategy != "" && !alias.Strategy(a.Strategy).Valid() {
+			fail("%s.strategy: %q is not one of priority, fill-first, round-robin, random, p2c, least-used", at, a.Strategy)
+		}
+	}
+
+	for _, p := range slices.Sorted(maps.Keys(f.AccountStrategies)) {
+		switch st := f.AccountStrategies[p]; {
+		case !cliproxyapi.IsSubscription(p):
+			fail("account_strategies.%s: %q is not a subscription provider", p, p)
+		case !alias.Strategy(st).Valid():
+			fail("account_strategies.%s: %q is not one of priority, fill-first, round-robin, random, p2c, least-used", p, st)
 		}
 	}
 

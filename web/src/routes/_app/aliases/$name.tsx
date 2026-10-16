@@ -41,6 +41,7 @@ import { MemberList } from "./-components/MemberList";
 import { useChainPreview } from "./-hooks/useChainPreview";
 import {
   ALIAS_KINDS,
+  ALIAS_STRATEGIES,
   type AliasDraft,
   aliasFromDraft,
   CAPABILITY_SUGGESTIONS,
@@ -261,6 +262,32 @@ function AliasEditor({ initial, original }: { initial: AliasDraft; original: str
                     {ALIAS_KINDS.map((k) => (
                       <ListBox.Item key={k} id={k} textValue={k}>
                         {k}
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                    ))}
+                  </ListBox>
+                </Select.Popover>
+              </Select>
+              <Select
+                value={draft.strategy}
+                onChange={(v) => set({ strategy: ALIAS_STRATEGIES.find((x) => x.id === v)?.id ?? draft.strategy })}
+              >
+                <Label>Strategy</Label>
+                <Select.Trigger>
+                  <Select.Value />
+                  <Select.Indicator />
+                </Select.Trigger>
+                <Description>
+                  Which member a request tries first. Busy means requests started in the last minute.
+                </Description>
+                <Select.Popover>
+                  <ListBox aria-label="Strategy">
+                    {ALIAS_STRATEGIES.map((s) => (
+                      <ListBox.Item key={s.id} id={s.id} textValue={s.label}>
+                        <div className="flex flex-col">
+                          <Label>{s.label}</Label>
+                          <Description>{s.description}</Description>
+                        </div>
                         <ListBox.ItemIndicator />
                       </ListBox.Item>
                     ))}

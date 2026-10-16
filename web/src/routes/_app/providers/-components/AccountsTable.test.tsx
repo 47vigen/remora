@@ -11,17 +11,28 @@ const items: Account[] = [
     provider: "codex",
     email: "one@example.com",
     enabled: true,
+    priority: 0,
     status: "active",
     cooldown_until: future,
     quota: [{ model: "gpt-x", remaining_fraction: 0.7 }],
     models: ["a", "b", "c", "d", "e"],
   },
-  { id: "2", provider: "codex", email: "two@example.com", enabled: true, status: "active", quota: [], models: ["a"] },
+  {
+    id: "2",
+    provider: "codex",
+    email: "two@example.com",
+    enabled: true,
+    priority: 0,
+    status: "active",
+    quota: [],
+    models: ["a"],
+  },
 ];
 
 function setup() {
   const h = {
     onToggle: vi.fn<(a: Account, enabled: boolean) => void>(),
+    onPriority: vi.fn<(a: Account, priority: number) => void>(),
     onResetCooldown: vi.fn<(a: Account) => void>(),
     onDelete: vi.fn<(a: Account) => void>(),
   };
@@ -63,4 +74,14 @@ test("toggling the switch calls onToggle and deleting calls onDelete", async () 
   await userEvent.click(within(rowOf("two@example.com")).getByRole("button", { name: "Actions for two@example.com" }));
   await userEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
   expect(h.onDelete).toHaveBeenCalledWith(items[1]);
+});
+
+test("the priority column shows each number and an edit calls onPriority", async () => {
+  const h = setup();
+  const field = within(rowOf("two@example.com")).getByRole("textbox", { name: "Priority of two@example.com" });
+  expect(field).toHaveValue("0");
+  await userEvent.clear(field);
+  await userEvent.type(field, "5");
+  await userEvent.tab();
+  expect(h.onPriority).toHaveBeenCalledWith(items[1], 5);
 });

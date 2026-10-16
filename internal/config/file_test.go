@@ -78,7 +78,7 @@ func TestParse_Errors(t *testing.T) {
 		{"bad alias name", "aliases:\n  - {name: -a, kind: chat, members: [p/m]}\n", []string{"aliases[0].name"}},
 		{"alias without members", "aliases:\n  - {name: a, kind: chat}\n", []string{"aliases[0].members"}},
 		{"negative context", "aliases:\n  - {name: a, kind: chat, members: [p/m], context_window: -1}\n", []string{"aliases[0].context_window"}},
-		{"bad strategy", "aliases:\n  - {name: a, kind: chat, members: [p/m], strategy: random}\n", []string{"aliases[0].strategy", "random"}},
+		{"bad strategy", "aliases:\n  - {name: a, kind: chat, members: [p/m], strategy: fallback}\n", []string{`aliases[0].strategy: "fallback" is not one of priority, fill-first, round-robin, random, p2c, least-used`}},
 		{"thinking on an api-key member", "aliases:\n  - {name: a, kind: chat, members: [up-a/m1(low)]}\n", []string{"aliases[0].members[0]", "subscription models"}},
 		{"unknown thinking level", "aliases:\n  - {name: a, kind: chat, members: [antigravity/x(extreme)]}\n", []string{"aliases[0].members[0]", "extreme"}},
 		{"duplicate alias", "aliases:\n  - {name: a, kind: chat, members: [p/m]}\n  - {name: a, kind: chat, members: [p/m]}\n", []string{"aliases[1].name"}},
@@ -113,5 +113,38 @@ func TestParseRejectsSecondDocument(t *testing.T) {
 	src := "---\n---\nproviders:\n  - {name: up, kind: openai-compatible, base_url: \"http://up.test/v1\"}\n"
 	if _, err := Parse([]byte(src)); err == nil || !strings.Contains(err.Error(), "more than one YAML document") {
 		t.Fatalf("Parse = %v, want the one-document error", err)
+	}
+}
+
+func TestValidateStrategy(t *testing.T) {
+	for _, st := range append([]string{""}, "priority", "fill-first", "round-robin", "random", "p2c", "least-used") {
+		f := File{Aliases: []FileAlias{{Name: "a", Kind: "chat", Members: []string{"p/m"}, Strategy: st}}}
+		if err := f.Validate(); err != nil {
+			t.Errorf("strategy %q: %v", st, err)
+		}
+	}
+	f := File{Aliases: []FileAlias{{Name: "a", Kind: "chat", Members: []string{"p/m"}, Strategy: "fallback"}}}
+	if err := f.Validate(); err == nil || !strings.Contains(err.Error(), "aliases[0].strategy") {
+		t.Errorf("strategy fallback: err = %v", err)
+	}
+}
+
+func TestValidateAccountStrategies(t *testing.T) {
+	if err := (File{AccountStrategies: map[string]string{"grok": "p2c"}}).Validate(); err != nil {
+		t.Errorf("grok p2c: %v", err)
+	}
+	err := File{AccountStrategies: map[string]string{"xai": "p2c"}}.Validate()
+	if err == nil || !strings.Contains(err.Error(), `account_strategies.xai: "xai" is not a subscription provider`) {
+		t.Errorf("xai: err = %v", err)
+	}
+	err = File{AccountStrategies: map[string]string{"codex": "bogus"}}.Validate()
+	if err == nil || !strings.Contains(err.Error(), `account_strategies.codex.strategy`) && !strings.Contains(err.Error(), `account_strategies.codex: "bogus" is not one of`) {
+		t.Errorf("bogus: err = %v", err)
+	}
+	if _, err := Parse([]byte("account_strategies: {codex: least-used}\n")); err != nil {
+		t.Errorf("Parse: %v", err)
+	}
+	if _, err := Parse([]byte("account_strategies: {codex: bogus}\n")); err == nil {
+		t.Error("Parse accepted a bogus strategy")
 	}
 }

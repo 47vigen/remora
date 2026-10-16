@@ -283,6 +283,56 @@ paths:
         default:
           $ref: "#/components/responses/Error"
 
+  /api/accounts/strategies:
+    get:
+      tags: [accounts]
+      operationId: listAccountStrategies
+      summary: The routing strategy of every subscription provider's account pool.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Every subscription provider, sorted by name; `round-robin` unless set.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountStrategyList"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/accounts/strategies/{provider}:
+    parameters:
+      - name: provider
+        in: path
+        required: true
+        description: A subscription provider, e.g. `codex`.
+        schema:
+          type: string
+    put:
+      tags: [accounts]
+      operationId: setAccountStrategy
+      summary: Set which account of a subscription provider serves a request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [strategy]
+              properties:
+                strategy:
+                  $ref: "#/components/schemas/RoutingStrategy"
+      responses:
+        "200":
+          description: The provider's strategy as stored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountStrategy"
+        default:
+          $ref: "#/components/responses/Error"
+
   /api/quota:
     get:
       tags: [accounts]
@@ -420,7 +470,7 @@ paths:
     patch:
       tags: [accounts]
       operationId: updateAccount
-      summary: Enable or disable an account.
+      summary: Enable or disable an account, or set its priority.
       requestBody:
         required: true
         content:
@@ -1352,7 +1402,7 @@ components:
             type: string
     Account:
       type: object
-      required: [id, provider, enabled, status, quota, models]
+      required: [id, provider, enabled, priority, status, quota, models]
       properties:
         id:
           type: string
@@ -1362,6 +1412,9 @@ components:
           type: string
         enabled:
           type: boolean
+        priority:
+          type: integer
+          description: Higher is tried first under the provider's `priority` and `fill-first` strategies; default 0.
         status:
           type: string
         message:
@@ -1389,10 +1442,30 @@ components:
           type: integer
     AccountUpdate:
       type: object
-      required: [enabled]
+      minProperties: 1
       properties:
         enabled:
           type: boolean
+        priority:
+          type: integer
+    AccountStrategy:
+      type: object
+      required: [provider, strategy]
+      properties:
+        provider:
+          type: string
+        strategy:
+          $ref: "#/components/schemas/RoutingStrategy"
+    AccountStrategyList:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AccountStrategy"
+        total:
+          type: integer
     AccountImport:
       type: object
       required: [provider, credential]
@@ -1464,11 +1537,20 @@ components:
           type: integer
           minimum: 0
         strategy:
-          type: string
-          enum: [round-robin]
-          description: >-
-            `round-robin` spreads requests over the compiled members at random with equal weight, falling back in
-            order; absent, the members are tried in order.
+          $ref: "#/components/schemas/RoutingStrategy"
+    RoutingStrategy:
+      type: string
+      enum: [priority, fill-first, round-robin, random, p2c, least-used]
+      description: >-
+        Which member (alias) or account (subscription provider) a request tries first; "busy" counts the requests
+        started in the last 60 seconds, and ties go to declared order.
+        `priority`: the first live member in order / the highest priority tier, rotating inside it.
+        `fill-first`: the same as priority for an alias / one account at a time, priority high first, then oldest.
+        `round-robin`: a rotation over the live members / accounts.
+        `random`: uniform over the live members / accounts.
+        `p2c`: two live members / accounts at random, the less busy one wins.
+        `least-used`: the least busy live member / account.
+        An alias without a strategy is `priority`; it is always set in an answer.
     AliasList:
       type: object
       required: [items, total]

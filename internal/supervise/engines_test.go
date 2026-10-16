@@ -216,7 +216,7 @@ func readCLIProxyConfig(t *testing.T, path string) cliproxyDoc {
 
 func TestCLIProxyAPIEngine(t *testing.T) {
 	dir := t.TempDir()
-	e, err := CLIProxyAPIEngine(testConfig(dir), testCreds)
+	e, err := CLIProxyAPIEngine(testConfig(dir), testCreds, nil)
 	if err != nil {
 		t.Fatalf("CLIProxyAPIEngine: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestCLIProxyAPIEngine(t *testing.T) {
 
 	cfg := testConfig(dir)
 	cfg.MemoryLimit = 4 << 30
-	if e, err = CLIProxyAPIEngine(cfg, testCreds); err != nil {
+	if e, err = CLIProxyAPIEngine(cfg, testCreds, nil); err != nil {
 		t.Fatalf("CLIProxyAPIEngine: %v", err)
 	}
 	checkGoMemLimit(t, e.Env, "GOMEMLIMIT=644245094")
@@ -274,11 +274,11 @@ func TestCLIProxyAPIEngine(t *testing.T) {
 func TestRenderOverwritesAtomically(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testConfig(dir)
-	if _, err := CLIProxyAPIEngine(cfg, testCreds); err != nil {
+	if _, err := CLIProxyAPIEngine(cfg, testCreds, nil); err != nil {
 		t.Fatal(err)
 	}
 	cfg.Ports.CLIProxyAPI = 28317
-	if _, err := CLIProxyAPIEngine(cfg, testCreds); err != nil {
+	if _, err := CLIProxyAPIEngine(cfg, testCreds, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := readCLIProxyConfig(t, dir+"/cliproxyapi/config.yaml").Server.Port; got != 28317 {

@@ -1,7 +1,17 @@
-import type { Alias, AliasKind, ChainTarget } from "../../../../client";
+import type { Alias, AliasKind, ChainTarget, RoutingStrategy } from "../../../../client";
 
 /** The shared alias kinds, in the order the editor offers them. */
 export const ALIAS_KINDS = ["chat", "embeddings", "transcription", "decisions"] as const satisfies readonly AliasKind[];
+
+/** The routing strategies, in the order the editor offers them, each with its meaning for an alias. */
+export const ALIAS_STRATEGIES: { id: RoutingStrategy; label: string; description: string }[] = [
+  { id: "priority", label: "Priority", description: "Try members in order." },
+  { id: "fill-first", label: "Fill first", description: "Same as priority for an alias." },
+  { id: "round-robin", label: "Round robin", description: "Members take turns." },
+  { id: "random", label: "Random", description: "A random member goes first." },
+  { id: "p2c", label: "Power of two", description: "Two random members; the less busy one goes first." },
+  { id: "least-used", label: "Least used", description: "The least busy member goes first." },
+];
 
 /** Capabilities the editor suggests; any other value may be typed. */
 export const CAPABILITY_SUGGESTIONS = ["tools", "structured_outputs", "reasoning", "vision"] as const;
@@ -12,8 +22,7 @@ export type AliasDraft = {
   members: string[];
   capabilities: string[];
   contextWindow: number | null;
-  /** Kept as loaded: the editor has no control for it yet, and saving must not reset it. */
-  strategy?: Alias["strategy"];
+  strategy: RoutingStrategy;
 };
 
 /** One step of a compiled chain as the preview shows it. */
@@ -22,7 +31,14 @@ export type AliasTarget = { provider: string; model: string; cooling: boolean; c
 /** Anything that names a provider and, when known, the models it serves (an API provider or an account group). */
 export type ModelSource = { name: string; models?: readonly string[] };
 
-export const EMPTY_DRAFT: AliasDraft = { name: "", kind: "chat", members: [], capabilities: [], contextWindow: null };
+export const EMPTY_DRAFT: AliasDraft = {
+  name: "",
+  kind: "chat",
+  members: [],
+  capabilities: [],
+  contextWindow: null,
+  strategy: "priority",
+};
 
 /** Returns one message per invalid field; an empty object means the draft can be saved. */
 export function validateAliasDraft(d: AliasDraft): Partial<Record<keyof AliasDraft, string>> {
@@ -83,14 +99,19 @@ export function draftFromAlias(a: Alias): AliasDraft {
     members: [...a.members],
     capabilities: [...a.capabilities],
     contextWindow: a.context_window ?? null,
-    strategy: a.strategy,
+    strategy: a.strategy ?? "priority",
   };
 }
 
 export function aliasFromDraft(d: AliasDraft): Alias {
-  const alias: Alias = { name: d.name.trim(), kind: d.kind, members: d.members, capabilities: d.capabilities };
+  const alias: Alias = {
+    name: d.name.trim(),
+    kind: d.kind,
+    members: d.members,
+    capabilities: d.capabilities,
+    strategy: d.strategy,
+  };
   if (d.contextWindow !== null) alias.context_window = d.contextWindow;
-  if (d.strategy) alias.strategy = d.strategy;
   return alias;
 }
 

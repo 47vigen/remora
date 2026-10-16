@@ -53,6 +53,7 @@ type Credential struct {
 	Status         string         `json:"status"`
 	StatusMessage  string         `json:"status_message"`
 	Disabled       bool           `json:"disabled"`
+	Priority       int            `json:"priority"` // absent = 0; the highest available tier serves
 	Unavailable    bool           `json:"unavailable"`
 	NextRetryAfter *time.Time     `json:"next_retry_after,omitempty"`
 	Quota          Quota          `json:"quota"`

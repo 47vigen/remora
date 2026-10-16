@@ -7,6 +7,8 @@ import (
 	"slices"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/47vigen/remora/internal/alias"
 )
 
 // exportHeader opens every exported document.
@@ -16,7 +18,7 @@ const exportHeader = "# remora.yaml, exported by remora. Secrets are env:NAME re
 // Marshal writes f as YAML in a stable order: every list sorted by name (provider keys by name within their
 // provider); alias members keep their order, which is the fallback order. f itself is not changed.
 func Marshal(f File) ([]byte, error) {
-	out := File{Version: 1}
+	out := File{Version: 1, AccountStrategies: f.AccountStrategies} // yaml sorts map keys
 	for _, p := range f.Providers {
 		p.Keys = slices.SortedFunc(slices.Values(p.Keys), func(a, b FileSecretKey) int { return cmp.Compare(a.Name, b.Name) })
 		out.Providers = append(out.Providers, p)
@@ -65,7 +67,10 @@ func (s *Service) Export(ctx context.Context) (File, error) {
 		return File{}, err
 	}
 	for _, a := range aliases {
-		fa := FileAlias{Name: a.Name, Kind: string(a.Kind), Members: make([]string, len(a.Members)), ContextWindow: a.ContextWindow, Strategy: string(a.Strategy)}
+		fa := FileAlias{Name: a.Name, Kind: string(a.Kind), Members: make([]string, len(a.Members)), ContextWindow: a.ContextWindow}
+		if a.Strategy != alias.StrategyPriority {
+			fa.Strategy = string(a.Strategy)
+		}
 		for i, m := range a.Members {
 			fa.Members[i] = m.Ref
 		}
@@ -89,6 +94,22 @@ func (s *Service) Export(ctx context.Context) (File, error) {
 			fk.Enabled = &off
 		}
 		f.Keys = append(f.Keys, fk)
+	}
+
+	if s.as != nil {
+		strategies, err := s.as.Strategies(ctx)
+		if err != nil {
+			return File{}, err
+		}
+		for p, st := range strategies {
+			if st == alias.StrategyRoundRobin {
+				continue
+			}
+			if f.AccountStrategies == nil {
+				f.AccountStrategies = map[string]string{}
+			}
+			f.AccountStrategies[p] = string(st)
+		}
 	}
 	return f, nil
 }

@@ -6,6 +6,7 @@ const account = (id: string, email: string) => ({
   provider: "x",
   email,
   enabled: true,
+  priority: 0,
   status: "active",
   quota: [],
   models: [],

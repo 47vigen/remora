@@ -394,3 +394,26 @@ func TestWS_KeyChangeAppliesToOpenSocket(t *testing.T) {
 
 // upstreamFrame is createFrame(name) as the front door receives it: an alias travels as alias.EngineModel.
 func upstreamFrame(name string) string { return createFrame(alias.EngineModel(name)) }
+
+func TestWSHandshakeDropsFirstHeader(t *testing.T) {
+	f := newFixture(t)
+	f.withSpread(t)
+	f.upstream((&wsEcho{}).handler(t))
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	h := http.Header{}
+	h.Set("Authorization", "Bearer "+keyFull)
+	h.Set("x-remora-first", "up-c/m1")
+	c, resp, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(f.srv.URL, "http")+"/v1/responses", &websocket.DialOptions{HTTPHeader: h})
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { _ = c.CloseNow() })
+	if resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	wsRoundTrip(t, c, createFrame("spread"))
+	if got := f.seen().header.Values(alias.FirstHeader); len(got) != 0 {
+		t.Errorf("upstream handshake carried %s: %q", alias.FirstHeader, got)
+	}
+}
