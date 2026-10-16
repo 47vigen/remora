@@ -4,11 +4,16 @@ on:
   pull_request:
   push:
     branches: [main]
+    # A release merge changes only these, and release.yml tests the tagged image on both architectures.
+    paths-ignore:
+      - CHANGELOG.md
+      - .release-please-manifest.json
 
 permissions: {}
 
+# A newer push to the same pull request cancels its run; every commit on main gets its own group and result.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: true
 
 # A release pull request changes only the changelog and the version manifest, and release.yml builds and tests
