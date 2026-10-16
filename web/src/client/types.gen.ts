@@ -150,7 +150,7 @@ export type Alias = {
     name: string;
     kind: AliasKind;
     /**
-     * Alias names or `<provider>/<model>` references, in fallback order.
+     * Alias names or `<provider>/<model>` references, in fallback order. A subscription model may end in a thinking level, `(minimal)`, `(low)`, `(medium)`, `(high)`, or a token budget such as `(1024)` (`(0)` turns thinking off); it overrides the client's `reasoning_effort` for that member.
      */
     members: Array<string>;
     /**

@@ -5,10 +5,12 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/api/gen"
+	"github.com/47vigen/remora/internal/engine/cliproxyapi"
 )
 
 // toGenAlias maps an alias to its answer. Lists are never null.
@@ -51,6 +53,15 @@ func fromGenAlias(b *gen.Alias) (alias.Alias, error) {
 	for _, m := range b.Members {
 		if m == "" {
 			return alias.Alias{}, badRequest("a member cannot be empty")
+		}
+		if provider, _, isTarget := strings.Cut(m, "/"); isTarget {
+			_, level, ok := alias.ParseThinking(m)
+			if !ok {
+				return alias.Alias{}, badRequest(fmt.Sprintf("thinking level must be minimal, low, medium, high or a token budget; got %q", level))
+			}
+			if _, sub := cliproxyapi.ProviderByName(provider); level != "" && !sub {
+				return alias.Alias{}, badRequest("a thinking level applies only to subscription models")
+			}
 		}
 		a.Members = append(a.Members, alias.Member{Ref: m})
 	}

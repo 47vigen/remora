@@ -410,7 +410,7 @@ type Alias struct {
 	ContextWindow *int      `json:"context_window,omitempty"`
 	Kind          AliasKind `json:"kind"`
 
-	// Members Alias names or `<provider>/<model>` references, in fallback order.
+	// Members Alias names or `<provider>/<model>` references, in fallback order. A subscription model may end in a thinking level, `(minimal)`, `(low)`, `(medium)`, `(high)`, or a token budget such as `(1024)` (`(0)` turns thinking off); it overrides the client's `reasoning_effort` for that member.
 	Members []string `json:"members"`
 	Name    string   `json:"name"`
 
