@@ -1,0 +1,6 @@
+providers:
+  - {name: up, kind: openai-compatible, base_url: http://fakes:9090/u/a, allow_private_network: true, keys: [{name: main, value: env:BENCH_UPSTREAM_KEY}]}
+aliases:
+  - {name: fast, kind: chat, members: [up/m1]}
+keys:
+  - {name: bench, value: env:BENCH_KEY, allow: ["*"]}

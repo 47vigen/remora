@@ -7,7 +7,7 @@ FAKES_IMAGE ?= remora-fakes:dev
 REMORA_VERSION ?= $(shell git describe --tags --always --dirty)
 REMORA_COMMIT ?= $(shell git rev-parse --short HEAD)
 
-.PHONY: lint test image fakes-image check-pins e2e
+.PHONY: lint test image fakes-image check-pins e2e bench
 
 lint:
 	golangci-lint run
@@ -35,3 +35,6 @@ export REMORA_IMAGE FAKES_IMAGE
 
 e2e:
 	go test -tags e2e -count=1 -timeout 20m ./test/e2e/...
+
+bench:
+	tools/bench/run.sh

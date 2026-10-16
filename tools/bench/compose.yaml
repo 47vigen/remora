@@ -1,0 +1,18 @@
+# The bench stack: remora under fixed limits, in front of the fake upstreams. tools/bench/run.sh drives it.
+services:
+  fakes:
+    image: ${FAKES_IMAGE:-remora-fakes:dev}
+    ports: ["127.0.0.1::9090"]
+  remora:
+    image: ${REMORA_IMAGE:-remora:dev}
+    cpus: 4
+    mem_limit: ${BENCH_MEM:-8g}
+    environment:
+      REMORA_ADMIN_PASSWORD: bench-admin-password
+      # Test values only; remora.yaml reads them through env: references.
+      BENCH_UPSTREAM_KEY: bench-upstream-key
+      BENCH_KEY: rk-bench-0123456789abcdef
+    volumes:
+      - ./remora.yaml:/bench/remora.yaml:ro
+    ports: ["127.0.0.1::8080"]
+    depends_on: [fakes]
