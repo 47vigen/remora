@@ -7,6 +7,8 @@ import (
 	"slices"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/47vigen/remora/internal/alias"
 )
 
 // exportHeader opens every exported document.
@@ -65,7 +67,10 @@ func (s *Service) Export(ctx context.Context) (File, error) {
 		return File{}, err
 	}
 	for _, a := range aliases {
-		fa := FileAlias{Name: a.Name, Kind: string(a.Kind), Members: make([]string, len(a.Members)), ContextWindow: a.ContextWindow, Strategy: string(a.Strategy)}
+		fa := FileAlias{Name: a.Name, Kind: string(a.Kind), Members: make([]string, len(a.Members)), ContextWindow: a.ContextWindow}
+		if a.Strategy != alias.StrategyPriority {
+			fa.Strategy = string(a.Strategy)
+		}
 		for i, m := range a.Members {
 			fa.Members[i] = m.Ref
 		}

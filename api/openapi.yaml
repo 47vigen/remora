@@ -1318,11 +1318,20 @@ components:
           type: integer
           minimum: 0
         strategy:
-          type: string
-          enum: [round-robin]
-          description: >-
-            `round-robin` spreads requests over the compiled members at random with equal weight, falling back in
-            order; absent, the members are tried in order.
+          $ref: "#/components/schemas/RoutingStrategy"
+    RoutingStrategy:
+      type: string
+      enum: [priority, fill-first, round-robin, random, p2c, least-used]
+      description: >-
+        Which member (alias) or account (subscription provider) a request tries first; "busy" counts the requests
+        started in the last 60 seconds, and ties go to declared order.
+        `priority`: the first live member in order / the highest priority tier, rotating inside it.
+        `fill-first`: the same as priority for an alias / one account at a time, priority high first, then oldest.
+        `round-robin`: a rotation over the live members / accounts.
+        `random`: uniform over the live members / accounts.
+        `p2c`: two live members / accounts at random, the less busy one wins.
+        `least-used`: the least busy live member / account.
+        An alias without a strategy is `priority`; it is always set in an answer.
     AliasList:
       type: object
       required: [items, total]

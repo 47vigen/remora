@@ -340,9 +340,9 @@ func populated() *world {
 	w.aliases["inner"] = alias.Alias{Name: "inner", Kind: alias.KindChat, Members: members("up-a/m1"), Strategy: alias.StrategyRoundRobin}
 	w.aliases["fast"] = alias.Alias{
 		Name: "fast", Kind: alias.KindChat, Members: members("inner", "openrouter/vendor/model-a"),
-		Capabilities: []string{"structured_outputs", "tools"}, ContextWindow: 131072,
+		Capabilities: []string{"structured_outputs", "tools"}, ContextWindow: 131072, Strategy: alias.StrategyPriority,
 	}
-	w.aliases["emb"] = alias.Alias{Name: "emb", Kind: alias.KindEmbeddings, Members: members("up-a/emb-1")}
+	w.aliases["emb"] = alias.Alias{Name: "emb", Kind: alias.KindEmbeddings, Members: members("up-a/emb-1"), Strategy: alias.StrategyPriority}
 	for i, k := range []Key{
 		{Name: "full", Allow: []string{"*"}, Enabled: true},
 		{Name: "limited", Allow: []string{"fast", "up-a/*"}, Enabled: true},

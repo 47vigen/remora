@@ -81,8 +81,8 @@
         },
         "context_window": { "type": "integer", "minimum": 0 },
         "strategy": {
-          "description": "`round-robin` spreads requests over the compiled members at random with equal weight, falling back in order; omit it to try the members in order.",
-          "enum": ["round-robin"]
+          "description": "Which member a request tries first; omitted is `priority`. `priority` and `fill-first` try the members in order; `round-robin` rotates, `random` picks uniformly, `p2c` takes the less busy of two random members and `least-used` the least busy, by requests started in the last 60 seconds.",
+          "enum": ["priority", "fill-first", "round-robin", "random", "p2c", "least-used"]
         }
       }
     },

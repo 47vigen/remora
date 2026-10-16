@@ -101,16 +101,3 @@ func TestCompile_ErrorNamesPath(t *testing.T) {
 		t.Errorf("err = %v, want it to name the path fast -> inner -> fast", err)
 	}
 }
-
-func TestStrategyValid(t *testing.T) {
-	for _, s := range []Strategy{StrategyFallback, StrategyRoundRobin} {
-		if !s.Valid() {
-			t.Errorf("%q.Valid() = false, want true", s)
-		}
-	}
-	for _, s := range []Strategy{"fallback", "priority", "Round-Robin"} {
-		if s.Valid() {
-			t.Errorf("%q.Valid() = true, want false", s)
-		}
-	}
-}

@@ -70,11 +70,11 @@ func TestAliasesCRUD(t *testing.T) {
 		t.Errorf("put answer has no empty capabilities list: %s", body)
 	}
 	stored, _ := env.aliases.Get(t.Context(), "fast")
-	if got := refs(stored); !slices.Equal(got, []string{"cheap", "or/a"}) || stored.Strategy != alias.StrategyFallback {
+	if got := refs(stored); !slices.Equal(got, []string{"cheap", "or/a"}) || stored.Strategy != alias.StrategyPriority {
 		t.Errorf("stored after PUT = %+v", stored)
 	}
-	if strings.Contains(string(body), `"strategy"`) {
-		t.Errorf("put answer names the default strategy: %s", body)
+	if !strings.Contains(string(body), `"strategy":"priority"`) {
+		t.Errorf("put answer does not name the default strategy: %s", body)
 	}
 	if code, body := env.do(t, env.client, http.MethodPut, "/api/aliases/fast", `{"name":"slow","kind":"chat","members":["or/a"]}`); code != http.StatusBadRequest {
 		t.Errorf("put with a different name = %d %s", code, body)
@@ -108,7 +108,7 @@ func TestAliasErrors(t *testing.T) {
 		{"empty member", `{"name":"a","kind":"chat","members":[""]}`, nil, "member"},
 		{"bad name", `{"name":" a","kind":"chat","members":["or/a"]}`, nil, "name"},
 		{"negative context window", `{"name":"a","kind":"chat","members":["or/a"],"context_window":-1}`, nil, "context_window"},
-		{"unknown strategy", `{"name":"a","kind":"chat","members":["or/a"],"strategy":"random"}`, nil, "strategy"},
+		{"unknown strategy", `{"name":"a","kind":"chat","members":["or/a"],"strategy":"fallback"}`, nil, `strategy must be one of priority, fill-first, round-robin, random, p2c, least-used; got \"fallback\"`},
 		{"thinking on an api-key member", `{"name":"a","kind":"chat","members":["up-a/m1(low)"]}`, nil, "applies only to subscription models"},
 		{"unknown thinking level", `{"name":"a","kind":"chat","members":["antigravity/gemini-3-flash(extreme)"]}`, nil, `got \"extreme\"`},
 	} {
@@ -274,5 +274,35 @@ func TestFromGenAliasThinkingSuffix(t *testing.T) {
 	env.aliases.mu.Unlock()
 	if len(got) != 1 || got[0].Ref != "antigravity/gemini-3-flash(low)" {
 		t.Fatalf("stored members %+v, want the ref unchanged", got)
+	}
+}
+
+func TestFromGenAliasStrategy(t *testing.T) {
+	env := newTestEnv(t)
+	check := func(body, want string) {
+		t.Helper()
+		code, out := env.do(t, env.client, http.MethodPost, "/api/aliases/compile", body)
+		if code != http.StatusOK {
+			t.Fatalf("compile %s = %d %s", body, code, out)
+		}
+		code, out = env.do(t, env.client, http.MethodPost, "/api/aliases", body)
+		if code != http.StatusCreated {
+			t.Fatalf("create %s = %d %s", body, code, out)
+		}
+		var a aliasJSON
+		decode(t, out, &a)
+		if a.Strategy == nil || *a.Strategy != want {
+			t.Errorf("create %s answered strategy %v, want %q", body, a.Strategy, want)
+		}
+		env.aliases.mu.Lock()
+		got := env.aliases.m[a.Name].Strategy
+		env.aliases.mu.Unlock()
+		if string(got) != want {
+			t.Errorf("stored strategy %q, want %q", got, want)
+		}
+	}
+	check(`{"name":"none","kind":"chat","members":["or/a"]}`, "priority")
+	for _, st := range alias.Strategies {
+		check(fmt.Sprintf(`{"name":"s-%s","kind":"chat","members":["or/a"],"strategy":%q}`, st, st), string(st))
 	}
 }

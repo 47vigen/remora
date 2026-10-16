@@ -176,11 +176,13 @@ export type Alias = {
      */
     capabilities: Array<string>;
     context_window?: number;
-    /**
-     * `round-robin` spreads requests over the compiled members at random with equal weight, falling back in order; absent, the members are tried in order.
-     */
-    strategy?: 'round-robin';
+    strategy?: RoutingStrategy;
 };
+
+/**
+ * Which member (alias) or account (subscription provider) a request tries first; "busy" counts the requests started in the last 60 seconds, and ties go to declared order. `priority`: the first live member in order / the highest priority tier, rotating inside it. `fill-first`: the same as priority for an alias / one account at a time, priority high first, then oldest. `round-robin`: a rotation over the live members / accounts. `random`: uniform over the live members / accounts. `p2c`: two live members / accounts at random, the less busy one wins. `least-used`: the least busy live member / account. An alias without a strategy is `priority`; it is always set in an answer.
+ */
+export type RoutingStrategy = 'priority' | 'fill-first' | 'round-robin' | 'random' | 'p2c' | 'least-used';
 
 export type AliasList = {
     items: Array<Alias>;

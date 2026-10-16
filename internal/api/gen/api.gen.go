@@ -43,21 +43,6 @@ func (e AccountLoginStatusStatus) Valid() bool {
 	}
 }
 
-// Defines values for AliasStrategy.
-const (
-	RoundRobin AliasStrategy = "round-robin"
-)
-
-// Valid indicates whether the value is a known member of the AliasStrategy enum.
-func (e AliasStrategy) Valid() bool {
-	switch e {
-	case RoundRobin:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for AliasKind.
 const (
 	Chat          AliasKind = "chat"
@@ -256,6 +241,36 @@ func (e ProviderKind) Valid() bool {
 	}
 }
 
+// Defines values for RoutingStrategy.
+const (
+	FillFirst  RoutingStrategy = "fill-first"
+	LeastUsed  RoutingStrategy = "least-used"
+	P2c        RoutingStrategy = "p2c"
+	Priority   RoutingStrategy = "priority"
+	Random     RoutingStrategy = "random"
+	RoundRobin RoutingStrategy = "round-robin"
+)
+
+// Valid indicates whether the value is a known member of the RoutingStrategy enum.
+func (e RoutingStrategy) Valid() bool {
+	switch e {
+	case FillFirst:
+		return true
+	case LeastUsed:
+		return true
+	case P2c:
+		return true
+	case Priority:
+		return true
+	case Random:
+		return true
+	case RoundRobin:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SessionVia.
 const (
 	SessionViaSession SessionVia = "session"
@@ -422,12 +437,9 @@ type Alias struct {
 	Members []string `json:"members"`
 	Name    string   `json:"name"`
 
-	// Strategy `round-robin` spreads requests over the compiled members at random with equal weight, falling back in order; absent, the members are tried in order.
-	Strategy *AliasStrategy `json:"strategy,omitempty"`
+	// Strategy Which member (alias) or account (subscription provider) a request tries first; "busy" counts the requests started in the last 60 seconds, and ties go to declared order. `priority`: the first live member in order / the highest priority tier, rotating inside it. `fill-first`: the same as priority for an alias / one account at a time, priority high first, then oldest. `round-robin`: a rotation over the live members / accounts. `random`: uniform over the live members / accounts. `p2c`: two live members / accounts at random, the less busy one wins. `least-used`: the least busy live member / account. An alias without a strategy is `priority`; it is always set in an answer.
+	Strategy *RoutingStrategy `json:"strategy,omitempty"`
 }
-
-// AliasStrategy `round-robin` spreads requests over the compiled members at random with equal weight, falling back in order; absent, the members are tried in order.
-type AliasStrategy string
 
 // AliasChain defines model for AliasChain.
 type AliasChain struct {
@@ -742,6 +754,9 @@ type ProviderTestResult struct {
 	Message   string `json:"message"`
 	Ok        bool   `json:"ok"`
 }
+
+// RoutingStrategy Which member (alias) or account (subscription provider) a request tries first; "busy" counts the requests started in the last 60 seconds, and ties go to declared order. `priority`: the first live member in order / the highest priority tier, rotating inside it. `fill-first`: the same as priority for an alias / one account at a time, priority high first, then oldest. `round-robin`: a rotation over the live members / accounts. `random`: uniform over the live members / accounts. `p2c`: two live members / accounts at random, the less busy one wins. `least-used`: the least busy live member / account. An alias without a strategy is `priority`; it is always set in an answer.
+type RoutingStrategy string
 
 // Session defines model for Session.
 type Session struct {

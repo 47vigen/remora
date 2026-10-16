@@ -291,7 +291,7 @@ func (r *Reconciler) aliasRule(all map[string]alias.Alias, name string, isTarget
 	rule.Target = routes[0]
 	switch {
 	case len(routes) == 1:
-	case all[name].Strategy == alias.StrategyRoundRobin:
+	case all[name].Strategy.Spreads():
 		// The front door cannot tell which spread member it picked, so the chain may repeat it; a cap keeps a failing
 		// request from walking every member, each a full round through the OAuth engine's accounts.
 		rule.Spread, rule.Fallbacks = routes[1:], routes[:min(len(routes), maxFallbacks)]

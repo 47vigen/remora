@@ -368,3 +368,35 @@ func TestApplyNothingSkipsTheBatch(t *testing.T) {
 		t.Fatalf("applied %v, err %v; want a no-op apply to succeed without the engine", applied, err)
 	}
 }
+
+func TestPlanOmittedStrategyMatchesPriority(t *testing.T) {
+	w := populated()
+	doc, _ := exportDoc(t, w)
+	for _, a := range doc.Aliases {
+		if a.Name == "fast" && a.Strategy != "" {
+			t.Fatalf("fast exported with strategy %q, want omitted", a.Strategy)
+		}
+	}
+	plan, err := w.service().Plan(context.Background(), doc, nil, true)
+	if err != nil || len(plan) != 0 {
+		t.Errorf("omitted vs stored priority: plan = %+v, %v", plan, err)
+	}
+	w.aliases["inner"] = alias.Alias{Name: "inner", Kind: alias.KindChat, Members: members("up-a/m1"), Strategy: alias.StrategyRandom}
+	plan, err = w.service().Plan(context.Background(), doc, nil, true)
+	if err != nil || !reflect.DeepEqual(plan, []Change{{Op: "update", Kind: "alias", Name: "inner", Fields: []string{"strategy"}}}) {
+		t.Errorf("random vs round-robin: plan = %+v, %v", plan, err)
+	}
+}
+
+func TestExportOmitsPriority(t *testing.T) {
+	w := populated()
+	w.aliases["emb"] = alias.Alias{Name: "emb", Kind: alias.KindEmbeddings, Members: members("up-a/emb-1"), Strategy: alias.StrategyP2C}
+	doc, _ := exportDoc(t, w)
+	got := map[string]string{}
+	for _, a := range doc.Aliases {
+		got[a.Name] = a.Strategy
+	}
+	if want := map[string]string{"emb": "p2c", "fast": "", "inner": "round-robin"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("exported strategies = %v, want %v", got, want)
+	}
+}

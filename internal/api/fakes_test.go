@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -295,6 +296,7 @@ func (f *fakeAliases) Put(_ context.Context, a alias.Alias, create bool) (alias.
 	if f.m == nil {
 		f.m = map[string]alias.Alias{}
 	}
+	a.Strategy = cmp.Or(a.Strategy, alias.StrategyPriority) // as the store writes it
 	f.m[a.Name] = a
 	return a, nil
 }

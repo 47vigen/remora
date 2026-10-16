@@ -26,10 +26,8 @@ func toGenAlias(a alias.Alias) gen.Alias {
 		cw := a.ContextWindow
 		out.ContextWindow = &cw
 	}
-	if a.Strategy != alias.StrategyFallback {
-		st := gen.AliasStrategy(a.Strategy)
-		out.Strategy = &st
-	}
+	st := gen.RoutingStrategy(cmp.Or(a.Strategy, alias.StrategyPriority))
+	out.Strategy = &st
 	return out
 }
 
@@ -64,13 +62,17 @@ func fromGenAlias(b *gen.Alias) (alias.Alias, error) {
 		}
 		a.ContextWindow = *b.ContextWindow
 	}
+	a.Strategy = alias.StrategyPriority
 	if b.Strategy != nil {
-		if !b.Strategy.Valid() {
-			return alias.Alias{}, badRequest(fmt.Sprintf("strategy must be round-robin or absent; got %q", *b.Strategy))
+		if a.Strategy = alias.Strategy(*b.Strategy); !a.Strategy.Valid() {
+			return alias.Alias{}, badStrategy(a.Strategy)
 		}
-		a.Strategy = alias.Strategy(*b.Strategy)
 	}
 	return a, nil
+}
+
+func badStrategy(st alias.Strategy) error {
+	return badRequest(fmt.Sprintf("strategy must be one of priority, fill-first, round-robin, random, p2c, least-used; got %q", st))
 }
 
 // coolingUntil maps each cooling target to when it cools down (the latest, should a target be listed twice).
