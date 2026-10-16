@@ -42,22 +42,48 @@ type Cooldown struct {
 // Credential is one entry of GET /credentials. Name is the credential file name; Provider is the engine's provider
 // id (for example "xai", which remora shows as "grok"). Fields the engine sends but remora does not use are dropped.
 type Credential struct {
-	ID             string     `json:"id"`
-	AuthIndex      string     `json:"auth_index"`
-	Name           string     `json:"name"`
-	Provider       string     `json:"provider"`
-	Label          string     `json:"label"`
-	Email          string     `json:"email,omitempty"`
-	Status         string     `json:"status"`
-	StatusMessage  string     `json:"status_message"`
-	Disabled       bool       `json:"disabled"`
-	Unavailable    bool       `json:"unavailable"`
-	NextRetryAfter *time.Time `json:"next_retry_after,omitempty"`
-	Quota          Quota      `json:"quota"`
-	Cooldowns      []Cooldown `json:"cooldowns"`
-	Success        int64      `json:"success"`
-	Failed         int64      `json:"failed"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID             string         `json:"id"`
+	AuthIndex      string         `json:"auth_index"`
+	Name           string         `json:"name"`
+	Provider       string         `json:"provider"`
+	Label          string         `json:"label"`
+	Email          string         `json:"email,omitempty"`
+	ProjectID      string         `json:"project_id,omitempty"`
+	IDToken        *IDTokenClaims `json:"id_token,omitempty"`
+	Status         string         `json:"status"`
+	StatusMessage  string         `json:"status_message"`
+	Disabled       bool           `json:"disabled"`
+	Unavailable    bool           `json:"unavailable"`
+	NextRetryAfter *time.Time     `json:"next_retry_after,omitempty"`
+	Quota          Quota          `json:"quota"`
+	Cooldowns      []Cooldown     `json:"cooldowns"`
+	Success        int64          `json:"success"`
+	Failed         int64          `json:"failed"`
+	UpdatedAt      time.Time      `json:"updated_at"`
+}
+
+// IDTokenClaims are the Codex id_token claims the engine lists with a credential.
+type IDTokenClaims struct {
+	ChatGPTAccountID string `json:"chatgpt_account_id"`
+	PlanType         string `json:"plan_type"`
+}
+
+// APICallRequest asks the engine to send one HTTP request upstream as a credential. "$TOKEN$" in Header or Data
+// becomes the credential's token.
+type APICallRequest struct {
+	AuthIndex string            `json:"auth_index"`
+	Method    string            `json:"method"`
+	URL       string            `json:"url"`
+	Header    map[string]string `json:"header,omitempty"`
+	Data      string            `json:"data,omitempty"`
+	ProxyURL  string            `json:"proxy_url,omitempty"`
+}
+
+// APICallResponse is the upstream's answer; a non-2xx StatusCode is an answer, not an error.
+type APICallResponse struct {
+	StatusCode int                 `json:"status_code"`
+	Header     map[string][]string `json:"header"`
+	Body       string              `json:"body"`
 }
 
 // Error is a non-2xx answer from the engine. Message is the body's "error" field, followed by its "message" field

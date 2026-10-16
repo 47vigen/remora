@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -478,5 +479,71 @@ func TestAwaitCredentialModelsBoundsSlowReads(t *testing.T) {
 	got, err := cliproxyapi.New(srv.URL, "s", nil).AwaitCredentialModels(context.Background(), "codex-a.json", "codex", 20*time.Millisecond)
 	if err != nil || len(got) != 0 || time.Since(start) > time.Second {
 		t.Fatalf("models %v, err %v after %v; want none within the rounds", got, err, time.Since(start))
+	}
+}
+
+func TestAPICallReplacesTokenAndReturnsUpstreamStatus(t *testing.T) {
+	var gotAuth, gotBody string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.Header().Set("X-A", "b")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"e":1}`))
+	}))
+	t.Cleanup(up.Close)
+	c, f := newClient(t)
+	f.AddCredential(cliproxyapi.Credential{Name: "c1", AuthIndex: "ai1", Provider: "codex"})
+	f.SetToken("c1", "tok-secret")
+
+	got, err := c.APICall(context.Background(), cliproxyapi.APICallRequest{
+		AuthIndex: "ai1", Method: http.MethodPost, URL: up.URL + "/x",
+		Header: map[string]string{"Authorization": "Bearer $TOKEN$"}, Data: `{"project":"p"}`,
+	})
+	if err != nil {
+		t.Fatalf("APICall: %v", err)
+	}
+	if got.StatusCode != http.StatusTooManyRequests || got.Body != `{"e":1}` || got.Header["X-A"][0] != "b" {
+		t.Errorf("APICall = %+v", got)
+	}
+	if gotAuth != "Bearer tok-secret" || gotBody != `{"project":"p"}` {
+		t.Errorf("upstream saw auth %q body %q", gotAuth, gotBody)
+	}
+}
+
+func TestAPICallEngineRefusal(t *testing.T) {
+	c, _ := newClient(t)
+	for name, in := range map[string]cliproxyapi.APICallRequest{
+		"invalid url": {Method: http.MethodGet, URL: "not a url"},
+		"unknown index": {
+			AuthIndex: "nope", Method: http.MethodGet, URL: "http://example.test/",
+			Header: map[string]string{"Authorization": "Bearer $TOKEN$"},
+		},
+	} {
+		_, err := c.APICall(context.Background(), in)
+		var e *cliproxyapi.Error
+		if !errors.As(err, &e) || e.StatusCode != http.StatusBadRequest {
+			t.Errorf("%s: err = %v, want *Error 400", name, err)
+		}
+	}
+}
+
+func TestCredentialsCarryProjectAndIDToken(t *testing.T) {
+	c, f := newClient(t)
+	f.AddCredential(cliproxyapi.Credential{Name: "a.json", Provider: "antigravity", ProjectID: "p1"})
+	f.AddCredential(cliproxyapi.Credential{
+		Name: "b.json", Provider: "codex",
+		IDToken: &cliproxyapi.IDTokenClaims{ChatGPTAccountID: "acct", PlanType: "plus"},
+	})
+	got, err := c.Credentials(context.Background())
+	if err != nil {
+		t.Fatalf("Credentials: %v", err)
+	}
+	if got[0].ProjectID != "p1" || got[0].IDToken != nil {
+		t.Errorf("antigravity = %+v", got[0])
+	}
+	if got[1].IDToken == nil || *got[1].IDToken != (cliproxyapi.IDTokenClaims{ChatGPTAccountID: "acct", PlanType: "plus"}) {
+		t.Errorf("codex = %+v", got[1])
 	}
 }
