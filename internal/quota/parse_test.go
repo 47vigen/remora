@@ -1,6 +1,7 @@
 package quota
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -183,5 +184,12 @@ func TestWindowLabel(t *testing.T) {
 		if got := windowLabel(secs); got != want {
 			t.Errorf("windowLabel(%d) = %q, want %q", secs, got, want)
 		}
+	}
+}
+
+func TestDecodeRejectsNull(t *testing.T) {
+	var v map[string]any
+	if err := decode([]byte("null"), &v); !errors.Is(err, errNotObject) {
+		t.Errorf("decode(null) = %v, want errNotObject", err)
 	}
 }

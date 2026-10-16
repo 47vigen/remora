@@ -35,10 +35,11 @@ type Service struct {
 	log *slog.Logger
 	f   *fetcher
 
-	wake     chan struct{}
-	mu       sync.Mutex
-	queue    []int64       // on-demand checks, in order
-	failures map[int64]int // consecutive 429/5xx per account
+	wake      chan struct{}
+	mu        sync.Mutex
+	queue     []int64             // on-demand checks, in order
+	failures  map[int64]int       // consecutive 429/5xx per account
+	requested map[int64]time.Time // last accepted on-demand refresh, so a check in flight still holds the floor
 }
 
 // spaced keeps at least Spacing between upstream calls, including the calls inside one check.
@@ -73,7 +74,7 @@ func New(eng Engine, st *store.Store, cfg Config, log *slog.Logger) *Service {
 			eng: &spaced{Engine: eng}, base: cfg.BaseURL, plans: map[int64]time.Time{},
 			ver: newVersionCache(&http.Client{}, upstream(cfg.BaseURL, antigravityManifestURL)),
 		},
-		wake: make(chan struct{}, 1), failures: map[int64]int{},
+		wake: make(chan struct{}, 1), failures: map[int64]int{}, requested: map[int64]time.Time{},
 	}
 }
 
@@ -125,7 +126,8 @@ func (s *Service) round(ctx context.Context) time.Duration {
 		if !ok {
 			break
 		}
-		if i := slices.IndexFunc(rows, func(a store.Account) bool { return a.ID == id }); i >= 0 && byName[rows[i].Credential] != nil {
+		if i := slices.IndexFunc(rows, func(a store.Account) bool { return a.ID == id }); i >= 0 && rows[i].Enabled &&
+			byName[rows[i].Credential] != nil && !byName[rows[i].Credential].Disabled {
 			pick = &rows[i]
 		}
 	}
@@ -287,10 +289,12 @@ func (s *Service) Refresh(ctx context.Context, accountID int64, provider string)
 	now := time.Now()
 	s.mu.Lock()
 	for _, a := range targets {
-		if q, ok := snaps[a.ID]; !a.Enabled || (ok && now.Sub(q.CheckedAt) < RefreshFloor) {
+		q, ok := snaps[a.ID]
+		if !a.Enabled || (ok && now.Sub(q.CheckedAt) < RefreshFloor) || now.Sub(s.requested[a.ID]) < RefreshFloor {
 			skipped = append(skipped, a.ID)
 			continue
 		}
+		s.requested[a.ID] = now // the snapshot only moves once the check finishes
 		queued = append(queued, a.ID)
 		if !slices.Contains(s.queue, a.ID) {
 			s.queue = append(s.queue, a.ID)

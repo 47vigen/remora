@@ -347,3 +347,36 @@ func TestRefreshFloor(t *testing.T) {
 		}
 	})
 }
+
+func TestRefreshHoldsFloorWhileQueued(t *testing.T) {
+	bubble(t, func(t *testing.T) {
+		r := newRig(t, 0)
+		a := r.add("a", "codex")
+		ctx := context.Background()
+		if q, _, _ := r.svc.Refresh(ctx, a, ""); len(q) != 1 {
+			t.Fatalf("first refresh queued %v", q)
+		}
+		if q, s, _ := r.svc.Refresh(ctx, a, ""); len(q) != 0 || len(s) != 1 {
+			t.Errorf("second refresh before the check: queued %v skipped %v, want skipped [a]", q, s)
+		}
+	})
+}
+
+func TestQueuedRefreshSkipsDisabledAccount(t *testing.T) {
+	bubble(t, func(t *testing.T) {
+		r := newRig(t, 0)
+		a := r.add("a", "codex")
+		ctx := context.Background()
+		if q, _, _ := r.svc.Refresh(ctx, a, ""); len(q) != 1 {
+			t.Fatalf("refresh queued %v", q)
+		}
+		if err := r.st.SetAccountEnabled(ctx, a, false); err != nil {
+			t.Fatal(err)
+		}
+		r.run(t)
+		time.Sleep(10 * time.Second)
+		if n := len(r.e.recorded()); n != 0 {
+			t.Errorf("calls = %d, want 0 for an account disabled after queueing", n)
+		}
+	})
+}

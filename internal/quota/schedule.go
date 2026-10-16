@@ -47,10 +47,11 @@ func nextPoll(a store.Account, c *cliproxyapi.Credential, q *store.AccountQuota,
 	return at, true
 }
 
-// exhausted: the provider says the limit is reached, or every window is known and at 0.
+// exhausted: every window is known and at 0, or, with no windows, the provider says the limit is reached. One
+// empty window must not hold back polling of the others.
 func exhausted(q store.AccountQuota) bool {
-	if q.LimitReached {
-		return true
+	if len(q.Windows) == 0 {
+		return q.LimitReached
 	}
 	for _, w := range q.Windows {
 		if w.Remaining == nil || *w.Remaining > 0 {

@@ -61,7 +61,9 @@ func TestNextPoll(t *testing.T) {
 		CheckedAt: n.Add(-time.Minute), LimitReached: true,
 		Windows: []store.QuotaWindow{win("gemini", "5h", f(0), &r), win("gemini", "weekly", f(0.5), new(n.Add(time.Hour)))},
 	}
-	want("exhausted", ag, cred, exhausted, 0, r)
+	want("one window empty keeps the interval", ag, cred, exhausted, 0, n.Add(14*time.Minute))
+	exhausted.Windows[1] = win("gemini", "weekly", f(0), new(n.Add(3*time.Hour)))
+	want("every window empty waits for the earliest reset", ag, cred, exhausted, 0, r)
 	after := *exhausted
 	after.CheckedAt = r
 	want("after the reset", ag, cred, &after, 0, r.Add(iv))

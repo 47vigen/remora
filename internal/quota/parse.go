@@ -37,7 +37,7 @@ func (o opt[T]) ptr() *T {
 // decode fills v from body; err only when body is not a JSON object.
 func decode(body []byte, v any) error {
 	var probe map[string]json.RawMessage
-	if json.Unmarshal(body, &probe) != nil {
+	if json.Unmarshal(body, &probe) != nil || probe == nil {
 		return errNotObject
 	}
 	_ = json.Unmarshal(body, v)
