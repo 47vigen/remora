@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -54,7 +55,6 @@ func main() {
 		mu.Unlock()
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), *d)
-	defer cancel()
 	start := time.Now()
 	var wg sync.WaitGroup
 	for range *c {
@@ -66,7 +66,7 @@ func main() {
 					method, rd = http.MethodGet, nil
 				}
 				// The request outlives ctx on purpose: a request in flight at the deadline still counts.
-				req, _ := http.NewRequestWithContext(context.Background(), method, *url, rd)
+				req, _ := http.NewRequestWithContext(context.WithoutCancel(ctx), method, *url, rd)
 				req.Header.Set("Content-Type", "application/json")
 				if *key != "" {
 					req.Header.Set("Authorization", "Bearer "+*key)
@@ -104,6 +104,7 @@ func main() {
 		})
 	}
 	wg.Wait()
+	cancel()
 	wall := time.Since(start)
 	slices.Sort(tot)
 	slices.Sort(ttft)
@@ -136,15 +137,15 @@ func countData(r *bufio.Reader, onFirst func()) (int, error) {
 			n++
 		}
 		switch {
-		case err == bufio.ErrBufferFull:
+		case errors.Is(err, bufio.ErrBufferFull):
 			// A line longer than the buffer: skip its rest.
-			for err == bufio.ErrBufferFull {
+			for errors.Is(err, bufio.ErrBufferFull) {
 				_, err = r.ReadSlice('\n')
 			}
-			if err != nil && err != io.EOF {
+			if err != nil && !errors.Is(err, io.EOF) {
 				return n, err
 			}
-		case err == io.EOF:
+		case errors.Is(err, io.EOF):
 			return n, nil
 		case err != nil:
 			return n, err
