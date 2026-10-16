@@ -16,6 +16,8 @@ type bodySpans struct {
 	messages  span // the last top-level key equal to "messages" under case folding, as encoding/json picks it
 	input     span // the same for "input"
 	firstUser span // the first element of messages, else of an input array, that is an object with "role": "user"
+	// messagesNotList is set when any "messages" (under case folding) holds something other than a list or null.
+	messagesNotList bool
 }
 
 // scanBody finds the model the way the engine's decoder would see it and records the spans the proxy needs. The
@@ -50,6 +52,9 @@ func scanBody(raw []byte) (model string, sp bodySpans, err error) {
 			}
 		case strings.EqualFold(k, "messages"):
 			sp.messages = v
+			if c := raw[v.start]; c != '[' && c != 'n' {
+				sp.messagesNotList = true
+			}
 		case strings.EqualFold(k, "input"):
 			sp.input = v
 		}

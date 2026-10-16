@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"net/http"
 	"strings"
 )
@@ -23,13 +22,16 @@ const base62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 // opencodeSession is the client's own session id when it sent a usable one. Otherwise it is derived from the
 // conversation's first message, so every turn of one conversation carries the same id, in OpenCode's "ses_" format.
 // A body with no message gets a random id.
-func opencodeSession(h http.Header, body []byte) string {
+func opencodeSession(h http.Header, body []byte, sp bodySpans) string {
 	if v := strings.TrimSpace(h.Get(headerOpencodeSession)); v != "" && len(v) <= maxSessionLen && !strings.ContainsFunc(v, isControl) {
 		return v
 	}
 	var sum [sha256.Size]byte
-	if first := firstMessage(body); first != nil {
-		sum = sha256.Sum256(append([]byte("opencode\x00ses_\x00"), first...))
+	if first := firstMessage(body, sp); first != nil {
+		hash := sha256.New()
+		_, _ = hash.Write([]byte("opencode\x00ses_\x00"))
+		_, _ = hash.Write(first)
+		hash.Sum(sum[:0])
 	} else {
 		_, _ = rand.Read(sum[:])
 	}
@@ -40,24 +42,31 @@ func opencodeSession(h http.Header, body []byte) string {
 	return "ses_" + hex.EncodeToString(sum[:6]) + string(id)
 }
 
-// firstMessage is the first entry of a chat "messages" or a Responses "input" list, or a string input itself.
-func firstMessage(body []byte) []byte {
-	var b struct {
-		Messages []json.RawMessage `json:"messages"`
-		Input    json.RawMessage   `json:"input"`
-	}
-	if json.Unmarshal(body, &b) != nil {
+// firstMessage is the first entry of a chat "messages" or a Responses "input" list, or a string input itself, read
+// from the spans scanBody recorded. It answers exactly as decoding into
+// struct{ Messages []json.RawMessage; Input json.RawMessage } did: a "messages" value that is not a list (or null)
+// fails that decode, so it gives nil.
+func firstMessage(body []byte, sp bodySpans) []byte {
+	if sp.messagesNotList {
 		return nil
 	}
-	if len(b.Messages) > 0 {
-		return b.Messages[0]
+	first := func(arr span) []byte {
+		var out []byte
+		forEachElement(body, arr, func(el span) bool { out = body[el.start:el.end]; return false })
+		return out
 	}
-	var input []json.RawMessage
-	if json.Unmarshal(b.Input, &input) == nil && len(input) > 0 {
-		return input[0]
+	if v := sp.messages; v.end > 0 && body[v.start] == '[' {
+		if m := first(v); m != nil {
+			return m
+		}
 	}
-	if len(b.Input) > 0 && b.Input[0] == '"' {
-		return b.Input
+	if v := sp.input; v.end > 0 {
+		switch body[v.start] {
+		case '[':
+			return first(v)
+		case '"':
+			return body[v.start:v.end]
+		}
 	}
 	return nil
 }

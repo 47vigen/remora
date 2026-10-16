@@ -48,7 +48,7 @@ func BenchmarkRequestPath(b *testing.B) {
 				if err != nil {
 					b.Fatal(err)
 				}
-				_ = opencodeSession(h, out)
+				_, _ = out, opencodeSession(h, raw, sp)
 			}
 		})
 	}
@@ -75,11 +75,15 @@ func BenchmarkOpencodeSession(b *testing.B) {
 	h := http.Header{}
 	for _, n := range sizes {
 		body := benchChatBody(n)
+		_, sp, err := scanBody(body)
+		if err != nil {
+			b.Fatal(err)
+		}
 		b.Run(fmt.Sprintf("%dKB", len(body)/1024), func(b *testing.B) {
 			b.SetBytes(int64(len(body)))
 			b.ReportAllocs()
 			for b.Loop() {
-				_ = opencodeSession(h, body)
+				_ = opencodeSession(h, body, sp)
 			}
 		})
 	}
