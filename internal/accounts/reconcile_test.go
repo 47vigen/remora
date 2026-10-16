@@ -84,6 +84,7 @@ func wantSettings(t *testing.T, m map[string]any) {
 		"requests.streaming.keepalive-seconds":              15.0,
 		"oauth.providers.antigravity.connection-pool":       map[string]any{"enabled": true, "idle-conn-timeout": "90s", "max-idle-conns-per-host": 8.0},
 		"upstream.codex.model-level-cooling":                true,
+		"routing.provider-strategies":                       jsonRoundTrip(map[string]any{"x": EngineStrategies(nil)})["x"],
 	} {
 		if got := at(m, path); !reflect.DeepEqual(got, want) {
 			t.Errorf("%s = %#v, want %#v", path, got, want)
@@ -147,7 +148,7 @@ func TestReconcileSettingsPresentAtStart(t *testing.T) {
 	// Settings the engine loaded from its file at start are applied; there is nothing to write.
 	e := newEnv(t)
 	e.setClientKey(t)
-	if err := cliproxyapi.New(e.fake.URL, testSecret, nil).PatchConfig(context.Background(), settingsPatch(testClientKey, false)); err != nil {
+	if err := cliproxyapi.New(e.fake.URL, testSecret, nil).PatchConfig(context.Background(), settingsPatch(testClientKey, false, EngineStrategies(nil))); err != nil {
 		t.Fatalf("PatchConfig: %v", err)
 	}
 	e.reconcile(t)
@@ -178,7 +179,7 @@ func TestReconcileAddsNewSettings(t *testing.T) {
 // so neither can drift from the other.
 func TestSettingsPatchMatchesRenderedFile(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := supervise.CLIProxyAPIEngine(config.Config{DataDir: dir, EngineDir: "/e"}, supervise.Credentials{CLIProxyAPIKey: testClientKey}); err != nil {
+	if _, err := supervise.CLIProxyAPIEngine(config.Config{DataDir: dir, EngineDir: "/e"}, supervise.Credentials{CLIProxyAPIKey: testClientKey}, EngineStrategies(nil)); err != nil {
 		t.Fatalf("CLIProxyAPIEngine: %v", err)
 	}
 	raw, err := os.ReadFile(dir + "/cliproxyapi/config.yaml") //nolint:gosec // G304: a path under t.TempDir().
@@ -190,7 +191,7 @@ func TestSettingsPatchMatchesRenderedFile(t *testing.T) {
 		t.Fatalf("decode config.yaml: %v", err)
 	}
 	file = jsonRoundTrip(file)
-	patch := jsonRoundTrip(settingsPatch(testClientKey, false))
+	patch := jsonRoundTrip(settingsPatch(testClientKey, false, EngineStrategies(nil)))
 	if !containsAll(file, patch) {
 		t.Errorf("rendered file lacks part of the patch:\nfile  %v\npatch %v", file, patch)
 	}
@@ -208,7 +209,7 @@ func TestReconcileSettingsDrift(t *testing.T) {
 	e := newEnv(t)
 	e.setClientKey(t)
 	c := cliproxyapi.New(e.fake.URL, testSecret, nil)
-	if err := c.PatchConfig(context.Background(), settingsPatch(testClientKey, false)); err != nil {
+	if err := c.PatchConfig(context.Background(), settingsPatch(testClientKey, false, EngineStrategies(nil))); err != nil {
 		t.Fatalf("PatchConfig: %v", err)
 	}
 	if err := c.PatchConfig(context.Background(), map[string]any{

@@ -39,6 +39,8 @@ type cliproxyRouting struct {
 	SessionAffinity         bool   `yaml:"session-affinity"`
 	SessionAffinityTTL      string `yaml:"session-affinity-ttl"`
 	SessionAffinityRebindOn string `yaml:"session-affinity-rebind-on"`
+	// ProviderStrategies is the strategy per engine provider id (accounts.EngineStrategies).
+	ProviderStrategies map[string]string `yaml:"provider-strategies"`
 }
 
 type cliproxyRetry struct {
@@ -109,8 +111,9 @@ type cliproxyPlugins struct {
 
 // CLIProxyAPIEngine renders $DATA/cliproxyapi/config.yaml (0600) and returns the OAuth engine's Engine. It renders
 // on every boot: the engine has no port flag, so its port lives only in this file. The engine rewrites the
-// plaintext secret-key as a bcrypt hash on load; rendering the plaintext again is harmless.
-func CLIProxyAPIEngine(cfg config.Config, c Credentials) (Engine, error) {
+// plaintext secret-key as a bcrypt hash on load; rendering the plaintext again is harmless. providerStrategies is
+// accounts.EngineStrategies of the stored strategies.
+func CLIProxyAPIEngine(cfg config.Config, c Credentials, providerStrategies map[string]string) (Engine, error) {
 	dir := filepath.Join(cfg.DataDir, "cliproxyapi")
 	authDir := filepath.Join(dir, "auths")
 	path := filepath.Join(dir, "config.yaml")
@@ -136,6 +139,7 @@ func CLIProxyAPIEngine(cfg config.Config, c Credentials) (Engine, error) {
 			SessionAffinity:         true,
 			SessionAffinityTTL:      "1h",
 			SessionAffinityRebindOn: "quota",
+			ProviderStrategies:      providerStrategies,
 		},
 		Requests: cliproxyRequests{Streaming: cliproxyStreaming{BootstrapRetries: 1, KeepaliveSeconds: 15}},
 		Upstream: cliproxyUpstream{Codex: cliproxyCodex{ModelLevelCooling: true}},

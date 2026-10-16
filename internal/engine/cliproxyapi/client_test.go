@@ -480,3 +480,23 @@ func TestAwaitCredentialModelsBoundsSlowReads(t *testing.T) {
 		t.Fatalf("models %v, err %v after %v; want none within the rounds", got, err, time.Since(start))
 	}
 }
+
+func TestSetCredentialPriority(t *testing.T) {
+	c, f := newClient(t)
+	ctx := context.Background()
+	f.AddCredential(cliproxyapi.Credential{Name: "x.json", Provider: "codex"})
+	if err := c.SetCredentialPriority(ctx, "x.json", 3); err != nil {
+		t.Fatalf("SetCredentialPriority: %v", err)
+	}
+	if cr, _, _ := f.Credential("x.json"); cr.Priority != 3 {
+		t.Errorf("fake priority = %d, want 3", cr.Priority)
+	}
+	creds, err := c.Credentials(ctx)
+	if err != nil || len(creds) != 1 || creds[0].Priority != 3 {
+		t.Errorf("Credentials = %+v, %v; want priority 3", creds, err)
+	}
+	var e *cliproxyapi.Error
+	if err := c.SetCredentialPriority(ctx, "missing.json", 1); !errors.As(err, &e) || e.StatusCode != http.StatusNotFound {
+		t.Errorf("missing credential: err = %v, want 404", err)
+	}
+}

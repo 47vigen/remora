@@ -102,7 +102,11 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	if err != nil {
 		return fmt.Errorf("ensure engine credentials: %w", err)
 	}
-	cliproxy, err := supervise.CLIProxyAPIEngine(cfg, creds)
+	stored, err := st.AccountStrategies(ctx)
+	if err != nil {
+		return fmt.Errorf("read account strategies: %w", err)
+	}
+	cliproxy, err := supervise.CLIProxyAPIEngine(cfg, creds, accounts.EngineStrategies(stored))
 	if err != nil {
 		return fmt.Errorf("render engine config: %w", err)
 	}

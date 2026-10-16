@@ -562,6 +562,12 @@ func (f *Fake) patchFields(w http.ResponseWriter, r *http.Request) {
 		}
 		cr.prefix = strings.TrimSpace(p)
 	}
+	if raw, ok := req["priority"]; ok {
+		if err := json.Unmarshal(raw, &cr.c.Priority); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "priority must be an integer"})
+			return
+		}
+	}
 	cr.c.UpdatedAt = time.Now().UTC()
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }

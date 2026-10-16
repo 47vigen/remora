@@ -3,8 +3,11 @@ package store
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
+
+	"github.com/47vigen/remora/internal/alias"
 )
 
 // account builds an enabled account; credential is the engine's credential file name, not a secret.
@@ -120,5 +123,45 @@ func TestAccountMissingIsNotFound(t *testing.T) {
 	}
 	if _, err := s.Account(ctx, 999); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Account(999) err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestAccountPriorityAndStrategies(t *testing.T) {
+	ctx := context.Background()
+	s := openTemp(t)
+	a, err := s.CreateAccount(ctx, account("codex", "a@x", "codex-a.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Priority != 0 {
+		t.Errorf("new account priority = %d", a.Priority)
+	}
+	if err := s.SetAccountPriority(ctx, a.ID, 7); err != nil {
+		t.Fatalf("SetAccountPriority: %v", err)
+	}
+	if got, err := s.Account(ctx, a.ID); err != nil || got.Priority != 7 {
+		t.Errorf("Account = %+v, %v; want priority 7", got, err)
+	}
+	if rows, _ := s.Accounts(ctx); len(rows) != 1 || rows[0].Priority != 7 {
+		t.Errorf("Accounts = %+v", rows)
+	}
+	if err := s.SetAccountPriority(ctx, a.ID+100, 1); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown id: err = %v, want ErrNotFound", err)
+	}
+
+	if got, err := s.AccountStrategies(ctx); err != nil || len(got) != 0 {
+		t.Errorf("AccountStrategies = %v, %v; want empty", got, err)
+	}
+	for _, st := range []alias.Strategy{alias.StrategyP2C, alias.StrategyFillFirst} {
+		if err := s.SetAccountStrategy(ctx, "codex", st); err != nil {
+			t.Fatalf("SetAccountStrategy: %v", err)
+		}
+	}
+	if err := s.SetAccountStrategy(ctx, "grok", alias.StrategyRandom); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.AccountStrategies(ctx)
+	if want := map[string]alias.Strategy{"codex": alias.StrategyFillFirst, "grok": alias.StrategyRandom}; err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("AccountStrategies = %v, %v; want %v", got, err, want)
 	}
 }

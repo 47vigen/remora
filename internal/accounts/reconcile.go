@@ -1,12 +1,17 @@
 package accounts
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"time"
+
+	"github.com/47vigen/remora/internal/alias"
+	"github.com/47vigen/remora/internal/store"
 )
 
 // settleDelay is how long after a settings write a later pass writes the settings once more through a changed file
@@ -52,8 +57,8 @@ func (s *Service) Reconcile(ctx context.Context) error {
 // providers; PATCH replaces lists, so access.api-keys holds only remora's key. twice lists the key twice: the same
 // access through a different file. request-retry and bootstrap-retries retry only before the first byte reaches the
 // client, absorbing a short capacity spike; the antigravity pool reuses upstream connections instead of a TLS
-// handshake per request.
-func settingsPatch(key string, twice bool) map[string]any {
+// handshake per request. providerStrategies is EngineStrategies of the stored ones.
+func settingsPatch(key string, twice bool, providerStrategies map[string]string) map[string]any {
 	keys := []any{key}
 	if twice {
 		keys = append(keys, key)
@@ -66,6 +71,7 @@ func settingsPatch(key string, twice bool) map[string]any {
 			"retry":              map[string]any{"request-retry": 1, "max-retry-interval": 10},
 			"cooldown":           map[string]any{"save-cooldown-status": true, "transient-error-cooldown-seconds": 5},
 			"session-affinity":   true, "session-affinity-ttl": "1h", "session-affinity-rebind-on": "quota",
+			"provider-strategies": providerStrategies,
 		},
 		"requests": map[string]any{"streaming": map[string]any{"bootstrap-retries": 1, "keepalive-seconds": 15}},
 		"oauth": map[string]any{"providers": map[string]any{"antigravity": map[string]any{"connection-pool": map[string]any{
@@ -92,7 +98,12 @@ func (s *Service) reconcileSettings(ctx context.Context, key string) error {
 	if err := json.Unmarshal(raw, &cur); err != nil {
 		return fmt.Errorf("accounts: read engine settings: %w", err)
 	}
-	want := settingsPatch(key, false)
+	stored, err := s.store.AccountStrategies(ctx)
+	if err != nil {
+		return fmt.Errorf("accounts: read strategies: %w", err)
+	}
+	strategies := EngineStrategies(stored)
+	want := settingsPatch(key, false, strategies)
 	if !containsAll(cur, jsonRoundTrip(want)) {
 		if err := s.engine.PatchConfig(ctx, want); err != nil {
 			return fmt.Errorf("accounts: write engine settings: %w", err)
@@ -104,7 +115,7 @@ func (s *Service) reconcileSettings(ctx context.Context, key string) error {
 	if s.settingsWrittenAt.IsZero() || s.now().Sub(s.settingsWrittenAt) < settleDelay {
 		return nil
 	}
-	if err := s.engine.PatchConfig(ctx, settingsPatch(key, true)); err != nil {
+	if err := s.engine.PatchConfig(ctx, settingsPatch(key, true, strategies)); err != nil {
 		return fmt.Errorf("accounts: rewrite engine settings: %w", err)
 	}
 	if err := s.engine.PatchConfig(ctx, want); err != nil {
@@ -114,7 +125,8 @@ func (s *Service) reconcileSettings(ctx context.Context, key string) error {
 	return nil
 }
 
-// reconcileCredentials applies each row's enabled state and deletes the credentials the store does not know.
+// reconcileCredentials applies each row's enabled state and priority tier and deletes the credentials the store does
+// not know.
 //
 // The reads run in this order on purpose: credentials, then the pending logins, then the rows. A credential an
 // import uploads already has its row, and a login marks itself adopted only after its rows exist, so any credential
@@ -130,6 +142,19 @@ func (s *Service) reconcileCredentials(ctx context.Context) error {
 		return fmt.Errorf("accounts: reconcile: %w", err)
 	}
 
+	strategies, err := s.store.AccountStrategies(ctx)
+	if err != nil {
+		return fmt.Errorf("accounts: reconcile: %w", err)
+	}
+	byProvider := map[string][]store.Account{}
+	for _, row := range rows {
+		byProvider[row.Provider] = append(byProvider[row.Provider], row)
+	}
+	tiers := map[string]int{}
+	for provider, pool := range byProvider {
+		maps.Copy(tiers, NativePriorities(cmp.Or(strategies[provider], alias.StrategyRoundRobin), pool))
+	}
+
 	byName := make(map[string]int, len(creds))
 	for i, c := range creds {
 		byName[c.Name] = i
@@ -143,11 +168,15 @@ func (s *Service) reconcileCredentials(ctx context.Context) error {
 			s.log.Warn("accounts: account's credential is missing", "provider", row.Provider, "id", row.ID)
 			continue
 		}
-		if creds[i].Disabled == !row.Enabled {
-			continue
+		if creds[i].Disabled != !row.Enabled {
+			if err := s.engine.SetCredentialDisabled(ctx, row.Credential, !row.Enabled); err != nil && !isNotFound(err) {
+				errs = append(errs, fmt.Errorf("accounts: reconcile account %d: %w", row.ID, err))
+			}
 		}
-		if err := s.engine.SetCredentialDisabled(ctx, row.Credential, !row.Enabled); err != nil && !isNotFound(err) {
-			errs = append(errs, fmt.Errorf("accounts: reconcile account %d: %w", row.ID, err))
+		if creds[i].Priority != tiers[row.Credential] {
+			if err := s.engine.SetCredentialPriority(ctx, row.Credential, tiers[row.Credential]); err != nil && !isNotFound(err) {
+				errs = append(errs, fmt.Errorf("accounts: reconcile account %d priority: %w", row.ID, err))
+			}
 		}
 	}
 	for _, c := range creds {
