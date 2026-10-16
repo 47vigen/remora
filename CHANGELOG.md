@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.2](https://github.com/47vigen/remora/compare/v0.4.1...v0.4.2) (2026-10-16)
+
+
+### Bug Fixes
+
+* **web:** stop doubling the provider in alias member options ([#59](https://github.com/47vigen/remora/issues/59)) ([e65c8fe](https://github.com/47vigen/remora/commit/e65c8fed30d81947ddd90076504b400da68905c9))
+
 ## [0.4.1](https://github.com/47vigen/remora/compare/v0.4.0...v0.4.1) (2026-10-16)
 
 
