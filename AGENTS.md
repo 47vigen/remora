@@ -6,7 +6,7 @@ This is the single guide for coding agents working in this repository. Read it b
 
 ```
 remora/
-  cmd/remora/                 main: serve, apply, export, import, version
+  cmd/remora/                 main: serve, apply, export, import, mcp, version
   internal/
     api/                      generated server interfaces + handlers
     auth/                     admin session, API token, client keys
@@ -18,6 +18,7 @@ remora/
     soniox/                   the speech-to-text adapter
     store/                    SQLite schema, migrations, repositories
     importer/omniroute/       remora import omniroute
+    mcp/                      the MCP server: /mcp and remora mcp
     reconcile/                store → engines
   api/openapi.yaml            the management API contract
   web/                        the UI (Bun, Vite)
