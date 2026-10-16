@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -262,10 +261,30 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt route, sh sha
 	}
 
 	out := r.WithContext(context.WithValue(ctx, reqInfoKey{}, info))
-	out.Body = io.NopCloser(bytes.NewReader(body))
+	out.Body = &dropReader{b: body}
 	out.ContentLength = int64(len(body))
 	out.TransferEncoding = nil
 	p.rp.ServeHTTP(w, out)
+}
+
+// dropReader serves b once and lets go of it at EOF or Close, so a long stream does not keep its request body alive.
+type dropReader struct{ b []byte }
+
+func (d *dropReader) Read(p []byte) (int, error) {
+	if len(d.b) == 0 {
+		d.b = nil
+		return 0, io.EOF
+	}
+	n := copy(p, d.b)
+	if d.b = d.b[n:]; len(d.b) == 0 {
+		d.b = nil
+	}
+	return n, nil
+}
+
+func (d *dropReader) Close() error {
+	d.b = nil
+	return nil
 }
 
 // checkAliasKind reports whether model names an alias, and refuses an alias of another kind than the endpoint
@@ -338,6 +357,8 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 		h(info.in, info.body, resp)
 	}
 	setDroppedParams(resp.Header, info)
+	// Nothing reads the request body past this point; a stream may run for minutes.
+	info.body, info.spans = nil, bodySpans{}
 	return nil
 }
 
@@ -347,6 +368,7 @@ func (p *Proxy) errorHandler(w http.ResponseWriter, r *http.Request, err error) 
 	sh := shapeOpenAI
 	if info := infoFrom(r.Context()); info != nil {
 		sh = info.shape
+		info.body, info.spans = nil, bodySpans{}
 	}
 	if errors.Is(err, context.Canceled) && r.Context().Err() != nil {
 		p.log.DebugContext(r.Context(), "proxy: client went away", slog.Any("err", err))

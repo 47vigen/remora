@@ -937,3 +937,52 @@ func TestProxy_RoutingHeadersScrubbed(t *testing.T) {
 		t.Errorf("%s = %q, want a scrubbed value", headerServedBy, v)
 	}
 }
+
+func TestDropReaderReleasesAtEOF(t *testing.T) {
+	d := &dropReader{b: []byte("hello")}
+	if got, err := io.ReadAll(d); err != nil || string(got) != "hello" {
+		t.Fatalf("ReadAll = %q, %v", got, err)
+	}
+	if d.b != nil {
+		t.Fatal("bytes still held at EOF")
+	}
+	d = &dropReader{b: []byte("hello")}
+	_ = d.Close()
+	if n, err := d.Read(make([]byte, 4)); d.b != nil || n != 0 || !errors.Is(err, io.EOF) {
+		t.Fatalf("after Close: held %v, Read = %d, %v", d.b != nil, n, err)
+	}
+}
+
+func TestModifyResponseReleasesBody(t *testing.T) {
+	f := newFixture(t)
+	var (
+		info     *reqInfo
+		seen     int
+		upstream []byte
+	)
+	f.upstream(func(w http.ResponseWriter, r *http.Request) {
+		upstream, _ = io.ReadAll(r.Body)
+		okJSON(w, r)
+	})
+	f.px.OnResponse(func(_ *http.Request, reqBody []byte, resp *http.Response) {
+		info, seen = infoFrom(resp.Request.Context()), len(reqBody)
+	})
+	body := []byte(`{"model":"up-a/m1","messages":[{"role":"user","content":"x"}]}`)
+	f.do(t, http.MethodPost, "/v1/chat/completions", keyFull, "application/json", body, nil)
+	if seen != len(body) || !bytes.Equal(upstream, body) {
+		t.Fatalf("hook saw %d bytes, upstream got %q", seen, upstream)
+	}
+	if info == nil || info.body != nil || info.spans != (bodySpans{}) {
+		t.Fatal("the request body is still held after the response started")
+	}
+}
+
+func TestErrorHandlerReleasesBody(t *testing.T) {
+	f := newFixture(t)
+	info := &reqInfo{shape: shapeOpenAI, body: []byte("{}"), spans: bodySpans{model: span{1, 2}}}
+	r := httptest.NewRequestWithContext(context.WithValue(t.Context(), reqInfoKey{}, info), http.MethodPost, "/v1/chat/completions", nil)
+	f.px.errorHandler(httptest.NewRecorder(), r, errors.New("down"))
+	if info.body != nil || info.spans != (bodySpans{}) {
+		t.Fatal("the request body is still held after an upstream failure")
+	}
+}
