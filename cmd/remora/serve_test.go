@@ -44,6 +44,16 @@ func TestNewServer_NoWriteTimeout(t *testing.T) {
 	}
 }
 
+func TestNewServer_IdleTimeout(t *testing.T) {
+	srv := newServer(context.Background(), ":0", http.NewServeMux())
+	if srv.IdleTimeout != idleTimeout || idleTimeout != 120*time.Second {
+		t.Errorf("IdleTimeout = %v, want 120s", srv.IdleTimeout)
+	}
+	if srv.ReadHeaderTimeout != readHeaderTimeout {
+		t.Errorf("ReadHeaderTimeout = %v, want %v", srv.ReadHeaderTimeout, readHeaderTimeout)
+	}
+}
+
 func TestServeLoggerScrubs(t *testing.T) {
 	var b bytes.Buffer
 	newServeLogger(&b, slog.LevelInfo).Error("reconcile: sync", "err", errors.New("bifrost: status 500 (key sk-bf-abc)"))

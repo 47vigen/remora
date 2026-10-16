@@ -31,6 +31,7 @@ import (
 
 const (
 	readHeaderTimeout = 10 * time.Second
+	idleTimeout       = 120 * time.Second // closes a client's idle keep-alive connection
 	shutdownTimeout   = 15 * time.Second
 	engineStopTimeout = 45 * time.Second // covers both engines' 15s SIGTERM grace
 	// sweepMargin keeps the speech sweeper off a job a live request still waits on.
@@ -315,6 +316,7 @@ func newServer(ctx context.Context, addr string, h http.Handler) *http.Server {
 		Addr:              addr,
 		Handler:           h,
 		ReadHeaderTimeout: readHeaderTimeout,
+		IdleTimeout:       idleTimeout,
 		BaseContext:       func(net.Listener) context.Context { return context.WithoutCancel(ctx) },
 	}
 }
