@@ -64,7 +64,7 @@ function setup(provider: QuotaProvider) {
 
 test("the header counts accounts and refreshes the whole provider", async () => {
   const onRefresh = setup(antigravity);
-  for (const text of ["Available 1", "Exhausted 1", "Sign in 2", "Next reset in 2h"])
+  for (const text of ["1 available", "1 exhausted", "2 need sign-in", "next reset in 2h"])
     expect(screen.getByText(text)).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Refresh all" }));
   expect(onRefresh).toHaveBeenCalledWith({ provider: "antigravity" });

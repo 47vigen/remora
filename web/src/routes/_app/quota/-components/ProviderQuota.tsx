@@ -1,21 +1,15 @@
 import { ArrowsRotateRight } from "@gravity-ui/icons";
-import { Button, Chip } from "@heroui/react";
+import { Button, Chip, Link } from "@heroui/react";
 
 import type { QuotaAccount, QuotaProvider } from "../../../../client/types.gen";
 import { StatusChip } from "../../../../components/status-chip/StatusChip";
+import { getOAuthProviderLabel } from "../../../../lib/providers";
 import { formatRelative } from "../../../../lib/time";
+import { ProviderMark } from "../../providers/-components/ProviderMark";
 import { accountHealth } from "../../providers/-lib/accounts";
 import { QuotaBar } from "./QuotaBar";
 
 export type RefreshTarget = { provider: string } | { account_id: string };
-
-function Count({ label, value }: { label: string; value: number }) {
-  return (
-    <Chip size="sm" variant="soft">
-      <Chip.Label>{`${label} ${value}`}</Chip.Label>
-    </Chip>
-  );
-}
 
 function Row({
   item,
@@ -88,17 +82,31 @@ export function ProviderQuota({
   pending: boolean;
   onRefresh(target: RefreshTarget): void;
 }) {
+  const label = getOAuthProviderLabel(provider.provider);
+  const counts: [string, number, string][] = [
+    ["available", provider.available, "text-foreground"],
+    ["exhausted", provider.exhausted, "text-danger"],
+    ["cooling", provider.cooling, "text-warning"],
+    ["need sign-in", provider.sign_in, "text-warning"],
+  ];
   return (
     <section aria-label={provider.provider} className="border-border bg-surface rounded-sm border">
-      <header className="border-border flex flex-wrap items-center gap-2 border-b px-4 py-3">
-        <h2 className="mr-2 text-sm font-medium">{provider.provider}</h2>
-        <Count label="Available" value={provider.available} />
-        <Count label="Exhausted" value={provider.exhausted} />
-        <Count label="Cooling" value={provider.cooling} />
-        <Count label="Sign in" value={provider.sign_in} />
-        {provider.next_reset ? (
-          <span className="text-muted text-xs">Next reset {formatRelative(provider.next_reset, now)}</span>
-        ) : null}
+      <header className="border-border flex flex-wrap items-center gap-x-4 gap-y-2 border-b px-4 py-3">
+        <Link
+          href={`/providers/${provider.provider}`}
+          className="text-foreground flex min-w-0 items-center gap-2.5 text-sm font-medium no-underline"
+        >
+          <ProviderMark type={provider.provider} name={label} />
+          {label}
+        </Link>
+        <p className="text-muted flex flex-wrap items-center gap-x-3 font-mono text-xs tabular-nums">
+          {counts.map(([name, n, tone]) => (
+            <span key={name} className={n > 0 ? tone : undefined}>
+              {`${n} ${name}`}
+            </span>
+          ))}
+          {provider.next_reset ? <span>{`next reset ${formatRelative(provider.next_reset, now)}`}</span> : null}
+        </p>
         {provider.supported ? (
           <Button
             size="sm"
@@ -107,6 +115,7 @@ export function ProviderQuota({
             isPending={pending}
             onPress={() => onRefresh({ provider: provider.provider })}
           >
+            <ArrowsRotateRight aria-hidden="true" />
             Refresh all
           </Button>
         ) : null}

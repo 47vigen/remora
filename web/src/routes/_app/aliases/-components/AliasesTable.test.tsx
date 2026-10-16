@@ -6,8 +6,14 @@ import { AliasesTable } from "./AliasesTable";
 vi.setConfig({ testTimeout: 30_000 });
 
 const items = [
-  { name: "fast", kind: "chat" as const, members: ["or/x", "free", "cp/y", "cp/z", "or/w"], capabilities: [] },
-  { name: "free", kind: "embeddings" as const, members: ["cp/y"], capabilities: [] },
+  {
+    name: "fast",
+    kind: "chat" as const,
+    members: ["or/x", "free", "cp/y", "cp/z", "or/w"],
+    capabilities: [],
+    strategy: "p2c" as const,
+  },
+  { name: "free", kind: "embeddings" as const, members: ["cp/y"], capabilities: [], strategy: "priority" as const },
 ];
 
 test("shows name, kind, the chain inline, target count and cooling count", () => {
@@ -21,16 +27,16 @@ test("shows name, kind, the chain inline, target count and cooling count", () =>
     />,
   );
   const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
-  expect(headers).toEqual(["Name", "Kind", "Chain", "Targets", "Cooling", "Actions"]);
+  expect(headers).toEqual(["Name", "Kind", "Strategy", "Chain", "Targets", "Cooling", "Actions"]);
   const rows = screen.getAllByRole("row").slice(1);
   const cells = (row: HTMLElement) =>
     within(row)
       .getAllByRole("rowheader")
       .concat(within(row).getAllByRole("gridcell"))
-      .slice(0, 5)
+      .slice(0, 6)
       .map((c) => c.textContent);
-  expect(cells(rows[0]!)).toEqual(["fast", "chat", "or/x→free→cp/y+2", "3", "2 cooling"]);
-  expect(cells(rows[1]!)).toEqual(["free", "embeddings", "cp/y", "–", ""]);
+  expect(cells(rows[0]!)).toEqual(["fast", "chat", "Power of two", "or/x→free→cp/y+2", "3", "2 cooling"]);
+  expect(cells(rows[1]!)).toEqual(["free", "embeddings", "Priority", "cp/y", "–", ""]);
   expect(within(rows[0]!).getByRole("link", { name: "fast" })).toHaveAttribute("href", "/aliases/fast");
 });
 

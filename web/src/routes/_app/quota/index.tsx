@@ -1,4 +1,4 @@
-import { Alert } from "@heroui/react";
+import { Alert, buttonVariants, cn, Link } from "@heroui/react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
@@ -110,7 +110,21 @@ function QuotaPage() {
           isLoading={quota.isPending}
           error={quota.error ?? undefined}
           isEmpty={groups.length === 0}
-          emptyText={q || provider ? "No accounts match these filters." : "No subscription accounts yet."}
+          emptyText={
+            q || provider
+              ? "No accounts match these filters."
+              : "No subscription accounts yet. Sign in to Antigravity, Codex or Claude on its provider page."
+          }
+          emptyAction={
+            q || provider ? undefined : (
+              <Link
+                href="/providers"
+                className={cn(buttonVariants({ variant: "primary", size: "sm" }), "no-underline")}
+              >
+                Open providers
+              </Link>
+            )
+          }
         >
           <div className="flex flex-col gap-4">
             {groups.map((g) => (

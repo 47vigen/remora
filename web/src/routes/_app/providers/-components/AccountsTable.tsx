@@ -1,5 +1,5 @@
 import { ArrowRotateLeft, Ellipsis, TrashBin } from "@gravity-ui/icons";
-import { Button, Chip, Dropdown, Label, Meter, NumberField, Switch, Table } from "@heroui/react";
+import { Button, Chip, cn, Dropdown, Label, Meter, NumberField, Switch, Table } from "@heroui/react";
 
 import { accountHealth, isCooling } from "../-lib/accounts";
 import type { Account } from "../../../../client/types.gen";
@@ -51,10 +51,13 @@ export function AccountsTable({
   items,
   onToggle,
   onPriority,
+  priorityApplies = true,
   onResetCooldown,
   onDelete,
 }: {
   items: Account[];
+  /** False when the pool's strategy ignores priorities; the field stays editable but reads as inactive. */
+  priorityApplies?: boolean;
   onToggle(a: Account, enabled: boolean): void;
   onPriority(a: Account, priority: number): void;
   onResetCooldown(a: Account): void;
@@ -107,7 +110,7 @@ export function AccountsTable({
                       onChange={(v) => {
                         if (Number.isInteger(v) && v !== a.priority) onPriority(a, v);
                       }}
-                      className="w-20"
+                      className={cn("w-20", !priorityApplies && "opacity-50")}
                     >
                       <NumberField.Group>
                         <NumberField.Input className="font-mono" />

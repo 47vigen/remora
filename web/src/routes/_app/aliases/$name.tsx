@@ -192,7 +192,7 @@ function AliasEditor({ initial, original }: { initial: AliasDraft; original: str
         description={
           original === undefined
             ? "Name it, choose its kind, and list the members to try in order."
-            : "Requests walk the members in order and fall back past any that fail or are cooling."
+            : "The strategy picks the first member; requests fall back past any that fail or are cooling."
         }
         actions={
           <>
@@ -277,9 +277,7 @@ function AliasEditor({ initial, original }: { initial: AliasDraft; original: str
                   <Select.Value />
                   <Select.Indicator />
                 </Select.Trigger>
-                <Description>
-                  Which member a request tries first. Busy means requests started in the last minute.
-                </Description>
+                <Description>{ALIAS_STRATEGIES.find((x) => x.id === draft.strategy)?.description}</Description>
                 <Select.Popover>
                   <ListBox aria-label="Strategy">
                     {ALIAS_STRATEGIES.map((s) => (

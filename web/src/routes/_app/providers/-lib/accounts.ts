@@ -27,8 +27,12 @@ export const ACCOUNT_STRATEGIES: { id: RoutingStrategy; label: string; descripti
   { id: "fill-first", label: "Fill first", description: "One account at a time: highest priority, then oldest." },
   { id: "round-robin", label: "Round robin", description: "Accounts take turns." },
   { id: "random", label: "Random", description: "A random account." },
-  { id: "p2c", label: "Power of two", description: "Two random accounts; the less busy one serves." },
-  { id: "least-used", label: "Least used", description: "The least busy account." },
+  {
+    id: "p2c",
+    label: "Power of two",
+    description: "Two random accounts; the one with fewer requests in the last minute serves.",
+  },
+  { id: "least-used", label: "Least used", description: "The account with the fewest requests in the last minute." },
 ];
 
 /** Whether a pool's strategy reads the accounts' priority numbers. */

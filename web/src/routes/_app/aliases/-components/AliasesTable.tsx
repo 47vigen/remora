@@ -1,6 +1,7 @@
 import { Ellipsis, Pencil, TrashBin } from "@gravity-ui/icons";
 import { Button, Chip, Dropdown, Label, Link, Table } from "@heroui/react";
 
+import { ALIAS_STRATEGIES } from "../-lib/alias-form";
 import type { Alias } from "../../../../client";
 
 const SHOWN_MEMBERS = 3;
@@ -29,6 +30,7 @@ export function AliasesTable({
           <Table.Header>
             <Table.Column isRowHeader>Name</Table.Column>
             <Table.Column>Kind</Table.Column>
+            <Table.Column>Strategy</Table.Column>
             <Table.Column>Chain</Table.Column>
             <Table.Column className="text-right">Targets</Table.Column>
             <Table.Column>Cooling</Table.Column>
@@ -54,6 +56,9 @@ export function AliasesTable({
                     <Chip size="sm" variant="soft">
                       <Chip.Label className="text-[11px]">{a.kind}</Chip.Label>
                     </Chip>
+                  </Table.Cell>
+                  <Table.Cell className="text-muted text-[13px] whitespace-nowrap">
+                    {ALIAS_STRATEGIES.find((x) => x.id === a.strategy)?.label ?? a.strategy}
                   </Table.Cell>
                   <Table.Cell>
                     <span className="flex max-w-md min-w-0 items-center gap-1.5 font-mono text-[13px]">
