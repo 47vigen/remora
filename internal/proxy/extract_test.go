@@ -231,7 +231,11 @@ func TestWithModel(t *testing.T) {
 	t.Run("json keeps every other byte", func(t *testing.T) {
 		in := []byte("{\"a\":[1,{\"model\":\"inner\"}],\n  \"model\"\t:\"openai/fast\" ,\"s\":\"\u0645\u06cc\u200c\u0634\u0648\u062f\"}")
 		want := []byte("{\"a\":[1,{\"model\":\"inner\"}],\n  \"model\"\t:\"remora-alias/openai/fast\" ,\"s\":\"\u0645\u06cc\u200c\u0634\u0648\u062f\"}")
-		got, err := withModel(in, "application/json", "remora-alias/openai/fast")
+		_, sp, err := scanBody(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := withModel(in, sp, "application/json", "remora-alias/openai/fast")
 		if err != nil || !bytes.Equal(got, want) {
 			t.Fatalf("withModel = %q, %v; want %q", got, err, want)
 		}
@@ -243,7 +247,7 @@ func TestWithModel(t *testing.T) {
 			{name: "model", value: []byte("stt/fast")},
 			{name: "response_format", value: []byte("verbose_json")},
 		})
-		got, err := withModel(body, ct, "remora-alias/stt/fast")
+		got, err := withModel(body, bodySpans{}, ct, "remora-alias/stt/fast")
 		if err != nil {
 			t.Fatal(err)
 		}

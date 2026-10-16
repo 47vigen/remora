@@ -40,11 +40,11 @@ func BenchmarkRequestPath(b *testing.B) {
 			for b.Loop() {
 				r, _ := http.NewRequestWithContext(b.Context(), http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 				r.Header.Set("Content-Type", "application/json")
-				_, raw, err := extractModel(r)
+				_, raw, sp, err := extractModel(r)
 				if err != nil {
 					b.Fatal(err)
 				}
-				out, err := withModel(raw, "application/json", "remora-alias/alias-3")
+				out, err := withModel(raw, sp, "application/json", "remora-alias/alias-3")
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -63,7 +63,7 @@ func BenchmarkExtractModel(b *testing.B) {
 			for b.Loop() {
 				r, _ := http.NewRequestWithContext(b.Context(), http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 				r.Header.Set("Content-Type", "application/json")
-				if _, _, err := extractModel(r); err != nil {
+				if _, _, _, err := extractModel(r); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -88,11 +88,15 @@ func BenchmarkOpencodeSession(b *testing.B) {
 func BenchmarkWithModel(b *testing.B) {
 	for _, n := range sizes {
 		body := benchChatBody(n)
+		_, sp, err := scanBody(body)
+		if err != nil {
+			b.Fatal(err)
+		}
 		b.Run(fmt.Sprintf("%dKB", len(body)/1024), func(b *testing.B) {
 			b.SetBytes(int64(len(body)))
 			b.ReportAllocs()
 			for b.Loop() {
-				if _, err := withModel(body, "application/json", "remora-alias/alias-3"); err != nil {
+				if _, err := withModel(body, sp, "application/json", "remora-alias/alias-3"); err != nil {
 					b.Fatal(err)
 				}
 			}

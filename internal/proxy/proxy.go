@@ -136,6 +136,7 @@ type reqInfo struct {
 	isAlias  bool
 	vk       string
 	body     []byte
+	spans    bodySpans // where the parts of body the proxy reads sit; zero for multipart
 }
 
 type reqInfoKey struct{}
@@ -219,7 +220,7 @@ func bearer(h string) string {
 // forward checks the request's model and hands it to the reverse proxy.
 func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt route, sh shape, key store.ClientKey) {
 	ctx := r.Context()
-	model, raw, err := extractModel(r)
+	model, raw, sp, err := extractModel(r)
 	switch {
 	case errors.Is(err, ErrBodyTooLarge):
 		errTooLarge.write(w, sh)
@@ -245,7 +246,7 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt route, sh sha
 		return
 	}
 
-	info := &reqInfo{in: r, upstream: rt.upstream, shape: sh, model: model, vk: key.VKValue, body: raw}
+	info := &reqInfo{in: r, upstream: rt.upstream, shape: sh, model: model, vk: key.VKValue, body: raw, spans: sp}
 	isAlias, e := p.checkAliasKind(ctx, model, rt.aliasKind, r.URL.Path)
 	if e != nil {
 		e.write(w, sh)
@@ -254,7 +255,7 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt route, sh sha
 	info.isAlias = isAlias
 	body := raw
 	if isAlias {
-		if body, err = withModel(raw, r.Header.Get("Content-Type"), alias.EngineModel(model)); err != nil {
+		if body, err = withModel(raw, sp, r.Header.Get("Content-Type"), alias.EngineModel(model)); err != nil {
 			errModelRequired.write(w, sh)
 			return
 		}
