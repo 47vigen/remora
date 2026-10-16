@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/47vigen/remora/internal/alias"
+	"github.com/47vigen/remora/internal/engine/cliproxyapi"
 )
 
 var (
@@ -26,28 +27,33 @@ type world struct {
 	aliases   map[string]alias.Alias
 	keys      map[string]Key // by id
 	values    map[string]string
+	strats    map[string]alias.Strategy // stored account strategies
 	nextID    int
 	log       []string
 	failOn    string
+	nudged    int // Reconcile calls
 }
 
 func newWorld() *world {
-	return &world{providers: map[string]Provider{}, aliases: map[string]alias.Alias{}, keys: map[string]Key{}, values: map[string]string{}}
+	return &world{
+		providers: map[string]Provider{}, aliases: map[string]alias.Alias{}, keys: map[string]Key{}, values: map[string]string{},
+		strats: map[string]alias.Strategy{},
+	}
 }
 
 func (w *world) service() *Service {
-	return NewService(fakeProviders{w}, fakeAliases{w}, fakeKeys{w}, w.batch)
+	return NewService(fakeProviders{w}, fakeAliases{w}, fakeKeys{w}, fakeAccountStrategies{w}, w.batch)
 }
 
 // batch restores the providers, aliases and keys when fn fails; the log keeps every write made.
 func (w *world) batch(ctx context.Context, fn func(context.Context) error) error {
 	w.mu.Lock()
-	p, a, k, v := maps.Clone(w.providers), maps.Clone(w.aliases), maps.Clone(w.keys), maps.Clone(w.values)
+	p, a, k, v, st := maps.Clone(w.providers), maps.Clone(w.aliases), maps.Clone(w.keys), maps.Clone(w.values), maps.Clone(w.strats)
 	w.mu.Unlock()
 	err := fn(ctx)
 	if err != nil {
 		w.mu.Lock()
-		w.providers, w.aliases, w.keys, w.values = p, a, k, v
+		w.providers, w.aliases, w.keys, w.values, w.strats = p, a, k, v, st
 		w.mu.Unlock()
 	}
 	return err
@@ -226,6 +232,35 @@ func (f fakeAliases) Chain(context.Context, string) ([]alias.Target, error) { re
 func (f fakeAliases) Compile(context.Context, alias.Alias) ([]alias.Target, error) { return nil, nil }
 
 func (f fakeAliases) Cooling(context.Context) ([]CoolingMember, error) { return nil, nil }
+
+type fakeAccountStrategies struct{ w *world }
+
+func (f fakeAccountStrategies) Strategies(context.Context) (map[string]alias.Strategy, error) {
+	f.w.mu.Lock()
+	defer f.w.mu.Unlock()
+	out := map[string]alias.Strategy{}
+	for _, p := range cliproxyapi.Providers() {
+		out[p.Name] = cmp.Or(f.w.strats[p.Name], alias.StrategyRoundRobin)
+	}
+	return out, nil
+}
+
+func (f fakeAccountStrategies) SetStrategy(_ context.Context, provider string, st alias.Strategy) error {
+	f.w.mu.Lock()
+	defer f.w.mu.Unlock()
+	if err := f.w.write("set account_strategy " + provider); err != nil {
+		return err
+	}
+	f.w.strats[provider] = st
+	return nil
+}
+
+func (f fakeAccountStrategies) Reconcile(context.Context) error {
+	f.w.mu.Lock()
+	defer f.w.mu.Unlock()
+	f.w.nudged++
+	return nil
+}
 
 type fakeKeys struct{ w *world }
 

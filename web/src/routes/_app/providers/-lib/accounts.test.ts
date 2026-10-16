@@ -6,6 +6,7 @@ const a = (patch: Partial<Account>): Account => ({
   id: "1",
   provider: "codex",
   enabled: true,
+  priority: 0,
   status: "active",
   quota: [],
   models: [],

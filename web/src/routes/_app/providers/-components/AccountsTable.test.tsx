@@ -11,12 +11,13 @@ const items: Account[] = [
     provider: "codex",
     email: "one@example.com",
     enabled: true,
+    priority: 0,
     status: "active",
     cooldown_until: future,
     quota: [{ model: "gpt-x", remaining_fraction: 0.7 }],
     models: ["a", "b", "c", "d", "e"],
   },
-  { id: "2", provider: "codex", email: "two@example.com", enabled: true, status: "active", quota: [], models: ["a"] },
+  { id: "2", provider: "codex", email: "two@example.com", enabled: true, priority: 0, status: "active", quota: [], models: ["a"] },
 ];
 
 function setup() {

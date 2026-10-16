@@ -141,7 +141,16 @@ func (s *Store) AccountStrategies(ctx context.Context) (map[string]alias.Strateg
 
 // SetAccountStrategy stores a subscription provider's strategy, replacing any earlier one.
 func (s *Store) SetAccountStrategy(ctx context.Context, provider string, st alias.Strategy) error {
-	_, err := s.db.ExecContext(ctx,
+	return setAccountStrategy(ctx, s.db, provider, st)
+}
+
+// SetAccountStrategy stores a subscription provider's strategy on the transaction.
+func (tx *Tx) SetAccountStrategy(ctx context.Context, provider string, st alias.Strategy) error {
+	return setAccountStrategy(ctx, tx.tx, provider, st)
+}
+
+func setAccountStrategy(ctx context.Context, q dbtx, provider string, st alias.Strategy) error {
+	_, err := q.ExecContext(ctx,
 		"INSERT INTO account_strategies (provider, strategy) VALUES (?, ?) ON CONFLICT (provider) DO UPDATE SET strategy = excluded.strategy",
 		provider, string(st))
 	if err != nil {

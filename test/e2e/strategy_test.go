@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -101,4 +102,34 @@ func TestFallbackAfterPick(t *testing.T) {
 	rep = chat(t, chatBody("spread-fb", false))
 	wantStatus(t, rep, http.StatusOK)
 	wantHeader(t, rep, "X-Remora-Served-By", "up-a/fb")
+}
+
+func TestAccountStrategyRoundTrip(t *testing.T) {
+	a := loginClient(t)
+	// Cleanup gets its own context: the test's ends before cleanups run.
+	t.Cleanup(func() {
+		req, _ := http.NewRequestWithContext(context.Background(), http.MethodPut, remoraURL(t, "/api/accounts/strategies/codex"),
+			strings.NewReader(`{"strategy":"round-robin"}`))
+		req.Header.Set("Content-Type", "application/json")
+		if resp, err := a.client.Do(req); err == nil {
+			_ = resp.Body.Close()
+		}
+	})
+	a.must(http.MethodPut, "/api/accounts/strategies/codex", `{"strategy":"least-used"}`, http.StatusOK)
+
+	var list struct {
+		Items []struct{ Provider, Strategy string } `json:"items"`
+	}
+	decodeJSON(t, a.must(http.MethodGet, "/api/accounts/strategies?limit=200", "", http.StatusOK), &list)
+	got := map[string]string{}
+	for _, it := range list.Items {
+		got[it.Provider] = it.Strategy
+	}
+	if got["codex"] != "least-used" || got["antigravity"] != "round-robin" {
+		t.Errorf("strategies = %v", got)
+	}
+	exported := string(a.must(http.MethodGet, "/api/config/export", "", http.StatusOK))
+	if !strings.Contains(exported, "account_strategies:\n  codex: least-used\n") {
+		t.Errorf("export lacks account_strategies:\n%s", exported)
+	}
 }

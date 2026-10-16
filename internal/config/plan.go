@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 
 	"github.com/47vigen/remora/internal/alias"
@@ -15,7 +16,7 @@ import (
 var ErrInvalid = errors.New("remora.yaml")
 
 // Change is one difference between a document and the store. Op is "create", "update" or "delete"; Kind is
-// "provider", "alias" or "key"; Fields lists the fields an update changes ("members", "allow", "keys", "base_url",
+// "provider", "alias", "key" or "account_strategy"; Fields lists the fields an update changes ("members", "allow", "keys", "base_url",
 // ...) and is empty, not nil, for create and delete. Value is set only on a client key that Apply created with a
 // generated value, so that it can be shown once.
 type Change struct {
@@ -29,12 +30,14 @@ type Service struct {
 	p     Providers
 	a     Aliases
 	k     Keys
+	as    AccountStrategies // nil: account_strategies cannot be applied
 	batch Batch
 }
 
-// NewService returns a Service over the provider, alias and client key ports; Apply makes its writes in one batch.
-func NewService(p Providers, a Aliases, k Keys, batch Batch) *Service {
-	return &Service{p: p, a: a, k: k, batch: batch}
+// NewService returns a Service over the provider, alias, client key and account strategy ports; Apply makes its
+// writes in one batch.
+func NewService(p Providers, a Aliases, k Keys, as AccountStrategies, batch Batch) *Service {
+	return &Service{p: p, a: a, k: k, as: as, batch: batch}
 }
 
 // step is a planned change and the port calls that make it. run returns a generated client key value, if any.
@@ -60,8 +63,8 @@ func (s *Service) Plan(ctx context.Context, want File, sec Secrets, prune bool) 
 	return out, nil
 }
 
-// plan orders the steps: providers, aliases with members first, client keys; then, with prune, deletions in
-// reverse: client keys, aliases with dependents first, providers.
+// plan orders the steps: providers, aliases with members first, client keys, account strategies; then, with prune,
+// deletions in reverse: client keys, aliases with dependents first, providers.
 func (s *Service) plan(ctx context.Context, want File, sec Secrets, prune bool) ([]step, error) {
 	if err := want.Validate(); err != nil {
 		return nil, err
@@ -82,6 +85,11 @@ func (s *Service) plan(ctx context.Context, want File, sec Secrets, prune bool) 
 		return nil, err
 	}
 	steps = append(steps, keys...)
+	strategies, err := s.accountStrategySteps(ctx, want, prune)
+	if err != nil {
+		return nil, err
+	}
+	steps = append(steps, strategies...)
 	if prune {
 		deletes, err := s.deleteSteps(ctx, want)
 		if err != nil {
@@ -393,6 +401,36 @@ func deleted(kind, name string, run func(ctx context.Context) error) step {
 	return step{Change{Op: "delete", Kind: kind, Name: name, Fields: []string{}}, func(ctx context.Context) (string, error) {
 		return noValue(run(ctx))
 	}}
+}
+
+// accountStrategySteps sets each subscription provider whose strategy differs from want's. With prune, a provider want
+// leaves out goes back to round-robin; nothing is deleted.
+func (s *Service) accountStrategySteps(ctx context.Context, want File, prune bool) ([]step, error) {
+	if s.as == nil {
+		if len(want.AccountStrategies) > 0 {
+			return nil, fmt.Errorf("%w: account_strategies cannot be applied here", ErrInvalid)
+		}
+		return nil, nil
+	}
+	have, err := s.as.Strategies(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var steps []step
+	for _, provider := range slices.Sorted(maps.Keys(have)) {
+		wanted, listed := want.AccountStrategies[provider]
+		if !listed && !prune {
+			continue
+		}
+		st := cmp.Or(alias.Strategy(wanted), alias.StrategyRoundRobin)
+		if st == have[provider] {
+			continue
+		}
+		steps = append(steps, step{Change{Op: "update", Kind: "account_strategy", Name: provider, Fields: []string{"strategy"}}, func(ctx context.Context) (string, error) {
+			return "", s.as.SetStrategy(ctx, provider, st)
+		}})
+	}
+	return steps, nil
 }
 
 // deleteSteps deletes what the store has and want does not: client keys, then aliases (an alias before the aliases

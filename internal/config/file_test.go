@@ -128,3 +128,23 @@ func TestValidateStrategy(t *testing.T) {
 		t.Errorf("strategy fallback: err = %v", err)
 	}
 }
+
+func TestValidateAccountStrategies(t *testing.T) {
+	if err := (File{AccountStrategies: map[string]string{"grok": "p2c"}}).Validate(); err != nil {
+		t.Errorf("grok p2c: %v", err)
+	}
+	err := File{AccountStrategies: map[string]string{"xai": "p2c"}}.Validate()
+	if err == nil || !strings.Contains(err.Error(), `account_strategies.xai: "xai" is not a subscription provider`) {
+		t.Errorf("xai: err = %v", err)
+	}
+	err = File{AccountStrategies: map[string]string{"codex": "bogus"}}.Validate()
+	if err == nil || !strings.Contains(err.Error(), `account_strategies.codex.strategy`) && !strings.Contains(err.Error(), `account_strategies.codex: "bogus" is not one of`) {
+		t.Errorf("bogus: err = %v", err)
+	}
+	if _, err := Parse([]byte("account_strategies: {codex: least-used}\n")); err != nil {
+		t.Errorf("Parse: %v", err)
+	}
+	if _, err := Parse([]byte("account_strategies: {codex: bogus}\n")); err == nil {
+		t.Error("Parse accepted a bogus strategy")
+	}
+}

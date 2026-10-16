@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/47vigen/remora/api/remora.schema.json",
   "title": "remora.yaml",
-  "description": "The providers, aliases and client keys `remora apply -f` makes a running remora match. Secrets never sit in the file: every secret is an `env:NAME` reference read from the environment of `remora apply`. Subscription accounts are not part of the document.",
+  "description": "The providers, aliases, client keys and account strategies `remora apply -f` makes a running remora match. Secrets never sit in the file: every secret is an `env:NAME` reference read from the environment of `remora apply`. Subscription accounts are not part of the document.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -21,6 +21,11 @@
     "keys": {
       "type": ["array", "null"],
       "items": { "$ref": "#/$defs/key" }
+    },
+    "account_strategies": {
+      "description": "The routing strategy per subscription provider (e.g. `codex: p2c`); an omitted provider is `round-robin`. Account priorities are set in the console, since accounts are not part of the document.",
+      "type": ["object", "null"],
+      "additionalProperties": { "enum": ["priority", "fill-first", "round-robin", "random", "p2c", "least-used"] }
     }
   },
   "$defs": {

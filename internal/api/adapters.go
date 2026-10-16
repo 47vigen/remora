@@ -597,7 +597,7 @@ func (a accountsAdapter) Pool(ctx context.Context) ([]accounts.PoolStatus, error
 func toAccount(a accounts.Account) Account {
 	out := Account{
 		ID: strconv.FormatInt(a.ID, 10), Provider: a.Provider, Email: a.Label, Status: a.Status,
-		Message: a.StatusMessage, Enabled: a.Enabled, Models: a.Models,
+		Message: a.StatusMessage, Enabled: a.Enabled, Priority: a.Priority, Models: a.Models,
 	}
 	later := func(t time.Time) {
 		if out.CooldownUntil == nil || t.After(*out.CooldownUntil) {
@@ -676,6 +676,24 @@ func (a accountsAdapter) SetEnabled(ctx context.Context, id string, enabled bool
 	}
 	return a.svc.SetEnabled(ctx, n, enabled)
 }
+
+func (a accountsAdapter) SetPriority(ctx context.Context, id string, priority int) error {
+	n, err := accountID(id)
+	if err != nil {
+		return err
+	}
+	return a.svc.SetPriority(ctx, n, priority)
+}
+
+func (a accountsAdapter) Strategies(ctx context.Context) (map[string]alias.Strategy, error) {
+	return a.svc.Strategies(ctx)
+}
+
+func (a accountsAdapter) SetStrategy(ctx context.Context, provider string, st alias.Strategy) error {
+	return a.svc.SetStrategy(ctx, provider, st)
+}
+
+func (a accountsAdapter) Reconcile(ctx context.Context) error { return a.svc.Reconcile(ctx) }
 
 func (a accountsAdapter) Delete(ctx context.Context, id string) error {
 	n, err := accountID(id)

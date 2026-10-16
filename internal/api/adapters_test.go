@@ -493,7 +493,7 @@ func TestApplyOverAdaptersIsAtomic(t *testing.T) {
 	ctx := context.Background()
 	st, rec, _ := adapterStore(t)
 	ps, as, ks := NewProviders(st, rec, nil, nil), NewAliases(st, rec, nil), NewKeys(st, rec)
-	svc := config.NewService(ps, as, ks, rec.Batch)
+	svc := config.NewService(ps, as, ks, nil, rec.Batch)
 	f, err := config.Parse([]byte(`
 providers:
   - {name: p, kind: openai-compatible, base_url: http://up.test/v1, keys: [{name: main, value: env:P_KEY}]}

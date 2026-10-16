@@ -3,18 +3,21 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/47vigen/remora/internal/accounts"
+	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/api/gen"
 )
 
 // toGenAccount maps an account to its answer; quota and models are never null.
 func toGenAccount(a Account) gen.Account {
 	out := gen.Account{
-		Id: a.ID, Provider: a.Provider, Enabled: a.Enabled, Status: a.Status, CooldownUntil: a.CooldownUntil,
+		Id: a.ID, Provider: a.Provider, Enabled: a.Enabled, Priority: a.Priority, Status: a.Status, CooldownUntil: a.CooldownUntil,
 		Quota: make([]gen.AccountQuota, 0, len(a.Quota)), Models: append([]string{}, a.Models...),
 	}
 	if a.Email != "" {
@@ -149,16 +152,24 @@ func (s *Server) CancelAccountLogin(ctx context.Context, req gen.CancelAccountLo
 	return gen.CancelAccountLogin204Response{}, nil
 }
 
-// UpdateAccount enables or disables an account and answers it as it now is.
+// UpdateAccount enables or disables an account, or sets its priority, and answers it as it now is. Only the fields
+// the body names change.
 func (s *Server) UpdateAccount(ctx context.Context, req gen.UpdateAccountRequestObject) (gen.UpdateAccountResponseObject, error) {
 	if s.d.Accounts == nil {
 		return nil, errNotImplemented
 	}
-	if req.Body == nil {
-		return nil, badRequest("an account update body is required")
+	if req.Body == nil || req.Body.Enabled == nil && req.Body.Priority == nil {
+		return nil, badRequest("an account update needs enabled or priority")
 	}
-	if err := s.d.Accounts.SetEnabled(ctx, req.Id, req.Body.Enabled); err != nil {
-		return nil, err
+	if req.Body.Priority != nil {
+		if err := s.d.Accounts.SetPriority(ctx, req.Id, *req.Body.Priority); err != nil {
+			return nil, err
+		}
+	}
+	if req.Body.Enabled != nil {
+		if err := s.d.Accounts.SetEnabled(ctx, req.Id, *req.Body.Enabled); err != nil {
+			return nil, err
+		}
 	}
 	all, err := s.d.Accounts.List(ctx, "")
 	if err != nil {
@@ -221,4 +232,39 @@ func (s *Server) ImportAccount(ctx context.Context, req gen.ImportAccountRequest
 		return nil, err
 	}
 	return gen.ImportAccount201JSONResponse(toGenAccount(a)), nil
+}
+
+// ListAccountStrategies lists every subscription provider's strategy, sorted by provider.
+func (s *Server) ListAccountStrategies(ctx context.Context, req gen.ListAccountStrategiesRequestObject) (gen.ListAccountStrategiesResponseObject, error) {
+	if s.d.Accounts == nil {
+		return nil, errNotImplemented
+	}
+	all, err := s.d.Accounts.Strategies(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]gen.AccountStrategy, 0, len(all))
+	for _, p := range slices.Sorted(maps.Keys(all)) {
+		out = append(out, gen.AccountStrategy{Provider: p, Strategy: gen.RoutingStrategy(all[p])})
+	}
+	items, total := page(out, req.Params.Limit, req.Params.Offset)
+	return gen.ListAccountStrategies200JSONResponse{Items: items, Total: total}, nil
+}
+
+// SetAccountStrategy sets a subscription provider's strategy.
+func (s *Server) SetAccountStrategy(ctx context.Context, req gen.SetAccountStrategyRequestObject) (gen.SetAccountStrategyResponseObject, error) {
+	if s.d.Accounts == nil {
+		return nil, errNotImplemented
+	}
+	if req.Body == nil {
+		return nil, badRequest("a strategy is required")
+	}
+	st := alias.Strategy(req.Body.Strategy)
+	if !st.Valid() {
+		return nil, badStrategy(st)
+	}
+	if err := s.d.Accounts.SetStrategy(ctx, req.Provider, st); err != nil {
+		return nil, err
+	}
+	return gen.SetAccountStrategy200JSONResponse{Provider: req.Provider, Strategy: req.Body.Strategy}, nil
 }

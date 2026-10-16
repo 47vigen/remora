@@ -112,7 +112,52 @@ type fakeAccounts struct {
 	enabled   map[string]bool // id → last SetEnabled
 	reset     []string
 	imported  []fakeImport
+	priority  map[string]int            // id → last SetPriority
+	strats    map[string]alias.Strategy // provider → stored strategy
 }
+
+func (f *fakeAccounts) SetPriority(_ context.Context, id string, priority int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	i, err := f.find(id)
+	if err != nil {
+		return err
+	}
+	f.accounts[i].Priority = priority
+	if f.priority == nil {
+		f.priority = map[string]int{}
+	}
+	f.priority[id] = priority
+	return nil
+}
+
+// fakeSubscriptionProviders are the providers the fake knows, as cliproxyapi.Providers() would list a few.
+var fakeSubscriptionProviders = []string{"antigravity", "codex", "grok"}
+
+func (f *fakeAccounts) Strategies(context.Context) (map[string]alias.Strategy, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[string]alias.Strategy{}
+	for _, p := range fakeSubscriptionProviders {
+		out[p] = cmp.Or(f.strats[p], alias.StrategyRoundRobin)
+	}
+	return out, nil
+}
+
+func (f *fakeAccounts) SetStrategy(_ context.Context, provider string, st alias.Strategy) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !slices.Contains(fakeSubscriptionProviders, provider) {
+		return fmt.Errorf("%w: %s", accounts.ErrUnknownProvider, provider)
+	}
+	if f.strats == nil {
+		f.strats = map[string]alias.Strategy{}
+	}
+	f.strats[provider] = st
+	return nil
+}
+
+func (f *fakeAccounts) Reconcile(context.Context) error { return nil }
 
 type fakeImport struct {
 	provider   string

@@ -3,8 +3,8 @@
 import { type InfiniteData, infiniteQueryOptions, queryOptions, type UseMutationOptions } from '@tanstack/react-query';
 
 import { client } from '../client.gen';
-import { applyConfig, cancelAccountLogin, changePassword, compileAlias, completeAccountLogin, createAlias, createApiToken, createKey, createProvider, deleteAccount, deleteAlias, deleteApiToken, deleteKey, deleteProvider, exportConfig, getAccountLogin, getAccountPool, getAlias, getAliasChain, getHealth, getKey, getKeyUsage, getLog, getProvider, getSession, getStats, getVersion, importAccount, listAccounts, listAliases, listApiTokens, listCooling, listKeys, listLogs, listProviders, login, logout, type Options, planConfig, resetAccountCooldown, startAccountLogin, testProvider, updateAccount, updateAlias, updateKey, updateProvider } from '../sdk.gen';
-import type { ApplyConfigData, ApplyConfigError, ApplyConfigResponse, CancelAccountLoginData, CancelAccountLoginError, CancelAccountLoginResponse, ChangePasswordData, ChangePasswordError, ChangePasswordResponse, CompileAliasData, CompileAliasError, CompileAliasResponse, CompleteAccountLoginData, CompleteAccountLoginError, CreateAliasData, CreateAliasError, CreateAliasResponse, CreateApiTokenData, CreateApiTokenError, CreateApiTokenResponse, CreateKeyData, CreateKeyError, CreateKeyResponse, CreateProviderData, CreateProviderError, CreateProviderResponse, DeleteAccountData, DeleteAccountError, DeleteAccountResponse, DeleteAliasData, DeleteAliasError, DeleteAliasResponse, DeleteApiTokenData, DeleteApiTokenError, DeleteApiTokenResponse, DeleteKeyData, DeleteKeyError, DeleteKeyResponse, DeleteProviderData, DeleteProviderError, DeleteProviderResponse, ExportConfigData, ExportConfigError, ExportConfigResponse, GetAccountLoginData, GetAccountLoginError, GetAccountLoginResponse, GetAccountPoolData, GetAccountPoolError, GetAccountPoolResponse, GetAliasChainData, GetAliasChainError, GetAliasChainResponse, GetAliasData, GetAliasError, GetAliasResponse, GetHealthData, GetHealthError, GetHealthResponse, GetKeyData, GetKeyError, GetKeyResponse, GetKeyUsageData, GetKeyUsageError, GetKeyUsageResponse, GetLogData, GetLogError, GetLogResponse, GetProviderData, GetProviderError, GetProviderResponse, GetSessionData, GetSessionError, GetSessionResponse, GetStatsData, GetStatsError, GetStatsResponse, GetVersionData, GetVersionError, GetVersionResponse, ImportAccountData, ImportAccountError, ImportAccountResponse, ListAccountsData, ListAccountsError, ListAccountsResponse, ListAliasesData, ListAliasesError, ListAliasesResponse, ListApiTokensData, ListApiTokensError, ListApiTokensResponse, ListCoolingData, ListCoolingError, ListCoolingResponse, ListKeysData, ListKeysError, ListKeysResponse, ListLogsData, ListLogsError, ListLogsResponse, ListProvidersData, ListProvidersError, ListProvidersResponse, LoginData, LoginError, LoginResponse, LogoutData, LogoutError, LogoutResponse, PlanConfigData, PlanConfigError, PlanConfigResponse, ResetAccountCooldownData, ResetAccountCooldownError, ResetAccountCooldownResponse, StartAccountLoginData, StartAccountLoginError, StartAccountLoginResponse, TestProviderData, TestProviderError, TestProviderResponse, UpdateAccountData, UpdateAccountError, UpdateAccountResponse, UpdateAliasData, UpdateAliasError, UpdateAliasResponse, UpdateKeyData, UpdateKeyError, UpdateKeyResponse, UpdateProviderData, UpdateProviderError, UpdateProviderResponse } from '../types.gen';
+import { applyConfig, cancelAccountLogin, changePassword, compileAlias, completeAccountLogin, createAlias, createApiToken, createKey, createProvider, deleteAccount, deleteAlias, deleteApiToken, deleteKey, deleteProvider, exportConfig, getAccountLogin, getAccountPool, getAlias, getAliasChain, getHealth, getKey, getKeyUsage, getLog, getProvider, getSession, getStats, getVersion, importAccount, listAccounts, listAccountStrategies, listAliases, listApiTokens, listCooling, listKeys, listLogs, listProviders, login, logout, type Options, planConfig, resetAccountCooldown, setAccountStrategy, startAccountLogin, testProvider, updateAccount, updateAlias, updateKey, updateProvider } from '../sdk.gen';
+import type { ApplyConfigData, ApplyConfigError, ApplyConfigResponse, CancelAccountLoginData, CancelAccountLoginError, CancelAccountLoginResponse, ChangePasswordData, ChangePasswordError, ChangePasswordResponse, CompileAliasData, CompileAliasError, CompileAliasResponse, CompleteAccountLoginData, CompleteAccountLoginError, CreateAliasData, CreateAliasError, CreateAliasResponse, CreateApiTokenData, CreateApiTokenError, CreateApiTokenResponse, CreateKeyData, CreateKeyError, CreateKeyResponse, CreateProviderData, CreateProviderError, CreateProviderResponse, DeleteAccountData, DeleteAccountError, DeleteAccountResponse, DeleteAliasData, DeleteAliasError, DeleteAliasResponse, DeleteApiTokenData, DeleteApiTokenError, DeleteApiTokenResponse, DeleteKeyData, DeleteKeyError, DeleteKeyResponse, DeleteProviderData, DeleteProviderError, DeleteProviderResponse, ExportConfigData, ExportConfigError, ExportConfigResponse, GetAccountLoginData, GetAccountLoginError, GetAccountLoginResponse, GetAccountPoolData, GetAccountPoolError, GetAccountPoolResponse, GetAliasChainData, GetAliasChainError, GetAliasChainResponse, GetAliasData, GetAliasError, GetAliasResponse, GetHealthData, GetHealthError, GetHealthResponse, GetKeyData, GetKeyError, GetKeyResponse, GetKeyUsageData, GetKeyUsageError, GetKeyUsageResponse, GetLogData, GetLogError, GetLogResponse, GetProviderData, GetProviderError, GetProviderResponse, GetSessionData, GetSessionError, GetSessionResponse, GetStatsData, GetStatsError, GetStatsResponse, GetVersionData, GetVersionError, GetVersionResponse, ImportAccountData, ImportAccountError, ImportAccountResponse, ListAccountsData, ListAccountsError, ListAccountsResponse, ListAccountStrategiesData, ListAccountStrategiesError, ListAccountStrategiesResponse, ListAliasesData, ListAliasesError, ListAliasesResponse, ListApiTokensData, ListApiTokensError, ListApiTokensResponse, ListCoolingData, ListCoolingError, ListCoolingResponse, ListKeysData, ListKeysError, ListKeysResponse, ListLogsData, ListLogsError, ListLogsResponse, ListProvidersData, ListProvidersError, ListProvidersResponse, LoginData, LoginError, LoginResponse, LogoutData, LogoutError, LogoutResponse, PlanConfigData, PlanConfigError, PlanConfigResponse, ResetAccountCooldownData, ResetAccountCooldownError, ResetAccountCooldownResponse, SetAccountStrategyData, SetAccountStrategyError, SetAccountStrategyResponse, StartAccountLoginData, StartAccountLoginError, StartAccountLoginResponse, TestProviderData, TestProviderError, TestProviderResponse, UpdateAccountData, UpdateAccountError, UpdateAccountResponse, UpdateAliasData, UpdateAliasError, UpdateAliasResponse, UpdateKeyData, UpdateKeyError, UpdateKeyResponse, UpdateProviderData, UpdateProviderError, UpdateProviderResponse } from '../types.gen';
 
 export type QueryKey<TOptions extends Options> = [
     Pick<TOptions, 'baseUrl' | 'body' | 'headers' | 'path' | 'query'> & {
@@ -358,6 +358,71 @@ export const getAccountPoolOptions = (options?: Options<GetAccountPoolData>) => 
     queryKey: getAccountPoolQueryKey(options)
 });
 
+export const listAccountStrategiesQueryKey = (options?: Options<ListAccountStrategiesData>) => createQueryKey('listAccountStrategies', options);
+
+/**
+ * The routing strategy of every subscription provider's account pool.
+ */
+export const listAccountStrategiesOptions = (options?: Options<ListAccountStrategiesData>) => queryOptions<ListAccountStrategiesResponse, ListAccountStrategiesError, ListAccountStrategiesResponse, ReturnType<typeof listAccountStrategiesQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await listAccountStrategies({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: listAccountStrategiesQueryKey(options)
+});
+
+export const listAccountStrategiesInfiniteQueryKey = (options?: Options<ListAccountStrategiesData>): QueryKey<Options<ListAccountStrategiesData>> => createQueryKey('listAccountStrategies', options, true);
+
+/**
+ * The routing strategy of every subscription provider's account pool.
+ */
+export const listAccountStrategiesInfiniteOptions = (options?: Options<ListAccountStrategiesData>) => {
+    const opts = infiniteQueryOptions<ListAccountStrategiesResponse, ListAccountStrategiesError, InfiniteData<ListAccountStrategiesResponse>, QueryKey<Options<ListAccountStrategiesData>>, number | Pick<QueryKey<Options<ListAccountStrategiesData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<ListAccountStrategiesData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await listAccountStrategies({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: listAccountStrategiesInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
+
+/**
+ * Set which account of a subscription provider serves a request.
+ */
+export const setAccountStrategyMutation = (options?: Partial<Options<SetAccountStrategyData>>): UseMutationOptions<SetAccountStrategyResponse, SetAccountStrategyError, Options<SetAccountStrategyData>> => {
+    const mutationOptions: UseMutationOptions<SetAccountStrategyResponse, SetAccountStrategyError, Options<SetAccountStrategyData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await setAccountStrategy({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
 /**
  * Start an OAuth login for a subscription provider.
  */
@@ -462,7 +527,7 @@ export const deleteAccountMutation = (options?: Partial<Options<DeleteAccountDat
 };
 
 /**
- * Enable or disable an account.
+ * Enable or disable an account, or set its priority.
  */
 export const updateAccountMutation = (options?: Partial<Options<UpdateAccountData>>): UseMutationOptions<UpdateAccountResponse, UpdateAccountError, Options<UpdateAccountData>> => {
     const mutationOptions: UseMutationOptions<UpdateAccountResponse, UpdateAccountError, Options<UpdateAccountData>> = {

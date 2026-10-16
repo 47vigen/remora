@@ -283,6 +283,56 @@ paths:
         default:
           $ref: "#/components/responses/Error"
 
+  /api/accounts/strategies:
+    get:
+      tags: [accounts]
+      operationId: listAccountStrategies
+      summary: The routing strategy of every subscription provider's account pool.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Every subscription provider, sorted by name; `round-robin` unless set.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountStrategyList"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/accounts/strategies/{provider}:
+    parameters:
+      - name: provider
+        in: path
+        required: true
+        description: A subscription provider, e.g. `codex`.
+        schema:
+          type: string
+    put:
+      tags: [accounts]
+      operationId: setAccountStrategy
+      summary: Set which account of a subscription provider serves a request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [strategy]
+              properties:
+                strategy:
+                  $ref: "#/components/schemas/RoutingStrategy"
+      responses:
+        "200":
+          description: The provider's strategy as stored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountStrategy"
+        default:
+          $ref: "#/components/responses/Error"
+
   /api/accounts/logins:
     post:
       tags: [accounts]
@@ -376,7 +426,7 @@ paths:
     patch:
       tags: [accounts]
       operationId: updateAccount
-      summary: Enable or disable an account.
+      summary: Enable or disable an account, or set its priority.
       requestBody:
         required: true
         content:
@@ -1206,7 +1256,7 @@ components:
           description: '"missing", "signed out", or the provider''s message.'
     Account:
       type: object
-      required: [id, provider, enabled, status, quota, models]
+      required: [id, provider, enabled, priority, status, quota, models]
       properties:
         id:
           type: string
@@ -1216,6 +1266,9 @@ components:
           type: string
         enabled:
           type: boolean
+        priority:
+          type: integer
+          description: Higher is tried first under the provider's `priority` and `fill-first` strategies; default 0.
         status:
           type: string
         message:
@@ -1243,10 +1296,30 @@ components:
           type: integer
     AccountUpdate:
       type: object
-      required: [enabled]
+      minProperties: 1
       properties:
         enabled:
           type: boolean
+        priority:
+          type: integer
+    AccountStrategy:
+      type: object
+      required: [provider, strategy]
+      properties:
+        provider:
+          type: string
+        strategy:
+          $ref: "#/components/schemas/RoutingStrategy"
+    AccountStrategyList:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AccountStrategy"
+        total:
+          type: integer
     AccountImport:
       type: object
       required: [provider, credential]

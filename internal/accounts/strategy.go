@@ -66,13 +66,17 @@ func (s *Service) Strategies(ctx context.Context) (map[string]alias.Strategy, er
 	return out, nil
 }
 
-// SetStrategy stores a subscription provider's strategy and applies it to the engine now.
+// SetStrategy stores a subscription provider's strategy and applies it to the engine now. Inside a store transaction
+// (a remora.yaml apply) it writes on that transaction and leaves the engine to a Reconcile after the commit.
 func (s *Service) SetStrategy(ctx context.Context, provider string, st alias.Strategy) error {
 	if _, ok := cliproxyapi.ProviderByName(provider); !ok {
 		return fmt.Errorf("%w: %s", ErrUnknownProvider, provider)
 	}
 	if !st.Valid() {
 		return fmt.Errorf("accounts: unknown strategy %q", st)
+	}
+	if tx, ok := store.TxFrom(ctx); ok {
+		return tx.SetAccountStrategy(ctx, provider, st)
 	}
 	if err := s.store.SetAccountStrategy(ctx, provider, st); err != nil {
 		return storeErr(err, "set strategy of %s", provider)

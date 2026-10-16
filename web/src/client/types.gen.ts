@@ -114,6 +114,10 @@ export type Account = {
     provider: string;
     email?: string;
     enabled: boolean;
+    /**
+     * Higher is tried first under the provider's `priority` and `fill-first` strategies; default 0.
+     */
+    priority: number;
     status: string;
     message?: string;
     cooldown_until?: string;
@@ -127,7 +131,18 @@ export type AccountList = {
 };
 
 export type AccountUpdate = {
-    enabled: boolean;
+    enabled?: boolean;
+    priority?: number;
+};
+
+export type AccountStrategy = {
+    provider: string;
+    strategy: RoutingStrategy;
+};
+
+export type AccountStrategyList = {
+    items: Array<AccountStrategy>;
+    total: number;
 };
 
 export type AccountImport = {
@@ -920,6 +935,76 @@ export type GetAccountPoolResponses = {
 };
 
 export type GetAccountPoolResponse = GetAccountPoolResponses[keyof GetAccountPoolResponses];
+
+export type ListAccountStrategiesData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * The page size.
+         */
+        limit?: number;
+        /**
+         * The number of items to skip.
+         */
+        offset?: number;
+    };
+    url: '/api/accounts/strategies';
+};
+
+export type ListAccountStrategiesErrors = {
+    /**
+     * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     *
+     */
+    default: Error;
+};
+
+export type ListAccountStrategiesError = ListAccountStrategiesErrors[keyof ListAccountStrategiesErrors];
+
+export type ListAccountStrategiesResponses = {
+    /**
+     * Every subscription provider, sorted by name; `round-robin` unless set.
+     */
+    200: AccountStrategyList;
+};
+
+export type ListAccountStrategiesResponse = ListAccountStrategiesResponses[keyof ListAccountStrategiesResponses];
+
+export type SetAccountStrategyData = {
+    body: {
+        strategy: RoutingStrategy;
+    };
+    path: {
+        /**
+         * A subscription provider, e.g. `codex`.
+         */
+        provider: string;
+    };
+    query?: never;
+    url: '/api/accounts/strategies/{provider}';
+};
+
+export type SetAccountStrategyErrors = {
+    /**
+     * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     *
+     */
+    default: Error;
+};
+
+export type SetAccountStrategyError = SetAccountStrategyErrors[keyof SetAccountStrategyErrors];
+
+export type SetAccountStrategyResponses = {
+    /**
+     * The provider's strategy as stored.
+     */
+    200: AccountStrategy;
+};
+
+export type SetAccountStrategyResponse = SetAccountStrategyResponses[keyof SetAccountStrategyResponses];
 
 export type StartAccountLoginData = {
     body: AccountLoginStart;

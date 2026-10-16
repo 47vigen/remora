@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -22,6 +23,8 @@ type File struct {
 	Providers []FileProvider `yaml:"providers"`
 	Aliases   []FileAlias    `yaml:"aliases"`
 	Keys      []FileKey      `yaml:"keys"`
+	// AccountStrategies is the routing strategy per subscription provider; an omitted provider is round-robin.
+	AccountStrategies map[string]string `yaml:"account_strategies,omitempty"`
 }
 
 // FileProvider is an upstream provider and its keys.
@@ -174,6 +177,15 @@ func (f File) Validate() error {
 		}
 		if a.Strategy != "" && !alias.Strategy(a.Strategy).Valid() {
 			fail("%s.strategy: %q is not one of priority, fill-first, round-robin, random, p2c, least-used", at, a.Strategy)
+		}
+	}
+
+	for _, p := range slices.Sorted(maps.Keys(f.AccountStrategies)) {
+		switch st := f.AccountStrategies[p]; {
+		case !cliproxyapi.IsSubscription(p):
+			fail("account_strategies.%s: %q is not a subscription provider", p, p)
+		case !alias.Strategy(st).Valid():
+			fail("account_strategies.%s: %q is not one of priority, fill-first, round-robin, random, p2c, least-used", p, st)
 		}
 	}
 
