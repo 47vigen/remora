@@ -995,8 +995,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ConfigChanges"
-        "409":
-          description: The store changed since the plan named by `plan_hash`. Nothing was applied; this is the fresh plan.
+        "412":
+          description: >-
+            The store changed since the plan named by `plan_hash`. Nothing was applied; this is the fresh plan. A
+            conflict inside the plan itself stays a 409 with an error body.
           content:
             application/json:
               schema:
@@ -1916,7 +1918,7 @@ components:
           type: string
           description: >-
             The `plan_hash` a plan of these same inputs returned. When the store changed since this plan, nothing is
-            applied: 409 with the fresh plan. Ignored by plan.
+            applied: 412 with the fresh plan. Ignored by plan.
     Change:
       type: object
       required: [op, kind, name, fields]
@@ -1950,5 +1952,5 @@ components:
         plan_hash:
           type: string
           description: >-
-            Binds this plan to its inputs and to the store it was planned against. Set by plan and on a 409; send it
+            Binds this plan to its inputs and to the store it was planned against. Set by plan and on a 412; send it
             with apply.

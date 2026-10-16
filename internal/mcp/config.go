@@ -72,10 +72,10 @@ func addConfig(s *sdk.Server, c gen.ClientWithResponsesInterface) {
 			return ConfigApplyOut{}, err
 		}
 		// A refusal is a normal result, so the agent gets the fresh plan to show.
-		if r.StatusCode() == http.StatusConflict && r.JSON409 != nil {
-			out := ConfigApplyOut{Changes: r.JSON409.Changes, Message: staleMessage}
-			if r.JSON409.PlanHash != nil {
-				out.PlanHash = *r.JSON409.PlanHash
+		if r.StatusCode() == http.StatusPreconditionFailed && r.JSON412 != nil {
+			out := ConfigApplyOut{Changes: r.JSON412.Changes, Message: staleMessage}
+			if r.JSON412.PlanHash != nil {
+				out.PlanHash = *r.JSON412.PlanHash
 			}
 			return out, nil
 		}

@@ -51,7 +51,7 @@ func TestConfigApplySendsHash(t *testing.T) {
 
 func TestConfigApplyStaleHash(t *testing.T) {
 	f := newFakeAPI(t)
-	f.on("POST /api/config/apply", http.StatusConflict, strings.Replace(changesBody, "h1", "h2", 1))
+	f.on("POST /api/config/apply", http.StatusPreconditionFailed, strings.Replace(changesBody, "h1", "h2", 1))
 	res, out := call(t, f.session(t), "remora_config_apply", map[string]any{"document": "aliases: []\n", "plan_hash": "h1"})
 	if res.IsError {
 		t.Fatalf("isError: %s", text(res))
@@ -76,5 +76,15 @@ func TestConfigApplyFailedChange(t *testing.T) {
 	res, _ := call(t, f.session(t), "remora_config_apply", map[string]any{"document": "aliases: []\n", "plan_hash": "h1"})
 	if !res.IsError || !strings.Contains(text(res), msg) {
 		t.Errorf("failed change = %s", text(res))
+	}
+}
+
+func TestConfigApplyConflictIsAnError(t *testing.T) {
+	f := newFakeAPI(t)
+	msg := "update key k2 failed: That value is already in use. Nothing was changed."
+	f.on("POST /api/config/apply", http.StatusConflict, `{"error":{"message":"`+msg+`","type":"invalid_request_error","code":"conflict"}}`)
+	res, _ := call(t, f.session(t), "remora_config_apply", map[string]any{"document": "keys: []\n", "plan_hash": "h1"})
+	if !res.IsError || !strings.Contains(text(res), msg) {
+		t.Errorf("a conflict inside the plan must reach the agent as an error, got %s", text(res))
 	}
 }

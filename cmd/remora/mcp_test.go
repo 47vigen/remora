@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -43,7 +44,7 @@ func TestRunMCPServesTools(t *testing.T) {
 	env := map[string]string{"REMORA_URL": srv.URL, "REMORA_TOKEN": "rmt_test"}
 	errc := make(chan error, 1)
 	go func() {
-		errc <- runMCP(context.Background(), nil, inR, outW, func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+		errc <- runMCP(context.Background(), nil, inR, outW, io.Discard, func(k string) (string, bool) { v, ok := env[k]; return v, ok })
 	}()
 
 	cs, err := sdk.NewClient(&sdk.Implementation{Name: "t", Version: "0"}, nil).Connect(context.Background(), &sdk.IOTransport{Reader: outR, Writer: inW}, nil)
@@ -79,7 +80,7 @@ func TestRunMCPServesTools(t *testing.T) {
 
 func TestRunMCPNeedsToken(t *testing.T) {
 	var out bytes.Buffer
-	err := runMCP(context.Background(), nil, io.NopCloser(strings.NewReader("")), nopWriteCloser{&out}, func(string) (string, bool) { return "", false })
+	err := runMCP(context.Background(), nil, io.NopCloser(strings.NewReader("")), nopWriteCloser{&out}, io.Discard, func(string) (string, bool) { return "", false })
 	if err == nil || !strings.Contains(err.Error(), "set REMORA_TOKEN") || out.Len() != 0 {
 		t.Errorf("err %v, stdout %q", err, out.String())
 	}
@@ -88,3 +89,11 @@ func TestRunMCPNeedsToken(t *testing.T) {
 type nopWriteCloser struct{ io.Writer }
 
 func (nopWriteCloser) Close() error { return nil }
+
+func TestMCPHelpExitsZeroWithUsageOnStderr(t *testing.T) {
+	var out, errOut bytes.Buffer
+	err := runMCP(context.Background(), []string{"--help"}, io.NopCloser(strings.NewReader("")), nopWriteCloser{&out}, &errOut, func(string) (string, bool) { return "", false })
+	if !errors.Is(err, errHelp) || out.Len() != 0 || !strings.Contains(errOut.String(), mcpUsage) {
+		t.Errorf("err %v, stdout %q, stderr %q; want errHelp, empty stdout, usage on stderr", err, out.String(), errOut.String())
+	}
+}

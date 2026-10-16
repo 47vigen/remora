@@ -275,8 +275,8 @@ func TestApplyConfigPlanHashMismatch(t *testing.T) {
 		t.Fatalf("edit inner = %d %s", code, body)
 	}
 	code, body := env.do(t, env.client, http.MethodPost, "/api/config/apply", hashedBody(t, fastDoc, stale))
-	if code != http.StatusConflict {
-		t.Fatalf("apply = %d %s, want 409", code, body)
+	if code != http.StatusPreconditionFailed {
+		t.Fatalf("apply = %d %s, want 412", code, body)
 	}
 	want := []gen.Change{{Op: gen.Update, Kind: gen.ChangeKindAlias, Name: "fast", Fields: []string{"members"}}}
 	if got := decodeChanges(t, body); !reflect.DeepEqual(got, want) {

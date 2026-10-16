@@ -36,7 +36,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	case "import":
 		return exitCode(stderr, "import", runImport(ctx, args[1:], stdout, lookup(getenv)))
 	case "mcp":
-		return exitCode(stderr, "mcp", runMCP(ctx, args[1:], os.Stdin, os.Stdout, lookup(getenv)))
+		return exitCode(stderr, "mcp", runMCP(ctx, args[1:], os.Stdin, os.Stdout, stderr, lookup(getenv)))
 	case "version":
 		return runVersion(stdout)
 	case "healthcheck":

@@ -87,7 +87,7 @@ func (s *Server) PlanConfig(ctx context.Context, req gen.PlanConfigRequestObject
 
 // ApplyConfig makes the store match a document and answers the changes made. When a change fails, nothing is
 // changed and the error names the failed change. With a plan_hash that no longer matches, nothing is changed and the
-// answer is 409 with the fresh plan.
+// answer is 412 with the fresh plan.
 func (s *Server) ApplyConfig(ctx context.Context, req gen.ApplyConfigRequestObject) (gen.ApplyConfigResponseObject, error) {
 	svc, err := s.config()
 	if err != nil {
@@ -107,7 +107,7 @@ func (s *Server) ApplyConfig(ctx context.Context, req gen.ApplyConfigRequestObje
 	}
 	var pm *config.PlanMismatchError
 	if errors.As(err, &pm) {
-		return gen.ApplyConfig409JSONResponse{Changes: toChanges(pm.Changes), PlanHash: &pm.Hash}, nil
+		return gen.ApplyConfig412JSONResponse{Changes: toChanges(pm.Changes), PlanHash: &pm.Hash}, nil
 	}
 	var ae *config.ApplyError
 	if !errors.As(err, &ae) {
