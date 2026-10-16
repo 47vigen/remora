@@ -72,15 +72,22 @@ func (s *Server) PlanConfig(ctx context.Context, req gen.PlanConfigRequestObject
 	if err != nil {
 		return nil, err
 	}
+	// Exported before planning: a store change in between makes the hash stale, so apply refuses rather than trusts it.
+	cur, err := svc.Export(ctx)
+	if err != nil {
+		return nil, err
+	}
 	cs, err := svc.Plan(ctx, f, sec, prune)
 	if err != nil {
 		return nil, err
 	}
-	return gen.PlanConfig200JSONResponse{Changes: toChanges(cs)}, nil
+	h := config.PlanHash(prune, f, sec, cur)
+	return gen.PlanConfig200JSONResponse{Changes: toChanges(cs), PlanHash: &h}, nil
 }
 
 // ApplyConfig makes the store match a document and answers the changes made. When a change fails, nothing is
-// changed and the error names the failed change.
+// changed and the error names the failed change. With a plan_hash that no longer matches, nothing is changed and the
+// answer is 412 with the fresh plan.
 func (s *Server) ApplyConfig(ctx context.Context, req gen.ApplyConfigRequestObject) (gen.ApplyConfigResponseObject, error) {
 	svc, err := s.config()
 	if err != nil {
@@ -90,9 +97,17 @@ func (s *Server) ApplyConfig(ctx context.Context, req gen.ApplyConfigRequestObje
 	if err != nil {
 		return nil, err
 	}
-	applied, err := svc.Apply(ctx, f, sec, prune)
+	var hash string
+	if req.Body.PlanHash != nil {
+		hash = *req.Body.PlanHash
+	}
+	applied, err := svc.ApplyPlanned(ctx, f, sec, prune, hash)
 	if err == nil {
 		return gen.ApplyConfig200JSONResponse{Changes: toChanges(applied)}, nil
+	}
+	var pm *config.PlanMismatchError
+	if errors.As(err, &pm) {
+		return gen.ApplyConfig412JSONResponse{Changes: toChanges(pm.Changes), PlanHash: &pm.Hash}, nil
 	}
 	var ae *config.ApplyError
 	if !errors.As(err, &ae) {

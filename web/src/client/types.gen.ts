@@ -500,11 +500,15 @@ export type ConfigRequest = {
      * Delete what the store has and the document does not.
      */
     prune?: boolean;
+    /**
+     * The `plan_hash` a plan of these same inputs returned. When the store changed since this plan, nothing is applied: 412 with the fresh plan. Ignored by plan.
+     */
+    plan_hash?: string;
 };
 
 export type Change = {
     op: 'create' | 'update' | 'delete';
-    kind: 'provider' | 'alias' | 'key';
+    kind: 'provider' | 'alias' | 'key' | 'account_strategy';
     name: string;
     /**
      * The fields an update changes; empty for create and delete.
@@ -518,6 +522,10 @@ export type Change = {
 
 export type ConfigChanges = {
     changes: Array<Change>;
+    /**
+     * Binds this plan to its inputs and to the store it was planned against. Set by plan and on a 412; send it with apply.
+     */
+    plan_hash?: string;
 };
 
 export type ProviderKeyWritable = {
@@ -2190,6 +2198,10 @@ export type ApplyConfigData = {
 };
 
 export type ApplyConfigErrors = {
+    /**
+     * The store changed since the plan named by `plan_hash`. Nothing was applied; this is the fresh plan. A conflict inside the plan itself stays a 409 with an error body.
+     */
+    412: ConfigChanges;
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
      * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).

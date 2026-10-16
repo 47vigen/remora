@@ -218,6 +218,39 @@ memory (a restart resets it). Ties go to the declared order.
 - **Upgrading.** Aliases stored with `round-robin` before this version picked a member at random; they were migrated
   to `random`, which keeps that behaviour. `round-robin` now rotates.
 
+## MCP
+
+remora serves its management tools over the Model Context Protocol, so Claude Code or any MCP client can operate it:
+at `/mcp` on the same listener (stateless Streamable HTTP), and over stdio with `remora mcp`. Every tool calls the
+management API, with the same authentication, validation and errors.
+
+The only credential is an API token from Settings → API tokens, sent as `Authorization: Bearer`. The console's
+session cookie is not accepted on `/mcp`.
+
+```sh
+claude mcp add --transport http remora https://<host>/mcp --header "Authorization: Bearer rmt_..."
+claude mcp add --transport stdio --env REMORA_URL=https://<host> --env REMORA_TOKEN=rmt_... remora -- remora mcp
+```
+
+| tool | kind | covers |
+|---|---|---|
+| `remora_overview` | read | health, version, counts, accounts out of the pool, cooling, quota per provider |
+| `remora_inspect` | read | list or show providers, accounts, aliases (with the compiled chain), keys (with usage), API tokens, cooling, quota, account strategies, logins |
+| `remora_logs` | read | search the request log, or one entry; bodies cut to 4096 bytes |
+| `remora_stats` | read | totals over a range, grouped by key, alias, provider or model |
+| `remora_alias_compile` | read | preview the chain an alias definition compiles to |
+| `remora_provider_test` | read | test one provider; sends one real request |
+| `remora_config_export` | read | the current `remora.yaml` |
+| `remora_config_plan` | read | the changes a whole or partial `remora.yaml` would make, and its `plan_hash` |
+| `remora_config_apply` | write, destructive | apply a planned document; refuses with the fresh plan if the configuration changed since |
+| `remora_delete` | write, destructive | delete a provider, alias, client key or account |
+| `remora_account` | write | enable, disable, set priority, reset cooldown, refresh quota, sign in, import a credential |
+
+Providers, aliases, keys and both strategy kinds change only through plan then apply. `prune` is off by default
+here, so a partial document adds or updates exactly what it names and deletes nothing; a full replace says
+`prune: true`, and its delete rows are what you confirm. Claude Code's permission rules match
+`mcp__remora__<tool>`, so the read tools can be allowed and the writes kept on ask.
+
 ## Verifying an image
 
 Every release image is signed with cosign (keyless, by the release workflow) and carries an SBOM and build
