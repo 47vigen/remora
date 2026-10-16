@@ -73,8 +73,16 @@ func (s *Store) ClientKeyByValue(ctx context.Context, value string) (ClientKey, 
 	if sl == nil {
 		return ClientKey{}, ErrNoSealer
 	}
+	mac := sl.MAC([]byte(value))
+	if snap := s.snap.Load(); snap != nil {
+		k, ok := snap.keys[string(mac)]
+		if !ok {
+			return ClientKey{}, ErrNotFound
+		}
+		return k, nil
+	}
 	row := s.db.QueryRowContext(ctx,
-		"SELECT "+clientKeyCols+" FROM client_keys WHERE key_mac = ?", sl.MAC([]byte(value)))
+		"SELECT "+clientKeyCols+" FROM client_keys WHERE key_mac = ?", mac)
 	k, err := scanClientKey(row, sl)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ClientKey{}, ErrNotFound

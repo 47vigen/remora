@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hkdf"
@@ -90,6 +91,7 @@ func (s *Sealer) MAC(data []byte) []byte {
 // SetSealer sets the Sealer the repositories use for secrets.
 func (s *Store) SetSealer(sl *Sealer) {
 	s.sealer.Store(sl)
+	_ = s.Refresh(context.Background()) // a failure leaves reads on SQL, which reports it
 }
 
 // LoadMasterKey returns the master key. env (the value of REMORA_MASTER_KEY, base64 of 32 bytes) wins when set;

@@ -29,9 +29,20 @@ type Tx struct {
 	sealer *Sealer
 }
 
-// Write runs fn in one BEGIN IMMEDIATE transaction and commits iff fn returns nil. Writers in other processes
-// serialise on the database lock; Write waits up to 30 s for it.
-func (s *Store) Write(ctx context.Context, fn func(tx *Tx) error) (err error) {
+// Write runs fn in one BEGIN IMMEDIATE transaction and commits iff fn returns nil, then rebuilds the snapshot.
+// Concurrent writers serialise on the database lock; Write waits up to 30 s for it.
+func (s *Store) Write(ctx context.Context, fn func(tx *Tx) error) error {
+	if err := s.write(ctx, fn); err != nil {
+		return err
+	}
+	// Every change to keys and aliases commits here, reconcile passes included, so the snapshot follows each one.
+	// It runs once the write's connection is back in the pool: concurrent writers may hold every other one. A failed
+	// rebuild leaves reads on SQL, which reports it.
+	_ = s.Refresh(context.WithoutCancel(ctx))
+	return nil
+}
+
+func (s *Store) write(ctx context.Context, fn func(tx *Tx) error) (err error) {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("store: write: conn: %w", err)

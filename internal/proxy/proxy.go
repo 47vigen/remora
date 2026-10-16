@@ -270,12 +270,11 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt route, sh sha
 // checkAliasKind reports whether model names an alias, and refuses an alias of another kind than the endpoint
 // serves. It fails closed: when the aliases cannot be read, the request is refused rather than sent unchecked.
 func (p *Proxy) checkAliasKind(ctx context.Context, model string, kind alias.Kind, path string) (bool, *apiError) {
-	aliases, err := p.store.Aliases(ctx)
+	a, ok, err := p.store.Alias(ctx, model)
 	if err != nil {
 		p.log.ErrorContext(ctx, "proxy: load aliases", slog.Any("err", err))
 		return false, &errInternal
 	}
-	a, ok := aliases[model]
 	if !ok {
 		return false, nil
 	}

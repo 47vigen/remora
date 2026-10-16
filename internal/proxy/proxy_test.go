@@ -881,6 +881,7 @@ func TestProxy_AliasesUnreadableFailsClosed(t *testing.T) {
 	if _, err := db.ExecContext(t.Context(), `UPDATE aliases SET capabilities = 'not a list' WHERE name = 'emb'`); err != nil {
 		t.Fatal(err)
 	}
+	_ = f.st.Refresh(t.Context()) // the edit bypassed Write; the failed rebuild sends reads back to SQL
 	resp := f.do(t, http.MethodPost, "/v1/chat/completions", keyFull, "application/json", chatBody("emb"), nil)
 	if resp.StatusCode != http.StatusInternalServerError || !strings.Contains(string(resp.Body), `"internal_error"`) {
 		t.Fatalf("unreadable aliases: %d %s, want 500 internal_error", resp.StatusCode, resp.Body)
