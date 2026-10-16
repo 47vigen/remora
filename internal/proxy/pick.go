@@ -16,9 +16,10 @@ type pickChain struct {
 // Picker picks the member a spreading alias's request tries first, from the live chains the reconciler publishes
 // and the starts of the last minute. It is safe for concurrent use.
 type Picker struct {
-	chains atomic.Pointer[map[string]pickChain]
-	recent *recentStarts
-	intn   func(n int) int
+	chains  atomic.Pointer[map[string]pickChain]
+	members atomic.Pointer[map[string]bool] // load keys of every published member; only these are counted
+	recent  *recentStarts
+	intn    func(n int) int
 }
 
 // NewPicker returns a Picker; nil now and intn mean time.Now and rand.IntN.
@@ -42,7 +43,14 @@ func (p *Picker) SetChains(chains map[string]alias.Chain) {
 		}
 		next[name] = pc
 	}
+	members := map[string]bool{}
+	for _, c := range chains {
+		for _, m := range c.Members {
+			members[loadKey(m)] = true
+		}
+	}
 	p.chains.Store(&next)
+	p.members.Store(&members)
 }
 
 // Pick returns the member ref to send as X-Remora-First for aliasName, or "" when it has no published chain.
@@ -90,7 +98,8 @@ func (p *Picker) Pick(aliasName string) string {
 // Started records a start against the member that served the request (x-remora-served-by), so a fallback counts
 // where it landed. "" is ignored.
 func (p *Picker) Started(servedBy string) {
-	if servedBy != "" {
+	// Only published members are counted, so arbitrary model names a client sends cannot grow the counters.
+	if m := p.members.Load(); servedBy != "" && m != nil && (*m)[loadKey(servedBy)] {
 		p.recent.Add(loadKey(servedBy))
 	}
 }

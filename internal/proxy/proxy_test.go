@@ -1068,7 +1068,8 @@ func TestStartedCountsServedBy(t *testing.T) {
 	if a, b, c := p.starts("up-a/m1"), p.starts("up-b/m1"), p.starts("up-c/m1"); a != 0 || b != 1 || c != 1 {
 		t.Errorf("starts a=%d b=%d c=%d, want 0 1 1", a, b, c)
 	}
-	serve("remora-oauth", "codex/m")
+	p.SetChains(map[string]alias.Chain{"spread": {Strategy: alias.StrategyRandom, Members: []string{"up-a/m1", "codex/m"}}})
+	serve("remora-oauth", "codex/m") // the renamed served-by value is what counts
 	if got := p.starts("codex/m"); got != 1 {
 		t.Errorf("starts(codex/m) = %d, want 1", got)
 	}

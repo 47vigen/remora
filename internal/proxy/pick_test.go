@@ -175,3 +175,15 @@ func TestPickLeastUsedMatchesThinkingSuffix(t *testing.T) {
 		t.Errorf("ag/m served twice = %q, want ag/n", got)
 	}
 }
+
+func TestStartedIgnoresUnpublishedModels(t *testing.T) {
+	p := NewPicker(nil, nil)
+	p.SetChains(chains(alias.StrategyLeastUsed, "a", "b"))
+	for i := range 100 {
+		p.Started("direct/model-" + string(rune('a'+i%26)) + string(rune('a'+i/26)))
+	}
+	p.Started("a")
+	if n := len(p.recent.keys); n != 1 {
+		t.Errorf("counter keys = %d, want 1 (only the published member)", n)
+	}
+}
