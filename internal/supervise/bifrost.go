@@ -70,7 +70,7 @@ func BifrostEngine(cfg config.Config, c Credentials) (Engine, error) {
 			"-log-style", "json",
 			"-log-level", levelName(cfg.LogLevel),
 		},
-		Env:       []string{childPath, "HOME=" + appDir},
+		Env:       append([]string{childPath, "HOME=" + appDir}, GoMemLimitEnv(cfg.MemoryLimit, MemoryShares.Router)...),
 		HealthURL: "http://127.0.0.1:" + port + "/health",
 	}, nil
 }

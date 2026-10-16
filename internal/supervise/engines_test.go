@@ -42,6 +42,20 @@ func checkFileMode(t *testing.T, path string) {
 	}
 }
 
+// checkGoMemLimit: want "" means no GOMEMLIMIT entry at all.
+func checkGoMemLimit(t *testing.T, env []string, want string) {
+	t.Helper()
+	var got []string
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "GOMEMLIMIT=") {
+			got = append(got, kv)
+		}
+	}
+	if want == "" && len(got) != 0 || want != "" && !slices.Equal(got, []string{want}) {
+		t.Errorf("GOMEMLIMIT entries = %q, want %q", got, want)
+	}
+}
+
 func checkNoRemoraEnv(t *testing.T, env []string) {
 	t.Helper()
 	for _, kv := range env {
@@ -74,6 +88,7 @@ func TestBifrostEngine(t *testing.T) {
 		t.Errorf("Env = %q, want HOME", e.Env)
 	}
 	checkNoRemoraEnv(t, e.Env)
+	checkGoMemLimit(t, e.Env, "")
 
 	path := filepath.Join(dir, "bifrost", "config.json")
 	checkFileMode(t, path)
@@ -121,6 +136,13 @@ func TestBifrostEngine(t *testing.T) {
 	if ac.AdminUsername != "remora" || ac.AdminPassword != testCreds.BifrostAdminPassword || !ac.IsEnabled {
 		t.Errorf("governance.auth_config = %+v", ac)
 	}
+
+	cfg := testConfig(dir)
+	cfg.MemoryLimit = 4 << 30
+	if e, err = BifrostEngine(cfg, testCreds); err != nil {
+		t.Fatalf("BifrostEngine: %v", err)
+	}
+	checkGoMemLimit(t, e.Env, "GOMEMLIMIT=2147483648")
 }
 
 type cliproxyDoc struct {
@@ -184,6 +206,7 @@ func TestCLIProxyAPIEngine(t *testing.T) {
 		}
 	}
 	checkNoRemoraEnv(t, e.Env)
+	checkGoMemLimit(t, e.Env, "")
 
 	checkFileMode(t, path)
 	doc := readCLIProxyConfig(t, path)
@@ -206,6 +229,13 @@ func TestCLIProxyAPIEngine(t *testing.T) {
 	if doc.Plugins.Enabled {
 		t.Error("plugins.enabled = true")
 	}
+
+	cfg := testConfig(dir)
+	cfg.MemoryLimit = 4 << 30
+	if e, err = CLIProxyAPIEngine(cfg, testCreds); err != nil {
+		t.Fatalf("CLIProxyAPIEngine: %v", err)
+	}
+	checkGoMemLimit(t, e.Env, "GOMEMLIMIT=644245094")
 }
 
 func TestRenderOverwritesAtomically(t *testing.T) {

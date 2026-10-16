@@ -110,7 +110,7 @@ func CLIProxyAPIEngine(cfg config.Config, c Credentials) (Engine, error) {
 		Name:      "cliproxyapi",
 		Bin:       filepath.Join(cfg.EngineDir, "cliproxyapi"),
 		Args:      []string{"-config", path},
-		Env:       []string{childPath, "HOME=" + dir, "WRITABLE_PATH=" + dir},
+		Env:       append([]string{childPath, "HOME=" + dir, "WRITABLE_PATH=" + dir}, GoMemLimitEnv(cfg.MemoryLimit, MemoryShares.Accounts)...),
 		HealthURL: "http://127.0.0.1:" + strconv.Itoa(cfg.Ports.CLIProxyAPI) + "/healthz",
 	}, nil
 }
