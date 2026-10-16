@@ -7,4 +7,6 @@ removes the row. `pending` in the `upstream PR` column means the upstream pull r
 
 | engine | file | change | why | fork commit | upstream PR | base tag | remove when |
 |---|---|---|---|---|---|---|---|
-| bifrost | core/schemas/transcriptions.go | add `speaker` to `TranscriptionSegment` | Soniox verbose_json segments carry speakers | 179c29b6265e5b2bbd9d34fc60a6e77bc1264214 | https://github.com/maximhq/bifrost/pull/8578 | transports/v2.3.0 | the PR is in a release tag |
+| bifrost | core/schemas/transcriptions.go | add `speaker` to `TranscriptionSegment` | Soniox verbose_json segments carry speakers | d3ad306803437ddc1950971fcbdf3afa463e9246 | https://github.com/maximhq/bifrost/pull/8578 | transports/v2.3.0 | the PR is in a release tag |
+| bifrost | core/bifrost.go | no fallback when the primary refuses the request itself (400/409/413/415/422 with an error body), on named chains too | a request the primary rejected is otherwise answered by another model | d3ad306803437ddc1950971fcbdf3afa463e9246 | pending | transports/v2.3.0 | the PR is in a release tag |
+| bifrost | core/schemas/chatcompletions.go | do not emit the synthesised text-only `reasoning_details` entry | reasoning reached clients three times | d3ad306803437ddc1950971fcbdf3afa463e9246 | pending | transports/v2.3.0 | the PR is in a release tag |

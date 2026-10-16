@@ -55,6 +55,16 @@ export function memberKind(ref: string): "alias" | "model" {
   return ref.includes("/") ? "model" : "alias";
 }
 
+/**
+ * Splits a member ref "<provider>/<model>(<level>)" into the ref without its thinking suffix and the level, for
+ * display only; the server validates.
+ */
+export function thinkingOf(ref: string): { base: string; level?: string } {
+  const open = ref.lastIndexOf("(");
+  if (open < 0 || !ref.endsWith(")") || memberKind(ref) === "alias") return { base: ref };
+  return { base: ref.slice(0, open), level: ref.slice(open + 1, -1) };
+}
+
 /** The members the add box offers: other aliases, and every known provider model, without duplicates. */
 export function memberOptions(
   aliases: string[],

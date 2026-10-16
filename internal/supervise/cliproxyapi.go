@@ -34,6 +34,11 @@ type cliproxyRouting struct {
 	ForceModelPrefix bool             `yaml:"force-model-prefix"`
 	Retry            cliproxyRetry    `yaml:"retry"`
 	Cooldown         cliproxyCooldown `yaml:"cooldown"`
+	// SessionAffinity keeps a conversation on one account so the provider's prompt cache hits; it rebinds only on
+	// quota and auth errors, not on a transient 5xx.
+	SessionAffinity         bool   `yaml:"session-affinity"`
+	SessionAffinityTTL      string `yaml:"session-affinity-ttl"`
+	SessionAffinityRebindOn string `yaml:"session-affinity-rebind-on"`
 }
 
 type cliproxyRetry struct {
@@ -124,10 +129,13 @@ func CLIProxyAPIEngine(cfg config.Config, c Credentials) (Engine, error) {
 		}}},
 		Plugins: cliproxyPlugins{Enabled: false},
 		Routing: cliproxyRouting{
-			Strategy:         "round-robin",
-			ForceModelPrefix: true,
-			Retry:            cliproxyRetry{RequestRetry: 1, MaxRetryInterval: 10},
-			Cooldown:         cliproxyCooldown{SaveCooldownStatus: true, TransientErrorCooldownSeconds: 5},
+			Strategy:                "round-robin",
+			ForceModelPrefix:        true,
+			Retry:                   cliproxyRetry{RequestRetry: 1, MaxRetryInterval: 10},
+			Cooldown:                cliproxyCooldown{SaveCooldownStatus: true, TransientErrorCooldownSeconds: 5},
+			SessionAffinity:         true,
+			SessionAffinityTTL:      "1h",
+			SessionAffinityRebindOn: "quota",
 		},
 		Requests: cliproxyRequests{Streaming: cliproxyStreaming{BootstrapRetries: 1, KeepaliveSeconds: 15}},
 		Upstream: cliproxyUpstream{Codex: cliproxyCodex{ModelLevelCooling: true}},

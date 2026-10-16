@@ -2,7 +2,7 @@ import { ArrowDown, ArrowUp, Grip, Xmark } from "@gravity-ui/icons";
 import { Button, Chip, ListBox } from "@heroui/react";
 import { useDragAndDrop } from "react-aria-components";
 
-import { memberKind } from "../-lib/alias-form";
+import { memberKind, thinkingOf } from "../-lib/alias-form";
 import { ProviderIcon } from "../../../../components/provider-icon/ProviderIcon";
 
 /** Moves `moved` (in their current order) before or after `target`. */
@@ -59,6 +59,7 @@ export function MemberList({
     >
       {({ id: ref }) => {
         const index = members.indexOf(ref);
+        const { base, level } = thinkingOf(ref);
         return (
           <ListBox.Item id={ref} textValue={ref} className="flex items-center gap-2.5 rounded-none px-2 py-1.5">
             <Grip aria-hidden="true" className="text-muted size-4 shrink-0 cursor-grab" />
@@ -70,7 +71,18 @@ export function MemberList({
             ) : (
               <ProviderIcon type={ref.slice(0, ref.indexOf("/"))} size="sm" />
             )}
-            <span className="min-w-0 flex-1 truncate font-mono text-[13px]">{ref}</span>
+            <span className="min-w-0 flex-1 truncate font-mono text-[13px]">{base}</span>
+            {level ? (
+              <Chip size="sm" variant="soft">
+                <Chip.Label className="text-[11px]">
+                  {level === "0"
+                    ? "thinking off"
+                    : /^\d+$/.test(level)
+                      ? `thinking ${level} tokens`
+                      : `thinking ${level}`}
+                </Chip.Label>
+              </Chip>
+            ) : null}
             {cooling.has(ref) ? (
               <Chip size="sm" variant="soft" color="warning">
                 <Chip.Label className="text-[11px]">cooling</Chip.Label>

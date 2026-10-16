@@ -17,13 +17,21 @@ const (
 	maxSessionLen         = 256
 )
 
+// headerSessionID is a client's explicit session id, which the OAuth engine reads first. headerForwardAffinity
+// reaches it as X-Session-Affinity, its second choice, which binds the conversation to one account while
+// routing.session-affinity is on.
+const (
+	headerSessionID       = "X-Session-ID"
+	headerForwardAffinity = "X-Bf-Eh-X-Session-Affinity"
+)
+
 const base62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
 // opencodeSession is the client's own session id when it sent a usable one. Otherwise it is derived from the
 // conversation's first message, so every turn of one conversation carries the same id, in OpenCode's "ses_" format.
 // A body with no message gets a random id.
 func opencodeSession(h http.Header, body []byte, sp bodySpans) string {
-	if v := strings.TrimSpace(h.Get(headerOpencodeSession)); v != "" && len(v) <= maxSessionLen && !strings.ContainsFunc(v, isControl) {
+	if v, ok := clientID(h, headerOpencodeSession); ok {
 		return v
 	}
 	var sum [sha256.Size]byte
@@ -69,6 +77,49 @@ func firstMessage(body []byte, sp bodySpans) []byte {
 		}
 	}
 	return nil
+}
+
+// affinityKey is the conversation's account-affinity key: the client's own id from X-Session-ID, X-Opencode-Session
+// or the body's prompt_cache_key, in that order; otherwise "aff_" and 32 hex digits of a hash of the client key and the
+// first user message, so a shared system prompt does not pin every conversation to one account and two clients that
+// open alike do not share one. "" when there is no client id and no user message.
+func affinityKey(h http.Header, vk, promptCacheKey string, firstUser []byte) string {
+	for _, name := range []string{headerSessionID, headerOpencodeSession} {
+		if v, ok := clientID(h, name); ok {
+			return v
+		}
+	}
+	if usableID(promptCacheKey) {
+		return promptCacheKey
+	}
+	if firstUser == nil {
+		return ""
+	}
+	hash := sha256.New()
+	_, _ = hash.Write([]byte("remora-affinity\x00" + vk + "\x00"))
+	_, _ = hash.Write(firstUser)
+	return "aff_" + hex.EncodeToString(hash.Sum(nil)[:16])
+}
+
+// affinitySource is the first user message, or a string Responses input, or nil.
+func affinitySource(body []byte, sp bodySpans) []byte {
+	if v := sp.firstUser; v.end > 0 {
+		return body[v.start:v.end]
+	}
+	if v := sp.input; v.end > 0 && body[v.start] == '"' {
+		return body[v.start:v.end]
+	}
+	return nil
+}
+
+// clientID is the trimmed value of header name when it is usable as a session id.
+func clientID(h http.Header, name string) (string, bool) {
+	v := strings.TrimSpace(h.Get(name))
+	return v, usableID(v)
+}
+
+func usableID(v string) bool {
+	return v != "" && len(v) <= maxSessionLen && !strings.ContainsFunc(v, isControl)
 }
 
 func isControl(r rune) bool { return r < 0x20 || r == 0x7f }

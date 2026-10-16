@@ -169,6 +169,16 @@ non-streaming answers alike, but not on the Responses WebSocket route, where it 
 The list is checked against the engine on every engine update by contract tests. What remora does and does not do,
 each row with the test that proves it, is in [`docs/parity.md`](docs/parity.md).
 
+## Thinking level
+
+A subscription model in an alias may carry an explicit thinking level as a suffix: `(minimal)`, `(low)`,
+`(medium)`, `(high)`, or a token budget such as `(1024)`, where `(0)` turns thinking off. For example, an alias
+`flash-fast` with the member `antigravity/gemini-3-flash(low)` answers faster than one without the suffix.
+
+- The suffix applies only to subscription models; the alias API refuses it on any other provider.
+- For that member it overrides the client's `reasoning_effort`. A model without thinking ignores it.
+- No existing alias changes, and there is no default level: a faster tier is a separate, named alias.
+
 ## Verifying an image
 
 Every release image is signed with cosign (keyless, by the release workflow) and carries an SBOM and build

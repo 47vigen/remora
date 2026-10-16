@@ -109,6 +109,8 @@ func TestAliasErrors(t *testing.T) {
 		{"bad name", `{"name":" a","kind":"chat","members":["or/a"]}`, nil, "name"},
 		{"negative context window", `{"name":"a","kind":"chat","members":["or/a"],"context_window":-1}`, nil, "context_window"},
 		{"unknown strategy", `{"name":"a","kind":"chat","members":["or/a"],"strategy":"random"}`, nil, "strategy"},
+		{"thinking on an api-key member", `{"name":"a","kind":"chat","members":["up-a/m1(low)"]}`, nil, "applies only to subscription models"},
+		{"unknown thinking level", `{"name":"a","kind":"chat","members":["antigravity/gemini-3-flash(extreme)"]}`, nil, `got \"extreme\"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env.aliases.mu.Lock()
@@ -257,5 +259,20 @@ func TestListAliasesFilter(t *testing.T) {
 	}
 	if code, body := env.do(t, env.client, http.MethodGet, "/api/aliases?kind=images", ""); code != http.StatusBadRequest {
 		t.Errorf("list with an unknown kind = %d %s", code, body)
+	}
+}
+
+func TestFromGenAliasThinkingSuffix(t *testing.T) {
+	env := newTestEnv(t)
+	code, body := env.do(t, env.client, http.MethodPost, "/api/aliases",
+		`{"name":"flash-fast","kind":"chat","members":["antigravity/gemini-3-flash(low)"]}`)
+	if code != http.StatusCreated && code != http.StatusOK {
+		t.Fatalf("status = %d %s", code, body)
+	}
+	env.aliases.mu.Lock()
+	got := env.aliases.m["flash-fast"].Members
+	env.aliases.mu.Unlock()
+	if len(got) != 1 || got[0].Ref != "antigravity/gemini-3-flash(low)" {
+		t.Fatalf("stored members %+v, want the ref unchanged", got)
 	}
 }

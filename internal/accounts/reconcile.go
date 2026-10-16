@@ -65,6 +65,7 @@ func settingsPatch(key string, twice bool) map[string]any {
 			"force-model-prefix": true,
 			"retry":              map[string]any{"request-retry": 1, "max-retry-interval": 10},
 			"cooldown":           map[string]any{"save-cooldown-status": true, "transient-error-cooldown-seconds": 5},
+			"session-affinity":   true, "session-affinity-ttl": "1h", "session-affinity-rebind-on": "quota",
 		},
 		"requests": map[string]any{"streaming": map[string]any{"bootstrap-retries": 1, "keepalive-seconds": 15}},
 		"oauth": map[string]any{"providers": map[string]any{"antigravity": map[string]any{"connection-pool": map[string]any{

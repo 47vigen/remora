@@ -65,6 +65,7 @@ func TestToEngineTarget(t *testing.T) {
 		{alias.Target{Provider: "codex", Model: "gpt-x"}, alias.Target{Provider: "remora-oauth", Model: "codex/gpt-x"}},
 		{alias.Target{Provider: "grok", Model: "g-1"}, alias.Target{Provider: "remora-oauth", Model: "grok/g-1"}},
 		{alias.Target{Provider: "openrouter", Model: "a/b"}, alias.Target{Provider: "openrouter", Model: "a/b"}},
+		{alias.Target{Provider: "antigravity", Model: "gemini-3-flash(low)"}, alias.Target{Provider: "remora-oauth", Model: "antigravity/gemini-3-flash(low)"}},
 	}
 	for _, c := range cases {
 		if got := ToEngineTarget(c.in); got != c.want {

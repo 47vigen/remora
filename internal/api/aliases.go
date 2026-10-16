@@ -9,6 +9,7 @@ import (
 
 	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/api/gen"
+	"github.com/47vigen/remora/internal/engine/cliproxyapi"
 )
 
 // toGenAlias maps an alias to its answer. Lists are never null.
@@ -51,6 +52,9 @@ func fromGenAlias(b *gen.Alias) (alias.Alias, error) {
 	for _, m := range b.Members {
 		if m == "" {
 			return alias.Alias{}, badRequest("a member cannot be empty")
+		}
+		if err := alias.CheckThinking(m, cliproxyapi.IsSubscription); err != nil {
+			return alias.Alias{}, badRequest(err.Error())
 		}
 		a.Members = append(a.Members, alias.Member{Ref: m})
 	}
