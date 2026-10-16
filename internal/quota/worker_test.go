@@ -380,3 +380,22 @@ func TestQueuedRefreshSkipsDisabledAccount(t *testing.T) {
 		}
 	})
 }
+
+func TestRefreshFloorReleasedAfterCheck(t *testing.T) {
+	bubble(t, func(t *testing.T) {
+		r := newRig(t, 0)
+		a := r.add("a", "codex")
+		ctx := context.Background()
+		r.run(t)
+		if q, _, _ := r.svc.Refresh(ctx, a, ""); len(q) != 1 {
+			t.Fatalf("refresh queued %v", q)
+		}
+		time.Sleep(5 * time.Second)
+		r.svc.mu.Lock()
+		_, held := r.svc.requested[a]
+		r.svc.mu.Unlock()
+		if held {
+			t.Error("a finished check still holds its request; a reused id would be skipped")
+		}
+	})
+}

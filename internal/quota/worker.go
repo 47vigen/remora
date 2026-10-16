@@ -121,11 +121,20 @@ func (s *Service) round(ctx context.Context) time.Duration {
 
 	now := time.Now()
 	var pick *store.Account
+	var popped []int64
+	defer func() { // a finished or dropped request no longer holds the floor; ids are reused after a delete
+		s.mu.Lock()
+		for _, id := range popped {
+			delete(s.requested, id)
+		}
+		s.mu.Unlock()
+	}()
 	for pick == nil {
 		id, ok := s.popQueue()
 		if !ok {
 			break
 		}
+		popped = append(popped, id)
 		if i := slices.IndexFunc(rows, func(a store.Account) bool { return a.ID == id }); i >= 0 && rows[i].Enabled &&
 			byName[rows[i].Credential] != nil && !byName[rows[i].Credential].Disabled {
 			pick = &rows[i]
