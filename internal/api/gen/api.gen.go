@@ -69,14 +69,17 @@ func (e AliasKind) Valid() bool {
 
 // Defines values for ChangeKind.
 const (
-	ChangeKindAlias    ChangeKind = "alias"
-	ChangeKindKey      ChangeKind = "key"
-	ChangeKindProvider ChangeKind = "provider"
+	ChangeKindAccountStrategy ChangeKind = "account_strategy"
+	ChangeKindAlias           ChangeKind = "alias"
+	ChangeKindKey             ChangeKind = "key"
+	ChangeKindProvider        ChangeKind = "provider"
 )
 
 // Valid indicates whether the value is a known member of the ChangeKind enum.
 func (e ChangeKind) Valid() bool {
 	switch e {
+	case ChangeKindAccountStrategy:
+		return true
 	case ChangeKindAlias:
 		return true
 	case ChangeKindKey:

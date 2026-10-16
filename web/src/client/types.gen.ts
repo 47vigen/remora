@@ -508,7 +508,7 @@ export type ConfigRequest = {
 
 export type Change = {
     op: 'create' | 'update' | 'delete';
-    kind: 'provider' | 'alias' | 'key';
+    kind: 'provider' | 'alias' | 'key' | 'account_strategy';
     name: string;
     /**
      * The fields an update changes; empty for create and delete.

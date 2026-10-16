@@ -1926,7 +1926,7 @@ components:
           enum: [create, update, delete]
         kind:
           type: string
-          enum: [provider, alias, key]
+          enum: [provider, alias, key, account_strategy]
         name:
           type: string
         fields:
