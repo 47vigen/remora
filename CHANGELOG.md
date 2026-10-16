@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/47vigen/remora/compare/v0.3.0...v0.4.0) (2026-10-16)
+
+
+### Features
+
+* **web:** panel review after quota, routing and MCP ([#54](https://github.com/47vigen/remora/issues/54)) ([f8e075a](https://github.com/47vigen/remora/commit/f8e075a2d05dd9ad012e74d40e7ed85afe159938))
+
+
+### Performance
+
+* **engine:** front-door routing rules cost 22 µs, not 103 µs ([#53](https://github.com/47vigen/remora/issues/53)) ([cd20f08](https://github.com/47vigen/remora/commit/cd20f08420f1c21c1cef61bca91053ae01b1546f))
+
 ## [0.3.0](https://github.com/47vigen/remora/compare/v0.2.1...v0.3.0) (2026-10-16)
 
 
