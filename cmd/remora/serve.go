@@ -197,6 +197,11 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	mux.Handle("/v1/", px)
 	// Everything else is the web console.
 	mux.Handle("/", web.Handler())
+	stopPprof, _, err := startPprof(ctx, cfg.PprofAddr, logger)
+	if err != nil {
+		return err
+	}
+	defer stopPprof()
 	srv := newServer(ctx, cfg.Listen, mux)
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.Listen)
 	if err != nil {
