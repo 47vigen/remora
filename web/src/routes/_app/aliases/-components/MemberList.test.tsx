@@ -47,3 +47,22 @@ test("the move buttons swap a member with its neighbour and stop at the ends", a
   await userEvent.click(screen.getByRole("button", { name: "Move b/2 down" }));
   expect(onReorder).toHaveBeenLastCalledWith(["a/1", "c/3", "b/2"]);
 });
+
+test("a member's thinking level shows as a chip beside its model", async () => {
+  const onRemove = vi.fn<(ref: string) => void>();
+  render(
+    <MemberList
+      members={["antigravity/gemini-3-flash(low)", "antigravity/gemini-3-pro(1024)", "up-a/m1"]}
+      cooling={new Set()}
+      onReorder={() => {}}
+      onRemove={onRemove}
+    />,
+  );
+  const [low, budget, plain] = screen.getAllByRole("option");
+  expect(within(low!).getByText("antigravity/gemini-3-flash")).toBeInTheDocument();
+  expect(within(low!).getByText("thinking low")).toBeInTheDocument();
+  expect(within(budget!).getByText("thinking 1024 tokens")).toBeInTheDocument();
+  expect(within(plain!).queryByText(/thinking/)).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "Remove antigravity/gemini-3-flash(low)" }));
+  expect(onRemove).toHaveBeenCalledWith("antigravity/gemini-3-flash(low)");
+});
