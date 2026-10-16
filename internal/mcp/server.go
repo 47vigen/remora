@@ -18,6 +18,7 @@ func New(c *gen.ClientWithResponses) *sdk.Server {
 	s := sdk.NewServer(&sdk.Implementation{Name: "remora", Version: version.Version}, nil)
 	addOverview(s, c)
 	addRead(s, c)
+	addConfig(s, c)
 	return s
 }
 
@@ -73,3 +74,7 @@ func ok200[T any](r interface {
 }
 
 var readOnly = &sdk.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, DestructiveHint: new(false), OpenWorldHint: new(false)}
+
+func write(destructive bool) *sdk.ToolAnnotations {
+	return &sdk.ToolAnnotations{DestructiveHint: new(destructive), OpenWorldHint: new(false)}
+}
