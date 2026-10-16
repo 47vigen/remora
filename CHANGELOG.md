@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/47vigen/remora/compare/v0.4.0...v0.4.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* **web:** accept "/" in alias names, as the server does ([#57](https://github.com/47vigen/remora/issues/57)) ([ada75e5](https://github.com/47vigen/remora/commit/ada75e5f69e706475ed45544de7f64e5e2185414))
+
 ## [0.4.0](https://github.com/47vigen/remora/compare/v0.3.0...v0.4.0) (2026-10-16)
 
 
