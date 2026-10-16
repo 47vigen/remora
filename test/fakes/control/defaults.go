@@ -36,7 +36,7 @@ const (
 )
 
 // defaultModels are the ids the default GET /v1/models lists.
-var defaultModels = []string{"m1", "emb-1", "jev"}
+var defaultModels = []string{"m1", "emb-1", "jev", "rr", "lu", "fb"} // rr, lu, fb: one model per strategy e2e, so their load counts stay apart
 
 // Defaults returns the default answer of every route this plan serves: OpenAI
 // chat (plain and streamed), Responses, embeddings and decisions, TypeSafe System One and
