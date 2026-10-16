@@ -32,6 +32,7 @@ func main() {
 	stream := flag.Bool("stream", false, "request a stream and measure time to the first data event")
 	get := flag.Bool("get", false, "send GET without a body")
 	bodyKB := flag.Int("body-kb", 0, "pad the user message to at least this many KiB")
+	grace := flag.Duration("grace", 30*time.Second, "how long requests in flight at the end may still finish")
 	flag.Parse()
 
 	tr := &http.Transport{
@@ -55,6 +56,9 @@ func main() {
 		mu.Unlock()
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), *d)
+	// Requests in flight at the end of the run still count, but none may outlive the grace period: a gateway that
+	// never answers must not hang the run.
+	reqCtx, reqCancel := context.WithTimeout(context.Background(), *d+*grace)
 	start := time.Now()
 	var wg sync.WaitGroup
 	for range *c {
@@ -65,8 +69,7 @@ func main() {
 				if *get {
 					method, rd = http.MethodGet, nil
 				}
-				// The request outlives ctx on purpose: a request in flight at the deadline still counts.
-				req, _ := http.NewRequestWithContext(context.WithoutCancel(ctx), method, *url, rd)
+				req, _ := http.NewRequestWithContext(reqCtx, method, *url, rd)
 				req.Header.Set("Content-Type", "application/json")
 				if *key != "" {
 					req.Header.Set("Authorization", "Bearer "+*key)
@@ -78,8 +81,9 @@ func main() {
 					continue
 				}
 				var first time.Duration
+				events := -1
 				if *stream && resp.StatusCode == http.StatusOK {
-					_, err = countData(bufio.NewReaderSize(resp.Body, 64<<10), func() { first = time.Since(t0) })
+					events, err = countData(bufio.NewReaderSize(resp.Body, 64<<10), func() { first = time.Since(t0) })
 				} else {
 					_, err = io.Copy(io.Discard, resp.Body)
 				}
@@ -91,6 +95,10 @@ func main() {
 				}
 				if err != nil {
 					fail("body")
+					continue
+				}
+				if events == 0 {
+					fail("empty") // a 200 stream that closed before its first event
 					continue
 				}
 				mu.Lock()
@@ -105,6 +113,7 @@ func main() {
 	}
 	wg.Wait()
 	cancel()
+	reqCancel()
 	wall := time.Since(start)
 	slices.Sort(tot)
 	slices.Sort(ttft)

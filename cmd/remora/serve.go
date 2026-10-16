@@ -162,9 +162,10 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	rctx, rcancel := context.WithCancel(ctx)
 	var loops sync.WaitGroup
 	loops.Go(func() { rec.Run(rctx) })
-	// Cooling only uses failures, so its tail asks for error rows alone; reading every row re-read the whole window,
-	// bodies included, every poll. Live log viewers get their own tail, which polls only while one is open.
-	coolTail := bifrost.NewTail(fd, cfg.Cooling.Poll, []string{"error"}, logger)
+	// Cooling only uses failures, so its tail asks for error rows, plus the requests still running so one that outlives
+	// the lookback and then fails is still followed; reading every row re-read the whole window, bodies included,
+	// every poll. Live log viewers get their own tail, which polls only while one is open.
+	coolTail := bifrost.NewTail(fd, cfg.Cooling.Poll, []string{"error", "processing"}, logger)
 	liveTail := bifrost.NewTail(fd, cfg.Cooling.Poll, nil, logger)
 	loops.Go(func() { coolTail.Run(rctx) })
 	loops.Go(func() { liveTail.Run(rctx) })
