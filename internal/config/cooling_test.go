@@ -11,7 +11,7 @@ func TestLoadCooling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := (Cooling{Count429: 3, Window429: 60 * time.Second, Default: 5 * time.Minute, Poll: time.Second}); c.Cooling != want {
+	if want := (Cooling{Count429: 3, Window429: 60 * time.Second, Default: 5 * time.Minute, Poll: time.Second, SubscriptionDefault: 30 * time.Second}); c.Cooling != want {
 		t.Errorf("defaults = %+v, want %+v", c.Cooling, want)
 	}
 
@@ -21,7 +21,7 @@ func TestLoadCooling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := (Cooling{Count429: 5, Window429: 2 * time.Minute, Default: 30 * time.Second, Poll: 250 * time.Millisecond}); c.Cooling != want {
+	if want := (Cooling{Count429: 5, Window429: 2 * time.Minute, Default: 30 * time.Second, Poll: 250 * time.Millisecond, SubscriptionDefault: 30 * time.Second}); c.Cooling != want {
 		t.Errorf("overrides = %+v, want %+v", c.Cooling, want)
 	}
 

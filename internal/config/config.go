@@ -31,6 +31,10 @@ const (
 	EnvCooling429Window    = "REMORA_COOLING_429_WINDOW"
 	EnvCoolingDefault      = "REMORA_COOLING_DEFAULT"
 	EnvCoolingPoll         = "REMORA_COOLING_POLL"
+
+	EnvCoolingSubscriptionDefault = "REMORA_COOLING_SUBSCRIPTION_DEFAULT"
+	EnvPprofAddr                  = "REMORA_PPROF_ADDR"
+	EnvLogContent                 = "REMORA_LOG_CONTENT"
 )
 
 // Defaults applied when a variable is unset or empty.
@@ -50,6 +54,8 @@ const (
 	DefaultCooling429Window    = 60 * time.Second
 	DefaultCoolingDefault      = 5 * time.Minute
 	DefaultCoolingPoll         = time.Second
+
+	DefaultCoolingSubscriptionDefault = 30 * time.Second
 )
 
 // Ports are the loopback ports of the internal processes. The Go fields name
@@ -67,6 +73,9 @@ type Cooling struct {
 	Window429 time.Duration // REMORA_COOLING_429_WINDOW, default 60s
 	Default   time.Duration // REMORA_COOLING_DEFAULT, default 5m: cooldown when the upstream gave no retry hint
 	Poll      time.Duration // REMORA_COOLING_POLL, default 1s: how often the front door's log is read
+	// SubscriptionDefault is the cooldown of a subscription member without a retry hint: the accounts behind it come
+	// back within seconds. REMORA_COOLING_SUBSCRIPTION_DEFAULT, default 30s.
+	SubscriptionDefault time.Duration
 }
 
 // Config is remora's runtime configuration.
@@ -86,6 +95,12 @@ type Config struct {
 	SonioxDeadline      time.Duration // REMORA_SONIOX_DEADLINE, default 30m
 	SonioxSweepInterval time.Duration // REMORA_SONIOX_SWEEP_INTERVAL, default 10m
 	Cooling             Cooling       // REMORA_COOLING_*
+
+	PprofAddr  string // REMORA_PPROF_ADDR, "" = off: a loopback host:port that serves net/http/pprof
+	LogContent bool   // REMORA_LOG_CONTENT, default false: keep request and response bodies in the request log
+	// MemoryLimit is the container's memory limit in bytes, 0 = none. serve fills it from the cgroup; it is not read
+	// from the environment.
+	MemoryLimit int64
 }
 
 // Load reads the configuration through getenv. Every error names its variable.
@@ -143,6 +158,18 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	if c.Cooling.Default, err = positiveDuration(getenv, EnvCoolingDefault, DefaultCoolingDefault); err != nil {
 		return Config{}, err
+	}
+	if c.Cooling.SubscriptionDefault, err = positiveDuration(getenv, EnvCoolingSubscriptionDefault,
+		DefaultCoolingSubscriptionDefault); err != nil {
+		return Config{}, err
+	}
+	if c.PprofAddr, err = loopbackAddr(getenv, EnvPprofAddr); err != nil {
+		return Config{}, err
+	}
+	if v := getenv(EnvLogContent); v != "" {
+		if c.LogContent, err = strconv.ParseBool(v); err != nil {
+			return Config{}, fmt.Errorf("config: %s=%q: want true or false", EnvLogContent, v)
+		}
 	}
 	if c.Cooling.Poll, err = positiveDuration(getenv, EnvCoolingPoll, DefaultCoolingPoll); err != nil {
 		return Config{}, err
@@ -232,6 +259,22 @@ func parsePort(v string) (int, error) {
 		return 0, fmt.Errorf("port %d is out of range 1-65535", p)
 	}
 	return p, nil
+}
+
+// loopbackAddr reads a host:port on a loopback address, or "" when env is unset.
+func loopbackAddr(getenv func(string) string, env string) (string, error) {
+	v := getenv(env)
+	if v == "" {
+		return "", nil
+	}
+	host, port, err := net.SplitHostPort(v)
+	if err != nil || port == "" {
+		return "", fmt.Errorf("config: %s=%q: want host:port", env, v)
+	}
+	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		return "", fmt.Errorf("config: %s=%q: want a loopback address", env, v)
+	}
+	return v, nil
 }
 
 func orDefault(v, def string) string {
