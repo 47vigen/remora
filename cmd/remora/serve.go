@@ -23,6 +23,7 @@ import (
 	"github.com/47vigen/remora/internal/cooling"
 	"github.com/47vigen/remora/internal/engine/bifrost"
 	"github.com/47vigen/remora/internal/engine/cliproxyapi"
+	"github.com/47vigen/remora/internal/mcp"
 	"github.com/47vigen/remora/internal/proxy"
 	"github.com/47vigen/remora/internal/quota"
 	"github.com/47vigen/remora/internal/reconcile"
@@ -195,6 +196,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	}
 	mux := http.NewServeMux()
 	api.RegisterHealthz(mux, sup, accts)
+	authSvc := auth.NewService(st, nil)
 	mgmt := api.New(api.Deps{
 		Providers: api.NewProviders(st, rec, fd, soniox.NewClient(cfg.SonioxBaseURL, &http.Client{})),
 		Accounts:  api.NewAccounts(accts),
@@ -206,10 +208,17 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		Logs:      fd,
 		Quota:     api.NewQuota(accts, qs),
 		Tail:      liveTail,
-		Auth:      auth.NewService(st, nil),
+		Auth:      authSvc,
 		Log:       logger,
 	})
-	mux.Handle("/api/", mgmt.Handler())
+	mgmtH := mgmt.Handler()
+	mux.Handle("/api/", mgmtH)
+	// /mcp serves the management tools; each tool call goes through mgmtH in process with the caller's token.
+	mc, err := mcp.InProcess(mgmtH)
+	if err != nil {
+		return fmt.Errorf("mcp: %w", err)
+	}
+	mux.Handle("/mcp", mcp.Handler(mcp.New(mc), authSvc))
 	// /v1 answers 503 until a Sync has completed, so a failed first pass never serves a stale front door; the
 	// management API and health stay reachable meanwhile.
 	px := proxy.New(upstream, st, logger)
