@@ -18,6 +18,7 @@ import (
 	"github.com/47vigen/remora/internal/config"
 	"github.com/47vigen/remora/internal/reconcile"
 	"github.com/47vigen/remora/internal/store"
+	"github.com/47vigen/remora/internal/supervise"
 )
 
 func TestPasswordLogLevelIsNeverFiltered(t *testing.T) {
@@ -149,5 +150,25 @@ func TestStartSpeech(t *testing.T) {
 	if c, err := (&net.Dialer{Timeout: time.Second}).DialContext(t.Context(), "tcp", cfg.SonioxAddr); err == nil {
 		_ = c.Close()
 		t.Error("adapter still listening after stop")
+	}
+}
+
+func TestSelfMemoryLimit(t *testing.T) {
+	cases := []struct {
+		name  string
+		limit int64
+		env   string
+		want  int64
+	}{
+		{"a limit and no GOMEMLIMIT", 4 << 30, "", int64(float64(4<<30) * supervise.MemoryShares.Self)},
+		{"no limit", 0, "", 0},
+		{"the operator set GOMEMLIMIT", 4 << 30, "1GiB", 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := selfMemoryLimit(c.limit, func(string) string { return c.env }); got != c.want {
+				t.Errorf("selfMemoryLimit = %d, want %d", got, c.want)
+			}
+		})
 	}
 }

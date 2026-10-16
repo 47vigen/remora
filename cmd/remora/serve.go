@@ -9,7 +9,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"sync"
 	"time"
@@ -62,6 +64,10 @@ func newServeLogger(w io.Writer, level slog.Leveler) *slog.Logger {
 // serve prepares the data directory, the store and the engine credentials, starts the engines and then serves the
 // public listener until ctx ends. It shuts down the listener, then the engines, then the store.
 func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err error) {
+	cfg.MemoryLimit = supervise.MemoryLimit(os.ReadFile)
+	if n := selfMemoryLimit(cfg.MemoryLimit, os.Getenv); n > 0 {
+		debug.SetMemoryLimit(n)
+	}
 	if err := prepareDataDir(cfg.DataDir); err != nil {
 		return fmt.Errorf("prepare data dir: %w", err)
 	}
@@ -224,6 +230,15 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		return fmt.Errorf("shut down http: %w", err)
 	}
 	return nil
+}
+
+// selfMemoryLimit is the soft memory limit remora sets for itself: its share of the container's limit, or 0 when
+// there is no limit or the operator set GOMEMLIMIT, which the runtime already applied.
+func selfMemoryLimit(limit int64, getenv func(string) string) int64 {
+	if limit <= 0 || getenv("GOMEMLIMIT") != "" {
+		return 0
+	}
+	return int64(float64(limit) * supervise.MemoryShares.Self)
 }
 
 // newReconciler is serve's reconciler: the store, the front door and the speech adapter it registers.
