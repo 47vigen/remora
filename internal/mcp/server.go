@@ -19,6 +19,7 @@ func New(c *gen.ClientWithResponses) *sdk.Server {
 	addOverview(s, c)
 	addRead(s, c)
 	addConfig(s, c)
+	addWrite(s, c)
 	return s
 }
 
@@ -71,6 +72,18 @@ func ok200[T any](r interface {
 		return nil, err
 	}
 	return check(r.StatusCode(), r.GetJSON200(), r.GetJSONDefault(), nil)
+}
+
+// done is check for an operation whose success has no body.
+func done(r response, err error) error {
+	if err != nil {
+		return err
+	}
+	if s := r.StatusCode(); s >= 200 && s < 300 {
+		return nil
+	}
+	_, err = check[struct{}](r.StatusCode(), nil, r.GetJSONDefault(), nil)
+	return err
 }
 
 var readOnly = &sdk.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, DestructiveHint: new(false), OpenWorldHint: new(false)}
