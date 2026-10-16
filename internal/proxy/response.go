@@ -282,9 +282,11 @@ type sseScrubber struct {
 }
 
 func newSSEScrubber(src io.ReadCloser, s shape) *sseScrubber {
-	return &sseScrubber{src: src, shape: s, br: bufio.NewReaderSize(src, 64<<10)}
+	return &sseScrubber{src: src, shape: s, br: bufio.NewReaderSize(src, 8<<10)}
 }
 
+// Read hands over every complete line already buffered in one call, so an event costs one write to the client,
+// not one per line; it waits for the upstream only when nothing is ready.
 func (s *sseScrubber) Read(p []byte) (int, error) {
 	for len(s.pending) == 0 {
 		if s.err != nil {
@@ -294,7 +296,22 @@ func (s *sseScrubber) Read(p []byte) (int, error) {
 	}
 	n := copy(p, s.pending)
 	s.pending = s.pending[n:]
+	for n < len(p) && len(s.pending) == 0 && s.err == nil && s.lineBuffered() {
+		s.fill()
+		m := copy(p[n:], s.pending)
+		s.pending = s.pending[m:]
+		n += m
+	}
 	return n, nil
+}
+
+// lineBuffered reports whether fill would return a whole line without waiting for the upstream.
+func (s *sseScrubber) lineBuffered() bool {
+	if s.passthrough || s.discard || len(s.line) > 0 {
+		return false
+	}
+	buffered, _ := s.br.Peek(s.br.Buffered())
+	return bytes.IndexByte(buffered, '\n') >= 0
 }
 
 // fill reads the next piece of the stream into pending (possibly nothing, while a long line is assembled).
@@ -303,6 +320,12 @@ func (s *sseScrubber) fill() {
 	full := errors.Is(err, bufio.ErrBufferFull)
 	if err != nil && !full {
 		s.err = err
+	}
+	if !full && !s.passthrough && !s.discard && len(s.line) == 0 {
+		// A whole line in one piece: forward it without a copy. chunk stays valid until the next read, and the next
+		// read happens only once pending is drained.
+		s.pending = rewriteSSELine(chunk, s.shape)
+		return
 	}
 	s.line = append(s.line, chunk...) // chunk is only valid until the next read
 	switch {
@@ -335,7 +358,7 @@ func (s *sseScrubber) fill() {
 	case full:
 		// keep assembling the line
 	default:
-		s.pending, s.line = rewriteSSELine(s.line, s.shape), nil
+		s.pending, s.line = rewriteSSELine(s.line, s.shape), s.line[:0]
 	}
 }
 
