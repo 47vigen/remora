@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -361,7 +362,11 @@ func TestApplyProviderKeysWithoutPrune(t *testing.T) {
 
 func TestApplyNothingSkipsTheBatch(t *testing.T) {
 	w := newWorld()
-	s := NewService(fakeProviders{w}, fakeAliases{w}, fakeKeys{w}, fakeAccountStrategies{w}, func(context.Context, func(context.Context) error) error {
+	// As the reconciler's batch: the engine pass runs only after fn succeeded.
+	s := NewService(fakeProviders{w}, fakeAliases{w}, fakeKeys{w}, fakeAccountStrategies{w}, func(ctx context.Context, fn func(context.Context) error) error {
+		if err := fn(ctx); err != nil {
+			return err
+		}
 		return errors.New("engine unavailable")
 	})
 	if applied, err := s.Apply(context.Background(), File{}, nil, true); err != nil || len(applied) != 0 {
@@ -462,5 +467,134 @@ func TestExportAccountStrategies(t *testing.T) {
 	}
 	if err := checkSchema(b); err != nil {
 		t.Errorf("schema: %v", err)
+	}
+}
+
+var hexHash = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+func TestPlanHashStable(t *testing.T) {
+	w := populated()
+	cur, _ := exportDoc(t, w)
+	want := mustParse(t, "aliases:\n  - {name: fast, kind: chat, members: [up-a/m1]}\n")
+	h := PlanHash(false, want, Secrets{"A": "1", "B": "2"}, cur)
+	if !hexHash.MatchString(h) {
+		t.Fatalf("hash %q is not 64 hex chars", h)
+	}
+	reordered := cur
+	reordered.Providers = []FileProvider{cur.Providers[1], cur.Providers[0]}
+	reordered.AccountStrategies = map[string]string{}
+	cur.AccountStrategies = nil
+	if h2 := PlanHash(false, want, Secrets{"B": "2", "A": "1"}, reordered); h2 != PlanHash(false, want, Secrets{"A": "1", "B": "2"}, cur) {
+		t.Errorf("order changes the hash")
+	}
+	if PlanHash(true, want, nil, cur) == PlanHash(false, want, nil, cur) {
+		t.Errorf("prune does not change the hash")
+	}
+}
+
+func TestPlanHashChangesWithDesiredValue(t *testing.T) {
+	cur, _ := exportDoc(t, populated())
+	b := mustParse(t, "aliases:\n  - {name: fast, kind: chat, members: [up-a/b]}\n")
+	c := mustParse(t, "aliases:\n  - {name: fast, kind: chat, members: [up-a/c]}\n")
+	if PlanHash(false, b, nil, cur) == PlanHash(false, c, nil, cur) {
+		t.Error("a different document gives the same hash")
+	}
+}
+
+func TestPlanHashChangesWithStore(t *testing.T) {
+	w := populated()
+	want := mustParse(t, "aliases:\n  - {name: fast, kind: chat, members: [up-a/b]}\n")
+	before, _ := exportDoc(t, w)
+	a := w.aliases["fast"]
+	a.ContextWindow = 1
+	w.aliases["fast"] = a
+	after, _ := exportDoc(t, w)
+	if PlanHash(false, want, nil, before) == PlanHash(false, want, nil, after) {
+		t.Error("a store change gives the same hash")
+	}
+}
+
+func TestPlanHashOmitsSecretValues(t *testing.T) {
+	cur, _ := exportDoc(t, populated())
+	canon := string(planCanon(false, File{}, Secrets{"UP_MAIN": "sk-very-secret-value"}, cur))
+	if strings.Contains(canon, "sk-very-secret-value") {
+		t.Fatalf("canonical JSON holds the secret: %s", canon)
+	}
+	if !strings.Contains(canon, "UP_MAIN") {
+		t.Errorf("canonical JSON lacks the secret's name: %s", canon)
+	}
+	if PlanHash(false, File{}, Secrets{"UP_MAIN": "a"}, cur) == PlanHash(false, File{}, Secrets{"UP_MAIN": "b"}, cur) {
+		t.Error("a different secret gives the same hash")
+	}
+}
+
+// planned plans doc against w and returns its changes and hash, as the API's plan does.
+func planned(t *testing.T, w *world, doc File, prune bool) ([]Change, string) {
+	t.Helper()
+	cs, err := w.service().Plan(context.Background(), doc, nil, prune)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cur, err := w.service().Export(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cs, PlanHash(prune, doc, nil, cur)
+}
+
+func TestApplyPlannedMismatchWritesNothing(t *testing.T) {
+	w := populated()
+	doc := mustParse(t, "aliases:\n  - {name: fast, kind: chat, members: [up-a/b]}\n")
+	_, h := planned(t, w, doc, false)
+	a := w.aliases["fast"]
+	a.ContextWindow = 1
+	w.aliases["fast"] = a
+	fresh, freshHash := planned(t, w, doc, false)
+
+	applied, err := w.service().ApplyPlanned(context.Background(), doc, nil, false, h)
+	var pm *PlanMismatchError
+	if !errors.As(err, &pm) {
+		t.Fatalf("err = %v, want *PlanMismatchError", err)
+	}
+	if len(applied) != 0 || len(w.calls()) != 0 {
+		t.Errorf("applied %v, calls %v; want nothing written", applied, w.calls())
+	}
+	if !reflect.DeepEqual(pm.Changes, fresh) || pm.Hash != freshHash || pm.Hash == h {
+		t.Errorf("mismatch = %+v, want changes %+v hash %s", pm, fresh, freshHash)
+	}
+}
+
+func TestApplyPlannedMatchApplies(t *testing.T) {
+	doc := mustParse(t, "aliases:\n  - {name: fast, kind: chat, members: [up-a/b]}\n")
+	w := populated()
+	want, h := planned(t, w, doc, false)
+	got, err := w.service().ApplyPlanned(context.Background(), doc, nil, false, h)
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("ApplyPlanned = %+v, %v; want %+v", got, err, want)
+	}
+	w2 := populated()
+	if got, err := w2.service().ApplyPlanned(context.Background(), doc, nil, false, ""); err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("without a hash = %+v, %v", got, err)
+	}
+}
+
+func TestPlanPartialAliasAgainstStoredProviders(t *testing.T) {
+	w := newWorld()
+	for _, p := range []string{"up-a", "up-b"} {
+		w.providers[p] = Provider{Name: p, Kind: "openai-compatible", BaseURL: "http://upstream.test/" + p, Keys: []ProviderKey{{Name: "main", Value: "sk-" + p}}}
+	}
+	w.aliases["fast"] = alias.Alias{Name: "fast", Kind: alias.KindChat, Members: members("up-a/m1"), Strategy: alias.StrategyPriority}
+	w.keys["id-1"], w.values["id-1"] = Key{ID: "id-1", Name: "k1", Allow: []string{"*"}, Enabled: true}, "sk-k1"
+	doc := mustParse(t, "aliases:\n  - {name: fast, kind: chat, members: [up-b/m1, up-a/m1]}\n")
+
+	cs, err := w.service().Plan(context.Background(), doc, nil, false)
+	if want := []Change{{Op: "update", Kind: "alias", Name: "fast", Fields: []string{"members"}}}; err != nil || !reflect.DeepEqual(cs, want) {
+		t.Fatalf("plan = %+v, %v; want %+v", cs, err, want)
+	}
+	if _, err := w.service().Apply(context.Background(), doc, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.providers) != 2 || len(w.keys) != 1 || !reflect.DeepEqual(w.aliases["fast"].Members, members("up-b/m1", "up-a/m1")) {
+		t.Errorf("after apply: providers %v keys %v fast %+v", w.providers, w.keys, w.aliases["fast"])
 	}
 }

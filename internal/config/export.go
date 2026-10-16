@@ -18,15 +18,7 @@ const exportHeader = "# remora.yaml, exported by remora. Secrets are env:NAME re
 // Marshal writes f as YAML in a stable order: every list sorted by name (provider keys by name within their
 // provider); alias members keep their order, which is the fallback order. f itself is not changed.
 func Marshal(f File) ([]byte, error) {
-	out := File{Version: 1, AccountStrategies: f.AccountStrategies} // yaml sorts map keys
-	for _, p := range f.Providers {
-		p.Keys = slices.SortedFunc(slices.Values(p.Keys), func(a, b FileSecretKey) int { return cmp.Compare(a.Name, b.Name) })
-		out.Providers = append(out.Providers, p)
-	}
-	slices.SortFunc(out.Providers, func(a, b FileProvider) int { return cmp.Compare(a.Name, b.Name) })
-	out.Aliases = slices.SortedFunc(slices.Values(f.Aliases), func(a, b FileAlias) int { return cmp.Compare(a.Name, b.Name) })
-	out.Keys = slices.SortedFunc(slices.Values(f.Keys), func(a, b FileKey) int { return cmp.Compare(a.Name, b.Name) })
-
+	out := normalise(f)
 	var buf bytes.Buffer
 	buf.WriteString(exportHeader)
 	enc := yaml.NewEncoder(&buf)
@@ -38,6 +30,23 @@ func Marshal(f File) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// normalise returns f in a stable order: every list sorted by name (provider keys by name within their provider);
+// alias members keep their order, which is the fallback order. f itself is not changed.
+func normalise(f File) File {
+	out := File{Version: 1, AccountStrategies: f.AccountStrategies} // yaml and json sort map keys
+	if len(out.AccountStrategies) == 0 {
+		out.AccountStrategies = nil
+	}
+	for _, p := range f.Providers {
+		p.Keys = slices.SortedFunc(slices.Values(p.Keys), func(a, b FileSecretKey) int { return cmp.Compare(a.Name, b.Name) })
+		out.Providers = append(out.Providers, p)
+	}
+	slices.SortFunc(out.Providers, func(a, b FileProvider) int { return cmp.Compare(a.Name, b.Name) })
+	out.Aliases = slices.SortedFunc(slices.Values(f.Aliases), func(a, b FileAlias) int { return cmp.Compare(a.Name, b.Name) })
+	out.Keys = slices.SortedFunc(slices.Values(f.Keys), func(a, b FileKey) int { return cmp.Compare(a.Name, b.Name) })
+	return out
 }
 
 // Export returns the store as a document: every provider with its keys as env:NAME references (EnvName), every

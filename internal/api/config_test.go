@@ -89,7 +89,7 @@ func TestConfigEndpoints(t *testing.T) {
 
 	// Plan of the export: no changes.
 	code, body := env.do(t, env.client, http.MethodPost, "/api/config/plan", configBody(t, doc, nil, nil))
-	if code != http.StatusOK || strings.TrimSpace(string(body)) != `{"changes":[]}` {
+	if code != http.StatusOK || len(decodeChanges(t, body)) != 0 {
 		t.Fatalf("plan(export) = %d %s", code, body)
 	}
 
@@ -225,4 +225,81 @@ func callRoute(t *testing.T, env *testEnv, method, path string) int {
 	}
 	code, _ := env.do(t, env.client, method, path, body)
 	return code
+}
+
+func planHash(t *testing.T, body []byte) string {
+	t.Helper()
+	var cs gen.ConfigChanges
+	if err := json.Unmarshal(body, &cs); err != nil || cs.PlanHash == nil {
+		t.Fatalf("no plan_hash in %s (%v)", body, err)
+	}
+	return *cs.PlanHash
+}
+
+func hashedBody(t *testing.T, doc, hash string) string {
+	t.Helper()
+	off := false
+	b, err := json.Marshal(gen.ConfigRequest{Document: doc, Prune: &off, PlanHash: &hash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+const fastDoc = "aliases:\n  - {name: fast, kind: chat, members: [up-a/m3]}\n"
+
+func TestPlanConfigReturnsPlanHash(t *testing.T) {
+	env := newTestEnv(t)
+	env.populate(t)
+	off := false
+	var hashes []string
+	for range 2 {
+		code, body := env.do(t, env.client, http.MethodPost, "/api/config/plan", configBody(t, fastDoc, nil, &off))
+		if code != http.StatusOK {
+			t.Fatalf("plan = %d %s", code, body)
+		}
+		hashes = append(hashes, planHash(t, body))
+	}
+	if len(hashes[0]) != 64 || hashes[0] != hashes[1] {
+		t.Errorf("hashes %v, want one stable 64-char hash", hashes)
+	}
+}
+
+func TestApplyConfigPlanHashMismatch(t *testing.T) {
+	env := newTestEnv(t)
+	env.populate(t)
+	off := false
+	_, body := env.do(t, env.client, http.MethodPost, "/api/config/plan", configBody(t, fastDoc, nil, &off))
+	stale := planHash(t, body)
+	if code, body := env.do(t, env.client, http.MethodPut, "/api/aliases/inner", `{"name":"inner","kind":"chat","members":["up-a/m9"]}`); code != http.StatusOK {
+		t.Fatalf("edit inner = %d %s", code, body)
+	}
+	code, body := env.do(t, env.client, http.MethodPost, "/api/config/apply", hashedBody(t, fastDoc, stale))
+	if code != http.StatusConflict {
+		t.Fatalf("apply = %d %s, want 409", code, body)
+	}
+	want := []gen.Change{{Op: gen.Update, Kind: gen.ChangeKindAlias, Name: "fast", Fields: []string{"members"}}}
+	if got := decodeChanges(t, body); !reflect.DeepEqual(got, want) {
+		t.Errorf("fresh changes = %+v, want %+v", got, want)
+	}
+	if h := planHash(t, body); h == stale || len(h) != 64 {
+		t.Errorf("fresh hash %q, stale %q", h, stale)
+	}
+	if a, _ := env.aliases.Get(context.Background(), "fast"); len(a.Members) != 2 {
+		t.Errorf("fast = %+v; want it unchanged", a)
+	}
+}
+
+func TestApplyConfigPlanHashMatch(t *testing.T) {
+	env := newTestEnv(t)
+	env.populate(t)
+	off := false
+	_, body := env.do(t, env.client, http.MethodPost, "/api/config/plan", configBody(t, fastDoc, nil, &off))
+	if code, body := env.do(t, env.client, http.MethodPost, "/api/config/apply", hashedBody(t, fastDoc, planHash(t, body))); code != http.StatusOK || len(decodeChanges(t, body)) != 1 {
+		t.Fatalf("apply with the fresh hash = %d %s", code, body)
+	}
+	doc := "aliases:\n  - {name: fast, kind: chat, members: [up-a/m4]}\n"
+	if code, body := env.do(t, env.client, http.MethodPost, "/api/config/apply", configBody(t, doc, nil, &off)); code != http.StatusOK || len(decodeChanges(t, body)) != 1 {
+		t.Fatalf("apply without a hash = %d %s", code, body)
+	}
 }

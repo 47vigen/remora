@@ -551,12 +551,18 @@ type ChangeOp string
 // ConfigChanges defines model for ConfigChanges.
 type ConfigChanges struct {
 	Changes []Change `json:"changes"`
+
+	// PlanHash Binds this plan to its inputs and to the store it was planned against. Set by plan and on a 409; send it with apply.
+	PlanHash *string `json:"plan_hash,omitempty"`
 }
 
 // ConfigRequest defines model for ConfigRequest.
 type ConfigRequest struct {
 	// Document The `remora.yaml` text.
 	Document string `json:"document"`
+
+	// PlanHash The `plan_hash` a plan of these same inputs returned. When the store changed since this plan, nothing is applied: 409 with the fresh plan. Ignored by plan.
+	PlanHash *string `json:"plan_hash,omitempty"`
 
 	// Prune Delete what the store has and the document does not.
 	Prune *bool `json:"prune,omitempty"`
@@ -6694,6 +6700,8 @@ type ApplyConfigResponse struct {
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
 	JSON200 *ConfigChanges
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *ConfigChanges
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *Error
 }
@@ -6701,6 +6709,11 @@ type ApplyConfigResponse struct {
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
 func (r ApplyConfigResponse) GetJSON200() *ConfigChanges {
 	return r.JSON200
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r ApplyConfigResponse) GetJSON409() *ConfigChanges {
+	return r.JSON409
 }
 
 // GetJSONDefault returns the response for an HTTP default `application/json` response
@@ -9591,6 +9604,13 @@ func ParseApplyConfigResponse(rsp *http.Response) (*ApplyConfigResponse, error) 
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ConfigChanges
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
@@ -13186,6 +13206,20 @@ func (response ApplyConfig200JSONResponse) VisitApplyConfigResponse(w http.Respo
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyConfig409JSONResponse ConfigChanges
+
+func (response ApplyConfig409JSONResponse) VisitApplyConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
