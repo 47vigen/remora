@@ -23,7 +23,9 @@ export function Attention({
   coolingTotal,
   now,
   action,
+  className,
 }: {
+  className?: string;
   health: HealthCounts;
   pool: AccountPool[];
   quota: QuotaProvider[];
@@ -93,8 +95,8 @@ export function Attention({
     items.push({ key: "untested", tone: "muted", title: `${plural(health.unknown, "provider")} not tested yet` });
 
   return (
-    <section className="bg-surface border-border flex flex-col rounded-sm border">
-      <header className="border-border flex items-center justify-between gap-3 border-b px-4 py-3">
+    <section className={cn("bg-surface border-border flex min-w-0 flex-col rounded-sm border", className)}>
+      <header className="border-border flex h-12 shrink-0 items-center justify-between gap-3 border-b px-4">
         <h3 className="label-caps text-muted">Needs attention</h3>
         {action}
       </header>

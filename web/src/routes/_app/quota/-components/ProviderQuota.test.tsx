@@ -64,18 +64,20 @@ function setup(provider: QuotaProvider) {
 
 test("the header counts accounts and refreshes the whole provider", async () => {
   const onRefresh = setup(antigravity);
-  for (const text of ["1 available", "1 exhausted", "2 need sign-in", "next reset in 2h"])
+  for (const text of ["1/2 available", "1 exhausted", "2 need sign-in", "next reset in 2h"])
     expect(screen.getByText(text)).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Refresh all" }));
   expect(onRefresh).toHaveBeenCalledWith({ provider: "antigravity" });
 });
 
-test("a row shows each window, never 0% for unknown, the error and its own refresh", async () => {
+test("one column per window, never 0% for unknown, the error and its own refresh", async () => {
   const onRefresh = setup(antigravity);
-  expect(screen.getByText("Gemini · 5h · 80%")).toBeInTheDocument();
-  expect(screen.getByText("Gemini · weekly · Unknown")).toBeInTheDocument();
+  expect(screen.getByRole("columnheader", { name: "Gemini · 5h" })).toBeInTheDocument();
+  expect(screen.getByRole("columnheader", { name: "Gemini · weekly" })).toBeInTheDocument();
+  expect(screen.getByRole("meter", { name: "Gemini · 5h · 80%" })).toBeInTheDocument();
+  expect(screen.getByRole("meter", { name: "Gemini · weekly · Unknown" })).toBeInTheDocument();
   expect(screen.queryByText(/(^|\D)0%/)).toBeNull();
-  expect(screen.getByText("updated 4m ago · poll")).toBeInTheDocument();
+  expect(screen.getByText("4m ago")).toBeInTheDocument();
   expect(screen.getByText("sign in again")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Refresh quota of a@example.test" }));
   expect(onRefresh).toHaveBeenCalledWith({ account_id: "1" });

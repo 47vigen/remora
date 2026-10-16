@@ -8,9 +8,10 @@ import { ChartCard, LegendItem } from "./ChartCard";
 import { ChartTooltip } from "./ChartTooltip";
 
 // p50 and p95 latency per bucket over the window; gaps where a bucket had no successful request.
-function LatencyChartImpl({ rows, total }: { rows: SeriesRow[]; total?: string }) {
+function LatencyChartImpl({ rows, total, className }: { rows: SeriesRow[]; total?: string; className?: string }) {
   return (
     <ChartCard
+      className={className}
       title="Latency"
       value={total}
       legend={

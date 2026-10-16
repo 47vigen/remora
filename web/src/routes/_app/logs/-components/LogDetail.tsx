@@ -223,22 +223,22 @@ export function LogDetail({
                     </Alert.Content>
                   </Alert>
                 ) : null}
-                <Tabs variant="secondary" aria-label="Log detail">
-                  <Tabs.ListContainer>
-                    <Tabs.List aria-label="Log detail">
-                      <Tabs.Tab id="overview">
+                <Tabs aria-label="Log detail">
+                  <Tabs.ListContainer className="w-fit">
+                    <Tabs.List aria-label="Log detail" className="p-0.5">
+                      <Tabs.Tab id="overview" className="h-7 px-3 text-[13px] whitespace-nowrap">
                         Overview
                         <Tabs.Indicator />
                       </Tabs.Tab>
-                      <Tabs.Tab id="request">
+                      <Tabs.Tab id="request" className="h-7 px-3 text-[13px] whitespace-nowrap">
                         Request
                         <Tabs.Indicator />
                       </Tabs.Tab>
-                      <Tabs.Tab id="response">
+                      <Tabs.Tab id="response" className="h-7 px-3 text-[13px] whitespace-nowrap">
                         Response
                         <Tabs.Indicator />
                       </Tabs.Tab>
-                      <Tabs.Tab id="fallback">
+                      <Tabs.Tab id="fallback" className="h-7 px-3 text-[13px] whitespace-nowrap">
                         Fallback path
                         <Tabs.Indicator />
                       </Tabs.Tab>

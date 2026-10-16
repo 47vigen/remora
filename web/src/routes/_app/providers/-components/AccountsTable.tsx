@@ -1,5 +1,5 @@
 import { ArrowRotateLeft, Ellipsis, TrashBin } from "@gravity-ui/icons";
-import { Button, Chip, cn, Dropdown, Label, Meter, NumberField, Switch, Table } from "@heroui/react";
+import { Button, Chip, cn, Dropdown, Label, Meter, NumberField, Switch, Table, Tooltip } from "@heroui/react";
 
 import { accountHealth, isCooling } from "../-lib/accounts";
 import type { Account } from "../../../../client/types.gen";
@@ -45,9 +45,20 @@ function Models({ models }: { models: string[] }) {
         </Chip>
       ))}
       {rest > 0 ? (
-        <Chip size="sm" variant="soft">
-          <Chip.Label>+{rest}</Chip.Label>
-        </Chip>
+        <Tooltip delay={150}>
+          <Tooltip.Trigger aria-label={`${rest} more models`} className="cursor-default rounded-sm outline-none">
+            <Chip size="sm" variant="soft">
+              <Chip.Label>+{rest}</Chip.Label>
+            </Chip>
+          </Tooltip.Trigger>
+          <Tooltip.Content placement="bottom start" className="max-w-xs">
+            <ul className="flex flex-col gap-0.5 font-mono text-xs">
+              {models.slice(MODEL_CHIPS).map((m) => (
+                <li key={m}>{m}</li>
+              ))}
+            </ul>
+          </Tooltip.Content>
+        </Tooltip>
       ) : null}
     </span>
   );

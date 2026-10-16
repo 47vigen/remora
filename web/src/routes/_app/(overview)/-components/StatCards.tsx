@@ -1,9 +1,15 @@
+import { cn } from "@heroui/react";
 import type { ReactNode } from "react";
 
 /** One sheet of figures split by hairlines, the way a spec table reads. */
-function Root({ children }: { children: ReactNode }) {
+function Root({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <dl className="bg-border border-border grid grid-cols-2 gap-px overflow-hidden rounded-sm border md:grid-cols-3 xl:grid-cols-5">
+    <dl
+      className={cn(
+        "bg-border border-border grid grid-cols-2 gap-px overflow-hidden rounded-sm border md:grid-cols-5 max-md:[&>:last-child:nth-child(odd)]:col-span-2",
+        className,
+      )}
+    >
       {children}
     </dl>
   );

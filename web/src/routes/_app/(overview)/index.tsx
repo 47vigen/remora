@@ -158,69 +158,76 @@ function OverviewPage() {
         </Alert>
       ) : null}
 
-      {summary ? (
-        <StatCards>
-          <StatCards.Item
-            label="Requests"
-            value={summary.requests}
-            trend={<Sparkline values={series.map((p) => p.requests)} />}
-          />
-          <StatCards.Item
-            label="Error rate"
-            value={summary.errorRate}
-            trend={<Sparkline values={series.map((p) => (p.requests > 0 ? p.errors / p.requests : 0))} />}
-          />
-          <StatCards.Item
-            label="p95 latency"
-            value={summary.p95}
-            hint={`p50 ${summary.p50}`}
-            trend={<Sparkline values={series.map((p) => p.latency_p95_ms ?? 0)} />}
-          />
-          <StatCards.Item
-            label="Tokens"
-            value={summary.tokens}
-            trend={<Sparkline values={series.map((p) => p.total_tokens)} />}
-          />
-          <StatCards.Item
-            label="Cost"
-            value={summary.cost}
-            trend={<Sparkline values={series.map((p) => p.cost_usd)} />}
-          />
-        </StatCards>
-      ) : stats.isLoading ? (
-        <Skeleton className="h-28 w-full" />
-      ) : null}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+        {summary ? (
+          <StatCards className="lg:col-span-12">
+            <StatCards.Item
+              label="Requests"
+              value={summary.requests}
+              trend={<Sparkline values={series.map((p) => p.requests)} />}
+            />
+            <StatCards.Item
+              label="Error rate"
+              value={summary.errorRate}
+              trend={<Sparkline values={series.map((p) => (p.requests > 0 ? p.errors / p.requests : 0))} />}
+            />
+            <StatCards.Item
+              label="p95 latency"
+              value={summary.p95}
+              hint={`p50 ${summary.p50}`}
+              trend={<Sparkline values={series.map((p) => p.latency_p95_ms ?? 0)} />}
+            />
+            <StatCards.Item
+              label="Tokens"
+              value={summary.tokens}
+              trend={<Sparkline values={series.map((p) => p.total_tokens)} />}
+            />
+            <StatCards.Item
+              label="Cost"
+              value={summary.cost}
+              trend={<Sparkline values={series.map((p) => p.cost_usd)} />}
+            />
+          </StatCards>
+        ) : stats.isLoading ? (
+          <Skeleton className="h-28 w-full lg:col-span-12" />
+        ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-3">
         {stats.data ? (
-          <VolumeChart rows={volumeRows(series)} total={summary?.requests} className="lg:col-span-2" />
+          <VolumeChart rows={volumeRows(series)} total={summary?.requests} className="lg:col-span-8" />
         ) : (
-          <Skeleton className="h-72 lg:col-span-2" />
+          <Skeleton className="h-80 lg:col-span-8" />
         )}
-        {quota.data ? <Subscriptions providers={quota.data} now={new Date(now)} /> : <Skeleton className="h-72" />}
-      </div>
+        {quota.data ? (
+          <Subscriptions providers={quota.data} now={new Date(now)} className="lg:col-span-4" />
+        ) : (
+          <Skeleton className="h-80 lg:col-span-4" />
+        )}
 
-      {stats.data ? (
-        <div className="grid gap-4 lg:grid-cols-3">
-          <TokenChart rows={overTime} total={summary?.tokens} />
-          <CostChart rows={overTime} total={summary?.cost} />
-          <LatencyChart rows={overTime} total={summary?.p95 === "—" ? undefined : `p95 ${summary?.p95}`} />
-        </div>
-      ) : null}
+        {stats.data ? (
+          <>
+            <TokenChart rows={overTime} total={summary?.tokens} className="lg:col-span-4" />
+            <CostChart rows={overTime} total={summary?.cost} className="lg:col-span-4" />
+            <LatencyChart
+              rows={overTime}
+              total={summary?.p95 === "—" ? undefined : `p95 ${summary?.p95}`}
+              className="lg:col-span-4"
+            />
+          </>
+        ) : null}
 
-      <div className="grid items-start gap-4 lg:grid-cols-3">
         {stats.data ? (
           <Breakdown
-            className="lg:col-span-2"
+            className="lg:col-span-8"
             models={byModel.data ? breakdownRows(byModel.data.groups) : undefined}
             modelsError={byModel.error && !byModel.data ? errorMessage(byModel.error) : undefined}
             providers={breakdownRows(stats.data.groups)}
           />
         ) : (
-          <Skeleton className="h-72 lg:col-span-2" />
+          <Skeleton className="h-72 lg:col-span-8" />
         )}
         {providers.data ? (
           <Attention
+            className="lg:col-span-4"
             health={healthCounts(providers.data.items)}
             pool={pool.data ?? []}
             quota={quota.data ?? []}
@@ -236,7 +243,7 @@ function OverviewPage() {
             }
           />
         ) : (
-          <Skeleton className="h-72" />
+          <Skeleton className="h-72 lg:col-span-4" />
         )}
       </div>
     </div>

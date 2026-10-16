@@ -10,11 +10,19 @@ import { QuotaBar } from "../../quota/-components/QuotaBar";
 const SHOWN_WINDOWS = 2;
 
 /** Subscription capacity at a glance: per provider, the accounts that can serve and how much quota they have left. */
-export function Subscriptions({ providers, now }: { providers: QuotaProvider[]; now: Date }) {
+export function Subscriptions({
+  providers,
+  now,
+  className,
+}: {
+  providers: QuotaProvider[];
+  now: Date;
+  className?: string;
+}) {
   const active = providers.filter((p) => p.accounts.length > 0);
   return (
-    <section className="bg-surface border-border flex flex-col rounded-sm border">
-      <header className="border-border flex items-center justify-between gap-3 border-b px-4 py-3">
+    <section className={cn("bg-surface border-border flex min-w-0 flex-col rounded-sm border", className)}>
+      <header className="border-border flex h-12 shrink-0 items-center justify-between gap-3 border-b px-4">
         <h3 className="label-caps text-muted">Subscriptions</h3>
         {active.length > 0 ? (
           <Link href="/quota" className="text-xs">

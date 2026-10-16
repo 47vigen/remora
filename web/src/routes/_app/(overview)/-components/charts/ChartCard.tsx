@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 
-/** A titled panel with a fixed-height plot area; shows `emptyText` instead of the chart when there is no data. */
+import { Panel } from "../Panel";
+
+/** A titled tile whose plot fills the rest of its height; shows `emptyText` instead of the chart when there is no data. */
 export function ChartCard({
   title,
   value,
@@ -11,7 +13,7 @@ export function ChartCard({
   children,
 }: {
   title: string;
-  /** The headline figure for the chart, shown under the title. */
+  /** The headline figure for the chart; a dash keeps the row height when there is none. */
   value?: ReactNode;
   legend?: ReactNode;
   isEmpty: boolean;
@@ -20,27 +22,26 @@ export function ChartCard({
   children: ReactNode;
 }) {
   return (
-    <section className={`bg-surface border-border flex flex-col gap-4 rounded-sm border p-4 ${className ?? ""}`}>
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex flex-col gap-1.5">
-          <h3 className="label-caps text-muted">{title}</h3>
-          {value ? <p className="text-xl leading-none font-medium tracking-[-0.02em] tabular-nums">{value}</p> : null}
+    <Panel
+      title={title}
+      aside={legend ? <div className="text-muted flex flex-wrap items-center gap-3 text-xs">{legend}</div> : null}
+      className={className}
+    >
+      <div className="flex flex-1 flex-col gap-3 p-4">
+        <p className="text-xl leading-none font-medium tracking-[-0.02em] tabular-nums">{value ?? "—"}</p>
+        <div className="min-h-48 flex-1">
+          {isEmpty ? (
+            <p className="text-muted border-border flex h-full items-center justify-center rounded-sm border border-dashed text-sm">
+              {emptyText}
+            </p>
+          ) : (
+            children
+          )}
         </div>
-        {legend ? <div className="text-muted flex flex-wrap items-center gap-3 text-xs">{legend}</div> : null}
-      </header>
-      <div className="h-52 flex-none">
-        {isEmpty ? (
-          <p className="text-muted border-border flex h-full items-center justify-center rounded-sm border border-dashed text-sm">
-            {emptyText}
-          </p>
-        ) : (
-          children
-        )}
       </div>
-    </section>
+    </Panel>
   );
 }
-
 /** One legend entry: a square swatch and its name. */
 export function LegendItem({ className, children }: { className: string; children: ReactNode }) {
   return (
