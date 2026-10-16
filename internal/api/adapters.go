@@ -16,6 +16,7 @@ import (
 	"github.com/47vigen/remora/internal/cooling"
 	"github.com/47vigen/remora/internal/engine/bifrost"
 	"github.com/47vigen/remora/internal/engine/cliproxyapi"
+	"github.com/47vigen/remora/internal/quota"
 	"github.com/47vigen/remora/internal/reconcile"
 	"github.com/47vigen/remora/internal/soniox"
 	"github.com/47vigen/remora/internal/store"
@@ -699,6 +700,53 @@ func (a accountsAdapter) Import(ctx context.Context, provider string, credential
 		return Account{}, err
 	}
 	return toAccount(acc), nil
+}
+
+// NewQuota reads quota through the quota service and the accounts service. Account ids are decimal strings.
+func NewQuota(accts *accounts.Service, q *quota.Service) Quotas {
+	return quotaAdapter{accts: accts, q: q}
+}
+
+type quotaAdapter struct {
+	accts *accounts.Service
+	q     *quota.Service
+}
+
+func (a quotaAdapter) Overview(ctx context.Context) ([]quota.ProviderView, error) {
+	all, err := a.accts.List(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	pool, err := a.accts.Pool(ctx)
+	if err != nil {
+		return nil, err
+	}
+	snaps, err := a.q.Snapshots(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return quota.Overview(all, pool, snaps, time.Now()), nil
+}
+
+func (a quotaAdapter) Refresh(ctx context.Context, rawID, provider string) ([]string, []string, error) {
+	var id int64
+	if rawID != "" {
+		n, err := accountID(rawID)
+		if err != nil {
+			return nil, nil, err
+		}
+		id = n
+	}
+	queued, skipped, err := a.q.Refresh(ctx, id, provider)
+	return idStrings(queued), idStrings(skipped), err
+}
+
+func idStrings(ids []int64) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, strconv.FormatInt(id, 10))
+	}
+	return out
 }
 
 // isSubscription reports whether name is a subscription provider served by the OAuth engine.

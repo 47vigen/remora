@@ -31,6 +31,7 @@ type testEnv struct {
 	accounts  *fakeAccounts
 	names     *fakeNames
 	logs      *fakeLogs
+	quota     *fakeQuota
 	server    *Server
 }
 
@@ -54,7 +55,7 @@ func newTestEnvTail(t *testing.T, tail *bifrost.Tail) *testEnv {
 	}
 	env := &testEnv{
 		system: &fakeSystem{}, providers: &fakeProviders{}, aliases: &fakeAliases{}, keys: &fakeKeys{},
-		accounts: &fakeAccounts{}, names: &fakeNames{}, logs: &fakeLogs{},
+		accounts: &fakeAccounts{}, names: &fakeNames{}, logs: &fakeLogs{}, quota: &fakeQuota{},
 	}
 	s := New(Deps{
 		Providers: env.providers,
@@ -65,6 +66,7 @@ func newTestEnvTail(t *testing.T, tail *bifrost.Tail) *testEnv {
 		System:    env.system,
 		Names:     env.names,
 		Logs:      env.logs,
+		Quota:     env.quota,
 		Tail:      tail,
 		Auth:      auth.NewService(st, nil),
 	})

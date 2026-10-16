@@ -196,6 +196,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		System:    api.NewSystem(sup),
 		Names:     api.NewNames(st),
 		Logs:      fd,
+		Quota:     api.NewQuota(accts, qs),
 		Tail:      liveTail,
 		Auth:      auth.NewService(st, nil),
 		Log:       logger,

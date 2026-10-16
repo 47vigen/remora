@@ -109,6 +109,88 @@ export type PoolAccount = {
     reason: string;
 };
 
+export type QuotaWindow = {
+    /**
+     * A model family or model ("gemini", "claude-gpt", "opus"); empty for the whole account.
+     */
+    scope: string;
+    /**
+     * "5h", "weekly", or the window's length in minutes.
+     */
+    window: string;
+    /**
+     * The fraction left; null when the provider did not report it.
+     */
+    remaining: number | null;
+    /**
+     * Null when unknown or when the window does not reset.
+     */
+    resets_at: string | null;
+};
+
+export type QuotaSnapshot = {
+    /**
+     * Empty when unknown.
+     */
+    plan: string;
+    windows: Array<QuotaWindow>;
+    limit_reached: boolean;
+    /**
+     * "poll" when remora asked the provider; "passive" when read from recent traffic.
+     */
+    source: 'poll' | 'passive';
+    /**
+     * When the windows were observed; absent when never.
+     */
+    fetched_at?: string;
+    /**
+     * The last check, successful or not.
+     */
+    checked_at: string;
+    /**
+     * Why the last check failed; empty when it succeeded.
+     */
+    error: string;
+};
+
+export type QuotaAccount = {
+    account: Account;
+    quota?: QuotaSnapshot;
+};
+
+export type QuotaProvider = {
+    provider: string;
+    /**
+     * Whether remora can read this provider's quota.
+     */
+    supported: boolean;
+    available: number;
+    exhausted: number;
+    cooling: number;
+    /**
+     * Enabled accounts that need a new sign-in. Each enabled account is counted once.
+     */
+    sign_in: number;
+    /**
+     * The earliest future reset of an exhausted window, else of any window.
+     */
+    next_reset?: string;
+    accounts: Array<QuotaAccount>;
+};
+
+/**
+ * Exactly one of account_id and provider.
+ */
+export type QuotaRefresh = {
+    account_id?: string;
+    provider?: string;
+};
+
+export type QuotaRefreshResult = {
+    queued: Array<string>;
+    skipped: Array<string>;
+};
+
 export type Account = {
     id: string;
     provider: string;
@@ -918,6 +1000,60 @@ export type GetAccountPoolResponses = {
 };
 
 export type GetAccountPoolResponse = GetAccountPoolResponses[keyof GetAccountPoolResponses];
+
+export type GetQuotaData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/quota';
+};
+
+export type GetQuotaErrors = {
+    /**
+     * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     *
+     */
+    default: Error;
+};
+
+export type GetQuotaError = GetQuotaErrors[keyof GetQuotaErrors];
+
+export type GetQuotaResponses = {
+    /**
+     * One entry per provider, sorted by name.
+     */
+    200: Array<QuotaProvider>;
+};
+
+export type GetQuotaResponse = GetQuotaResponses[keyof GetQuotaResponses];
+
+export type RefreshQuotaData = {
+    body: QuotaRefresh;
+    path?: never;
+    query?: never;
+    url: '/api/quota/refresh';
+};
+
+export type RefreshQuotaErrors = {
+    /**
+     * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     *
+     */
+    default: Error;
+};
+
+export type RefreshQuotaError = RefreshQuotaErrors[keyof RefreshQuotaErrors];
+
+export type RefreshQuotaResponses = {
+    /**
+     * What was queued and what was skipped.
+     */
+    202: QuotaRefreshResult;
+};
+
+export type RefreshQuotaResponse = RefreshQuotaResponses[keyof RefreshQuotaResponses];
 
 export type StartAccountLoginData = {
     body: AccountLoginStart;
