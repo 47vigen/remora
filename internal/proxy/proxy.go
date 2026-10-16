@@ -349,6 +349,10 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 		if err := rewriteErrorBody(resp, info.shape); err != nil {
 			return err
 		}
+	case isJSON(resp.Header):
+		if err := stripJSONBody(resp); err != nil {
+			return err
+		}
 	}
 	p.hooksMu.RLock()
 	hooks := p.hooks

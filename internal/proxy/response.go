@@ -110,7 +110,8 @@ func Scrub(b []byte) []byte { return scrub(b) }
 // isEngineHeader reports whether a header name belongs to an engine.
 func isEngineHeader(name string) bool {
 	l := strings.ToLower(name)
-	return strings.HasPrefix(l, "x-bf-") || strings.Contains(l, "bifrost") || strings.Contains(l, "cliproxyapi")
+	return strings.HasPrefix(l, "x-bf-") || strings.HasPrefix(l, "x-cpa-") || strings.Contains(l, "bifrost") ||
+		strings.Contains(l, "cliproxyapi")
 }
 
 // cleanResponseHeaders removes engine headers, the Server header and the front door's CORS headers (they describe
@@ -262,11 +263,14 @@ func orNull(r json.RawMessage) json.RawMessage {
 	return r
 }
 
-// rewriteSSELine returns line (with its line ending) unchanged, unless it is a data line carrying an error: the
-// front door's native envelope becomes the route's error shape s, and any other error event (a top-level "error" key or
-// "type":"error") is scrubbed. Content events are never touched.
+// rewriteSSELine returns line (with its line ending) unchanged, unless it is a data line carrying an error or the
+// front door's "extra_fields": the front door's native error envelope becomes the route's error shape s, any other
+// error event (a top-level "error" key or "type":"error") is scrubbed, and a top-level "extra_fields" is removed.
+// Content is never touched.
 func rewriteSSELine(line []byte, s shape) []byte {
-	if !mayBeSSEError(line) {
+	isErr := mayBeSSEError(line)
+	extra := bytes.HasPrefix(line, []byte("data:")) && bytes.Contains(line, []byte(extraFieldsProbe))
+	if !isErr && !extra {
 		return line
 	}
 	payload := line[len("data:"):]
@@ -277,12 +281,22 @@ func rewriteSSELine(line []byte, s shape) []byte {
 	body := bytes.TrimRight(payload, "\r\n")
 	ending := payload[len(body):]
 
-	var out []byte
-	if mapped, ok := mapNativeError(body, s); ok {
-		out = mapped
-	} else if isErrorEvent(body) {
-		out = scrub(body)
-	} else {
+	var (
+		out    []byte
+		mapped bool
+	)
+	if isErr {
+		out, mapped = mapNativeError(body, s)
+	}
+	switch {
+	case mapped:
+	case isErr && isErrorEvent(body):
+		out = stripExtraFields(scrub(body))
+	case extra:
+		if out = stripExtraFields(body); len(out) == len(body) {
+			return line
+		}
+	default:
 		return line
 	}
 	res := make([]byte, 0, len(prefix)+len(out)+len(ending))
@@ -419,3 +433,83 @@ func (s *sseScrubber) sseError() []byte {
 }
 
 func (s *sseScrubber) Close() error { return s.src.Close() }
+
+// extraFieldsKey is the member the front door adds to every response object; it names internal providers and keys.
+const extraFieldsKey = `"extra_fields"`
+
+// extraFieldsProbe finds extraFieldsKey faster than the key itself: 'x' is rare in JSON, '"' is everywhere.
+const extraFieldsProbe = `xtra_fields"`
+
+// stripExtraFields removes the top-level "extra_fields" member, with one comma, from the JSON object in b. It returns
+// b itself, without allocating, when there is none or b is not an object.
+func stripExtraFields(b []byte) []byte {
+	if !bytes.Contains(b, []byte(extraFieldsProbe)) {
+		return b
+	}
+	i := skipWS(b, 0)
+	if i >= len(b) || b[i] != '{' {
+		return b
+	}
+	i = skipWS(b, i+1)
+	prevEnd := -1 // just past the previous member's value
+	for i < len(b) && b[i] == '"' {
+		kEnd := skipString(b, i)
+		if kEnd < 0 {
+			return b
+		}
+		j := skipWS(b, kEnd)
+		if j >= len(b) || b[j] != ':' {
+			return b
+		}
+		vEnd := skipValue(b, skipWS(b, j+1))
+		if vEnd < 0 {
+			return b
+		}
+		next := skipWS(b, vEnd)
+		if string(b[i:kEnd]) == extraFieldsKey {
+			from, to := i, vEnd // the only member
+			switch {
+			case next < len(b) && b[next] == ',':
+				to = skipWS(b, next+1) // the member and the comma after it
+			case prevEnd >= 0:
+				from = prevEnd // the last member and the comma before it
+			}
+			out := make([]byte, 0, len(b)-(to-from))
+			out = append(out, b[:from]...)
+			return append(out, b[to:]...)
+		}
+		if next >= len(b) || b[next] != ',' {
+			return b
+		}
+		prevEnd, i = vEnd, skipWS(b, next+1)
+	}
+	return b
+}
+
+// stripJSONBody removes "extra_fields" from a successful JSON answer. A body over MaxBodyBytes passes untouched.
+// shortcut: such a body keeps its extra_fields; stream the strip if one ever shows up.
+func stripJSONBody(resp *http.Response) error {
+	data, err := io.ReadAll(io.LimitReader(resp.Body, MaxBodyBytes+1))
+	if err != nil {
+		_ = resp.Body.Close()
+		return fmt.Errorf("proxy: read upstream body: %w", err)
+	}
+	if len(data) > MaxBodyBytes {
+		resp.Body = struct {
+			io.Reader
+			io.Closer
+		}{io.MultiReader(bytes.NewReader(data), resp.Body), resp.Body}
+		return nil
+	}
+	_ = resp.Body.Close()
+	out := stripExtraFields(data)
+	resp.Body = io.NopCloser(bytes.NewReader(out))
+	resp.Header.Set("Content-Length", strconv.Itoa(len(out)))
+	resp.ContentLength = int64(len(out))
+	return nil
+}
+
+func isJSON(h http.Header) bool {
+	mt, _, _ := mime.ParseMediaType(h.Get("Content-Type"))
+	return mt == "application/json"
+}

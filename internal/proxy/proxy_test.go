@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -984,5 +985,24 @@ func TestErrorHandlerReleasesBody(t *testing.T) {
 	f.px.errorHandler(httptest.NewRecorder(), r, errors.New("down"))
 	if info.body != nil || info.spans != (bodySpans{}) {
 		t.Fatal("the request body is still held after an upstream failure")
+	}
+}
+
+func TestProxy_NonStreamStripsExtraFields(t *testing.T) {
+	f := newFixture(t)
+	f.upstream(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Cpa-Trace-Id", "t1")
+		_, _ = io.WriteString(w, `{"id":"x","object":"chat.completion","extra_fields":{"provider":"remora-oauth","routing_info":{"key":"k1"}}}`)
+	})
+	resp := f.do(t, http.MethodPost, "/v1/chat/completions", keyFull, "application/json", chatBody("up-a/m1"), nil)
+	if want := `{"id":"x","object":"chat.completion"}`; string(resp.Body) != want {
+		t.Fatalf("body = %s, want %s", resp.Body, want)
+	}
+	if cl := resp.Header.Get("Content-Length"); cl != strconv.Itoa(len(resp.Body)) {
+		t.Fatalf("Content-Length = %q for %d bytes", cl, len(resp.Body))
+	}
+	if resp.Header.Get("X-Cpa-Trace-Id") != "" {
+		t.Fatal("an OAuth engine header reached the client")
 	}
 }

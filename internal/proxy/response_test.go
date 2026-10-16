@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -118,4 +119,49 @@ func FuzzScrubFastPath(f *testing.F) {
 			t.Fatalf("scrub(%q) = %q, want %q", b, got, want)
 		}
 	})
+}
+
+func TestStripExtraFieldsTopLevelOnly(t *testing.T) {
+	persian := "می\u200cشود"
+	cases := []struct{ name, in, want string }{
+		{"first", `{"extra_fields":{"k":1},"id":"x"}`, `{"id":"x"}`},
+		{"middle", `{"id":"x","extra_fields":{"routing_info":{"key":"k"}},"object":"o"}`, `{"id":"x","object":"o"}`},
+		{"last", `{"id":"x", "extra_fields" : {"a":[1,"}"]} }`, `{"id":"x" }`},
+		{"only", `{"extra_fields":{}}`, `{}`},
+		{
+			"nested kept", `{"choices":[{"message":{"content":"\"extra_fields\":1","extra_fields":2}}],"extra_fields":{"p":"q"}}`,
+			`{"choices":[{"message":{"content":"\"extra_fields\":1","extra_fields":2}}]}`,
+		},
+		{"persian", `{"c":"` + persian + `","extra_fields":{}}`, `{"c":"` + persian + `"}`},
+		{"absent", `{"id":"x"}`, `{"id":"x"}`},
+		{"not an object", `["extra_fields"]`, `["extra_fields"]`},
+	}
+	for _, c := range cases {
+		if got := stripExtraFields([]byte(c.in)); string(got) != c.want {
+			t.Errorf("%s: %s, want %s", c.name, got, c.want)
+		}
+	}
+	clean := []byte(`{"id":"x","choices":[]}`)
+	if n := testing.AllocsPerRun(100, func() { _ = stripExtraFields(clean) }); n != 0 {
+		t.Errorf("allocs on a body without extra_fields = %v, want 0", n)
+	}
+}
+
+func TestCleanResponseHeadersDropsCpa(t *testing.T) {
+	h := http.Header{"X-Cpa-Trace-Id": {"t1"}, "X-Cpa-Anything": {"v"}, "X-Request-Id": {"r1"}}
+	cleanResponseHeaders(h)
+	if h.Get("X-Cpa-Trace-Id") != "" || h.Get("X-Cpa-Anything") != "" || h.Get("X-Request-Id") != "r1" {
+		t.Fatalf("headers = %v", h)
+	}
+}
+
+func TestSSEStripsExtraFields(t *testing.T) {
+	in := "data: {\"id\":\"c\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}],\"extra_fields\":{\"provider\":\"remora-oauth\"}}\n\n" +
+		"data: {\"error\":{\"message\":\"bifrost down\"},\"extra_fields\":{\"key\":\"k\"}}\n\ndata: [DONE]\n\n"
+	got, _ := io.ReadAll(newSSEScrubber(io.NopCloser(strings.NewReader(in)), shapeOpenAI))
+	want := "data: {\"id\":\"c\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n" +
+		"data: {\"error\":{\"message\":\"remora down\"}}\n\ndata: [DONE]\n\n"
+	if string(got) != want {
+		t.Fatalf("stream = %q, want %q", got, want)
+	}
 }
