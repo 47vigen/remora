@@ -24,8 +24,10 @@ const d: AliasDraft = {
 
 test("valid", () => expect(validateAliasDraft(d)).toEqual({}));
 test("name is required", () => expect(validateAliasDraft({ ...d, name: " " }).name).toBe("Enter a name."));
-test("name cannot contain / (it would read as a provider model)", () =>
-  expect(validateAliasDraft({ ...d, name: "a/b" }).name).toBeDefined());
+test("name may contain / like the server allows", () =>
+  expect(validateAliasDraft({ ...d, name: "honcho/chat" }).name).toBeUndefined());
+test("name rejects spaces and other characters", () =>
+  expect(validateAliasDraft({ ...d, name: "a b" }).name).toBeDefined());
 test("at least one member", () =>
   expect(validateAliasDraft({ ...d, members: [] }).members).toBe("Add at least one member."));
 test("no duplicate members", () =>

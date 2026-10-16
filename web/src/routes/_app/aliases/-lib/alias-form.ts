@@ -53,8 +53,8 @@ export function validateAliasDraft(d: AliasDraft): Partial<Record<keyof AliasDra
   const errors: Partial<Record<keyof AliasDraft, string>> = {};
   const name = d.name.trim();
   if (name === "") errors.name = "Enter a name.";
-  else if (name.includes("/")) errors.name = "A name cannot contain “/”; it would read as a provider model.";
-  else if (/\s/.test(name)) errors.name = "Spaces are not allowed.";
+  else if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(name))
+    errors.name = "Use letters, digits and . _ : / -, up to 128 characters.";
 
   if (d.members.length === 0) errors.members = "Add at least one member.";
   else if (d.members.includes(name)) errors.members = "An alias cannot contain itself.";
