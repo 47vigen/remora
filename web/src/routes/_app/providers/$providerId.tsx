@@ -1,5 +1,5 @@
 import { ChevronLeft, PencilToSquare, PlugConnection, Plus, TrashBin } from "@gravity-ui/icons";
-import { Alert, AlertDialog, Button, Link, Skeleton, toast } from "@heroui/react";
+import { Alert, AlertDialog, Button, Description, Label, Link, ListBox, Select, Skeleton, toast } from "@heroui/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, stripSearchParams, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
@@ -8,8 +8,10 @@ import {
   deleteAccountMutation,
   deleteProviderMutation,
   getProviderOptions,
+  listAccountStrategiesOptions,
   listAccountsOptions,
   resetAccountCooldownMutation,
+  setAccountStrategyMutation,
   testProviderMutation,
   updateAccountMutation,
 } from "../../../client/@tanstack/react-query.gen";
@@ -29,6 +31,7 @@ import { ProviderMark } from "./-components/ProviderMark";
 import { ProviderTraffic } from "./-components/ProviderTraffic";
 import { SpecSheet } from "./-components/SpecSheet";
 import { useAccountLogin } from "./-hooks/useAccountLogin";
+import { ACCOUNT_STRATEGIES, usesPriority } from "./-lib/accounts";
 import { displayGroup, GROUP_LABELS, KIND_LABELS } from "./-lib/provider-form";
 
 type DetailSearch = ListSearch & { login?: "1"; edit?: "1" };
@@ -121,12 +124,19 @@ function SubscriptionProvider({ providerId }: { providerId: string }) {
       },
     }),
   );
-  const refresh = () => invalidateOps(qc, "listAccounts", "listProviders");
+  const strategies = useQuery(listAccountStrategiesOptions({ query: { limit: 200 } }));
+  const strategy = strategies.data?.items.find((s) => s.provider === providerId)?.strategy ?? "round-robin";
+  const refresh = () => invalidateOps(qc, "listAccounts", "listProviders", "listAccountStrategies");
   const setSearch = (patch: Partial<DetailSearch>) =>
     void navigate({ search: (prev) => ({ ...prev, page: 1, ...patch }) });
 
   const toggle = useMutation({
     ...updateAccountMutation(),
+    onError: (e) => toast.danger(errorMessage(e)),
+    onSettled: refresh,
+  });
+  const setStrategy = useMutation({
+    ...setAccountStrategyMutation(),
     onError: (e) => toast.danger(errorMessage(e)),
     onSettled: refresh,
   });
@@ -171,7 +181,7 @@ function SubscriptionProvider({ providerId }: { providerId: string }) {
             {label}
           </Title>
         }
-        description={`Accounts signed in to ${label}. Requests rotate across the enabled ones.`}
+        description={`Accounts signed in to ${label}. The strategy picks which enabled account serves a request.`}
         actions={addAccount}
       />
 
@@ -184,6 +194,41 @@ function SubscriptionProvider({ providerId }: { providerId: string }) {
           {providerId}/model
         </SpecSheet.Item>
       </SpecSheet>
+
+      <Select
+        className="max-w-sm"
+        value={strategy}
+        isDisabled={!strategies.data}
+        onChange={(v) => {
+          const next = ACCOUNT_STRATEGIES.find((x) => x.id === v)?.id;
+          if (next && next !== strategy)
+            setStrategy.mutate({ path: { provider: providerId }, body: { strategy: next } });
+        }}
+      >
+        <Label>Strategy</Label>
+        <Select.Trigger>
+          <Select.Value />
+          <Select.Indicator />
+        </Select.Trigger>
+        <Description>
+          {usesPriority(strategy)
+            ? "Busy means requests started in the last minute."
+            : "Busy means requests started in the last minute. Account priorities do not apply under this strategy."}
+        </Description>
+        <Select.Popover>
+          <ListBox aria-label="Strategy">
+            {ACCOUNT_STRATEGIES.map((s) => (
+              <ListBox.Item key={s.id} id={s.id} textValue={s.label}>
+                <div className="flex flex-col">
+                  <Label>{s.label}</Label>
+                  <Description>{s.description}</Description>
+                </div>
+                <ListBox.ItemIndicator />
+              </ListBox.Item>
+            ))}
+          </ListBox>
+        </Select.Popover>
+      </Select>
 
       <SectionLabel>Accounts</SectionLabel>
       <DataList>
@@ -200,6 +245,7 @@ function SubscriptionProvider({ providerId }: { providerId: string }) {
           <AccountsTable
             items={accounts.data?.items ?? []}
             onToggle={(a, enabled) => toggle.mutate({ path: { id: a.id }, body: { enabled } })}
+            onPriority={(a, priority) => toggle.mutate({ path: { id: a.id }, body: { priority } })}
             onResetCooldown={setResetting}
             onDelete={(a) => {
               remove.reset();

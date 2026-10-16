@@ -1,5 +1,5 @@
 import { ArrowRotateLeft, Ellipsis, TrashBin } from "@gravity-ui/icons";
-import { Button, Chip, Dropdown, Label, Meter, Switch, Table } from "@heroui/react";
+import { Button, Chip, Dropdown, Label, Meter, NumberField, Switch, Table } from "@heroui/react";
 
 import { accountHealth, isCooling } from "../-lib/accounts";
 import type { Account } from "../../../../client/types.gen";
@@ -50,11 +50,13 @@ function Models({ models }: { models: string[] }) {
 export function AccountsTable({
   items,
   onToggle,
+  onPriority,
   onResetCooldown,
   onDelete,
 }: {
   items: Account[];
   onToggle(a: Account, enabled: boolean): void;
+  onPriority(a: Account, priority: number): void;
   onResetCooldown(a: Account): void;
   onDelete(a: Account): void;
 }) {
@@ -67,6 +69,7 @@ export function AccountsTable({
             <Table.Column>Status</Table.Column>
             <Table.Column>Quota</Table.Column>
             <Table.Column>Models</Table.Column>
+            <Table.Column>Priority</Table.Column>
             <Table.Column>Enabled</Table.Column>
             <Table.Column>
               <span className="sr-only">Actions</span>
@@ -95,6 +98,21 @@ export function AccountsTable({
                   </Table.Cell>
                   <Table.Cell>
                     <Models models={a.models} />
+                  </Table.Cell>
+                  <Table.Cell>
+                    <NumberField
+                      aria-label={`Priority of ${name}`}
+                      value={a.priority}
+                      step={1}
+                      onChange={(v) => {
+                        if (Number.isInteger(v) && v !== a.priority) onPriority(a, v);
+                      }}
+                      className="w-20"
+                    >
+                      <NumberField.Group>
+                        <NumberField.Input className="font-mono" />
+                      </NumberField.Group>
+                    </NumberField>
                   </Table.Cell>
                   <Table.Cell>
                     <Switch isSelected={a.enabled} onChange={(enabled) => onToggle(a, enabled)}>

@@ -53,3 +53,22 @@ test("the detail page shows the facts and keys, edits in a drawer and returns to
   await waitFor(() => expect(router.state.location.pathname).toBe("/providers"));
   expect(requests.some((r) => r.method === "DELETE")).toBe(true);
 });
+
+test("a subscription provider sets its strategy and says when priorities do not apply", async () => {
+  const { requests } = renderRoute("/providers/codex", async (req, url) => {
+    if (url.pathname === "/api/accounts/strategies" && req.method === "GET")
+      return Response.json({ items: [{ provider: "codex", strategy: "round-robin" }], total: 1 });
+    if (url.pathname === "/api/accounts/strategies/codex" && req.method === "PUT") {
+      const body = (await req.json()) as { strategy: string };
+      return Response.json({ provider: "codex", ...body });
+    }
+    if (url.pathname.startsWith("/api/")) return Response.json({ items: [], total: 0 });
+  });
+  expect(await screen.findByText(/Account priorities do not apply/)).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /Strategy/ }));
+  await userEvent.click(await screen.findByRole("option", { name: /Fill first/ }));
+  await waitFor(() => expect(requests.some((r) => r.method === "PUT")).toBe(true));
+  const put = requests.find((r) => r.method === "PUT")!;
+  expect(new URL(put.url).pathname).toBe("/api/accounts/strategies/codex");
+  expect(await put.json()).toEqual({ strategy: "fill-first" });
+});
