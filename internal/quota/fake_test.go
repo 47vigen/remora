@@ -30,6 +30,7 @@ type fakeEngine struct {
 	calls      []apiCall
 	refreshErr error
 	refreshed  []string
+	onCall     func() // runs inside APICall, without the lock
 }
 
 func newFakeEngine(creds ...cliproxyapi.Credential) *fakeEngine {
@@ -53,6 +54,9 @@ func (e *fakeEngine) Credentials(context.Context) ([]cliproxyapi.Credential, err
 }
 
 func (e *fakeEngine) APICall(_ context.Context, in cliproxyapi.APICallRequest) (cliproxyapi.APICallResponse, error) {
+	if e.onCall != nil {
+		e.onCall()
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.calls = append(e.calls, apiCall{at: time.Now(), req: in})

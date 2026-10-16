@@ -94,6 +94,8 @@ store and is managed in the UI, through the management API, or with `remora.yaml
 | `REMORA_COOLING_DEFAULT` | `5m` | How long a member cools when the upstream gave no retry hint. |
 | `REMORA_COOLING_POLL` | `1s` | How often remora reads the request log for failures. |
 | `REMORA_COOLING_SUBSCRIPTION_DEFAULT` | `30s` | How long a subscription account member cools when the upstream gave no retry hint. A retry hint always wins. |
+| `REMORA_QUOTA_INTERVAL` | `15m` | How often each subscription account's quota is checked. At least `5m`; `0` turns background checks off, and the Refresh buttons still work. |
+| `REMORA_QUOTA_BASE_URL` | unset | Sends every quota check here instead of to the providers. For tests only: the checks carry the accounts' tokens. |
 | `REMORA_LOG_CONTENT` | `false` | Keep request and response bodies in the request log. Off by default: the log keeps 7 days of metadata and errors only. |
 | `REMORA_PPROF_ADDR` | unset | A loopback `host:port`, such as `127.0.0.1:6060`, that serves Go profiling (`net/http/pprof`) on its own listener. Off when unset; any other host is refused. |
 

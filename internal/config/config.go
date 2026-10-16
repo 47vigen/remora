@@ -35,6 +35,8 @@ const (
 	EnvCoolingSubscriptionDefault = "REMORA_COOLING_SUBSCRIPTION_DEFAULT"
 	EnvPprofAddr                  = "REMORA_PPROF_ADDR"
 	EnvLogContent                 = "REMORA_LOG_CONTENT"
+	EnvQuotaInterval              = "REMORA_QUOTA_INTERVAL"
+	EnvQuotaBaseURL               = "REMORA_QUOTA_BASE_URL"
 )
 
 // Defaults applied when a variable is unset or empty.
@@ -56,6 +58,10 @@ const (
 	DefaultCoolingPoll         = time.Second
 
 	DefaultCoolingSubscriptionDefault = 30 * time.Second
+	// DefaultQuotaInterval and MinQuotaInterval equal quota.DefaultInterval and quota.MinInterval; quota imports
+	// accounts, whose tests import config, so config cannot import quota.
+	DefaultQuotaInterval = 15 * time.Minute
+	MinQuotaInterval     = 5 * time.Minute
 )
 
 // Ports are the loopback ports of the internal processes. The Go fields name
@@ -98,6 +104,9 @@ type Config struct {
 
 	PprofAddr  string // REMORA_PPROF_ADDR, "" = off: a loopback host:port that serves net/http/pprof
 	LogContent bool   // REMORA_LOG_CONTENT, default false: keep request and response bodies in the request log
+
+	QuotaInterval time.Duration // REMORA_QUOTA_INTERVAL, default 15m, at least 5m, 0 = background checks off
+	QuotaBaseURL  string        // REMORA_QUOTA_BASE_URL, "" = the providers; tests point quota checks at a fake
 	// MemoryLimit is the container's memory limit in bytes, 0 = none. serve fills it from the cgroup; it is not read
 	// from the environment.
 	MemoryLimit int64
@@ -173,6 +182,19 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	if c.Cooling.Poll, err = positiveDuration(getenv, EnvCoolingPoll, DefaultCoolingPoll); err != nil {
 		return Config{}, err
+	}
+	c.QuotaInterval = DefaultQuotaInterval
+	if v := getenv(EnvQuotaInterval); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || (d != 0 && d < MinQuotaInterval) {
+			return Config{}, fmt.Errorf("config: %s=%q: want 0 (off) or a duration of at least 5m", EnvQuotaInterval, v)
+		}
+		c.QuotaInterval = d
+	}
+	if c.QuotaBaseURL = getenv(EnvQuotaBaseURL); c.QuotaBaseURL != "" {
+		if u, perr := url.Parse(c.QuotaBaseURL); perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return Config{}, fmt.Errorf("config: %s=%q: want an http or https URL", EnvQuotaBaseURL, c.QuotaBaseURL)
+		}
 	}
 	return c, nil
 }
