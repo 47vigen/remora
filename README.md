@@ -93,6 +93,9 @@ store and is managed in the UI, through the management API, or with `remora.yaml
 | `REMORA_COOLING_429_WINDOW` | `60s` | The window for `REMORA_COOLING_429_COUNT`. |
 | `REMORA_COOLING_DEFAULT` | `5m` | How long a member cools when the upstream gave no retry hint. |
 | `REMORA_COOLING_POLL` | `1s` | How often remora reads the request log for failures. |
+| `REMORA_COOLING_SUBSCRIPTION_DEFAULT` | `30s` | How long a subscription account member cools when the upstream gave no retry hint. A retry hint always wins. |
+| `REMORA_LOG_CONTENT` | `false` | Keep request and response bodies in the request log. Off by default: the log keeps 7 days of metadata and errors only. |
+| `REMORA_PPROF_ADDR` | unset | A loopback `host:port`, such as `127.0.0.1:6060`, that serves Go profiling (`net/http/pprof`) on its own listener. Off when unset; any other host is refused. |
 
 The internal ports are bound to `127.0.0.1` inside the container and are never published. Change them only when
 they collide with something else in the container.

@@ -37,6 +37,9 @@ and later plans consume it from there.
 | `REMORA_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `REMORA_ENGINE_DIR` | `/usr/local/lib/remora/engines` | engine binaries and `versions.json` |
 | `REMORA_MASTER_KEY` | read from `$REMORA_DATA/master.key`, generated if absent | encrypts secrets at rest |
+| `REMORA_PPROF_ADDR` | unset (off) | loopback `host:port` that serves `net/http/pprof` on its own listener |
+| `REMORA_LOG_CONTENT` | `false` | keep request and response bodies in the request log |
+| `REMORA_COOLING_SUBSCRIPTION_DEFAULT` | `30s` | cooldown of a subscription member when the upstream gave no retry hint |
 
 `REMORA_ADMIN_PASSWORD` applies only while the store has no admin; afterwards the stored password wins.
 
