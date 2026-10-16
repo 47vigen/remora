@@ -11,10 +11,10 @@ on:
 
 permissions: {}
 
-# Only a newer push to the same pull request cancels a run; every commit on main keeps its own result.
+# A newer push to the same pull request cancels its run; every commit on main gets its own group and result.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: true
 
 # A release pull request changes only the changelog and the version manifest, and release.yml builds and tests
 # the tagged image on both architectures, so its jobs are skipped; a skipped required check counts as passed. Only a
