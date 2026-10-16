@@ -2,5 +2,16 @@ providers:
   - {name: up, kind: openai-compatible, base_url: http://fakes:9090/u/a, allow_private_network: true, keys: [{name: main, value: env:BENCH_UPSTREAM_KEY}]}
 aliases:
   - {name: fast, kind: chat, members: [up/m1]}
+  # Ten spreading aliases: 50 rules, a pool-sized table every request walks.
+  - {name: spread-01, kind: chat, members: [up/m1, up/m2, up/m3, up/m4], strategy: p2c}
+  - {name: spread-02, kind: chat, members: [up/m1, up/m2, up/m3, up/m4], strategy: p2c}
+  - {name: spread-03, kind: chat, members: [up/m1, up/m2, up/m3, up/m4], strategy: p2c}
+  - {name: spread-04, kind: chat, members: [up/m1, up/m2, up/m3, up/m4], strategy: p2c}
+  - {name: spread-05, kind: chat, members: [up/m1, up/m2, up/m3, up/m4], strategy: p2c}
+  - {name: spread-06, kind: chat, members: [up/m1, up/m2, up/m3, up/m4], strategy: p2c}
+  - {name: spread-07, kind: chat, members: [up/m1, up/m2, up/m3, up/m4], strategy: p2c}
+  - {name: spread-08, kind: chat, members: [up/m1, up/m2, up/m3, up/m4], strategy: p2c}
+  - {name: spread-09, kind: chat, members: [up/m1, up/m2, up/m3, up/m4], strategy: p2c}
+  - {name: spread-10, kind: chat, members: [up/m1, up/m2, up/m3, up/m4], strategy: p2c}
 keys:
   - {name: bench, value: env:BENCH_KEY, allow: ["*"]}
