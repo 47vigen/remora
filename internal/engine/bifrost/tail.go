@@ -30,6 +30,7 @@ type Tail struct {
 	src      LogSource
 	interval time.Duration
 	lookback time.Duration
+	status   []string // the row statuses each poll asks for; nil = every row
 	log      *slog.Logger
 	now      func() time.Time
 
@@ -63,8 +64,9 @@ func (s *subscriber) flush() {
 	s.pending = nil
 }
 
-// NewTail returns a Tail over src that polls every interval (1s when interval ≤ 0). A nil log discards.
-func NewTail(src LogSource, interval time.Duration, log *slog.Logger) *Tail {
+// NewTail returns a Tail over src that polls every interval (1s when interval ≤ 0) for rows of the given statuses
+// (nil = every row). A nil log discards.
+func NewTail(src LogSource, interval time.Duration, status []string, log *slog.Logger) *Tail {
 	if interval <= 0 {
 		interval = defaultTailInterval
 	}
@@ -72,7 +74,7 @@ func NewTail(src LogSource, interval time.Duration, log *slog.Logger) *Tail {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Tail{
-		src: src, interval: interval, lookback: defaultLookback, log: log, now: time.Now,
+		src: src, interval: interval, lookback: defaultLookback, status: status, log: log, now: time.Now,
 		subs: map[int]*subscriber{}, seen: map[string]time.Time{}, running: map[string]time.Time{},
 	}
 }
@@ -137,7 +139,7 @@ func (t *Tail) poll(ctx context.Context) {
 	newest := t.cursor
 	for offset := 0; ; offset += MaxLogLimit {
 		page, err := t.src.SearchLogs(ctx, LogFilter{
-			Start: &start, Limit: MaxLogLimit, Offset: offset, SortBy: "timestamp", Order: "asc",
+			Start: &start, Status: t.status, Limit: MaxLogLimit, Offset: offset, SortBy: "timestamp", Order: "asc",
 		})
 		if err != nil {
 			if ctx.Err() == nil {

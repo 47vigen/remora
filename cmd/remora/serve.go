@@ -155,9 +155,13 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	rctx, rcancel := context.WithCancel(ctx)
 	var loops sync.WaitGroup
 	loops.Go(func() { rec.Run(rctx) })
-	tail := bifrost.NewTail(fd, cfg.Cooling.Poll, logger)
-	loops.Go(func() { tail.Run(rctx) })
-	loops.Go(func() { runCooling(rctx, cooler, tail, fd, logger) })
+	// Cooling only uses failures, so its tail asks for error rows alone; reading every row re-read the whole window,
+	// bodies included, every poll. Live log viewers get their own tail, which polls only while one is open.
+	coolTail := bifrost.NewTail(fd, cfg.Cooling.Poll, []string{"error"}, logger)
+	liveTail := bifrost.NewTail(fd, cfg.Cooling.Poll, nil, logger)
+	loops.Go(func() { coolTail.Run(rctx) })
+	loops.Go(func() { liveTail.Run(rctx) })
+	loops.Go(func() { runCooling(rctx, cooler, coolTail, fd, logger) })
 	defer func() {
 		rcancel()
 		loops.Wait()
@@ -178,7 +182,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		System:    api.NewSystem(sup),
 		Names:     api.NewNames(st),
 		Logs:      fd,
-		Tail:      tail, // the cooling tail; live log viewers share its one poller
+		Tail:      liveTail,
 		Auth:      auth.NewService(st, nil),
 		Log:       logger,
 	})
