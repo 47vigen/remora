@@ -92,7 +92,7 @@ function AliasesPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Aliases"
-        description="A named model that clients call. Each one walks its members in order, falling back past any that fail or are cooling."
+        description="A named model that clients call. Its strategy picks the first member, and requests fall back past any that fail or are cooling."
         actions={newAlias}
       />
       <DataList.Root>

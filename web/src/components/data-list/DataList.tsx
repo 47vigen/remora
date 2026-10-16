@@ -176,8 +176,9 @@ function Pagination({
   onPageChange(n: number): void;
   onPageSizeChange(n: number): void;
 }) {
+  if (total === 0) return null;
   const count = pageCount(total, pageSize);
-  const first = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const first = (page - 1) * pageSize + 1;
   const last = Math.min(total, page * pageSize);
 
   return (

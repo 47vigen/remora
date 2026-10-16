@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 
 import {
   getAccountPoolOptions,
+  getQuotaOptions,
   getStatsOptions,
   listCoolingOptions,
   listProvidersOptions,
@@ -18,16 +19,16 @@ import { errorMessage } from "../../../lib/api";
 import { buildCSV, downloadFile } from "../../../lib/download";
 import { parseEnum } from "../../../lib/list-search";
 import { invalidateOps } from "../../../lib/query";
+import { Attention, COOLING_LIMIT } from "./-components/Attention";
 import { Breakdown } from "./-components/Breakdown";
 import { CostChart } from "./-components/charts/CostChart";
 import { LatencyChart } from "./-components/charts/LatencyChart";
 import { TokenChart } from "./-components/charts/TokenChart";
 import { VolumeChart } from "./-components/charts/VolumeChart";
-import { COOLING_LIMIT, CoolingList } from "./-components/CoolingList";
-import { HealthSummary } from "./-components/HealthSummary";
-import { PoolAlert } from "./-components/PoolAlert";
+import { Panel } from "./-components/Panel";
 import { Sparkline } from "./-components/Sparkline";
 import { StatCards } from "./-components/StatCards";
+import { Subscriptions } from "./-components/Subscriptions";
 import { overviewCostToCSV, overviewLatencyToCSV, overviewTokensToCSV, overviewVolumeToCSV } from "./-lib/export";
 import { breakdownRows, healthCounts, seriesRows, summarize, volumeRows } from "./-lib/overview";
 
@@ -105,6 +106,7 @@ function OverviewPage() {
   });
   const cooling = useQuery(listCoolingOptions({ query: { limit: COOLING_LIMIT } }));
   const pool = useQuery({ ...getAccountPoolOptions(), refetchInterval: POOL_REFRESH_MS });
+  const quota = useQuery({ ...getQuotaOptions(), refetchInterval: STATS_REFRESH_MS });
 
   const summary = stats.data ? summarize(stats.data.summary) : undefined;
   const series = stats.data?.series ?? [];
@@ -147,8 +149,6 @@ function OverviewPage() {
         }
       />
 
-      {pool.data ? <PoolAlert pool={pool.data} /> : null}
-
       {stats.error ? (
         <Alert status="danger" role="alert">
           <Alert.Indicator />
@@ -159,36 +159,87 @@ function OverviewPage() {
         </Alert>
       ) : null}
 
-      {summary ? (
-        <StatCards>
-          <StatCards.Item
-            label="Requests"
-            value={summary.requests}
-            trend={<Sparkline values={series.map((p) => p.requests)} />}
-          />
-          <StatCards.Item
-            label="Error rate"
-            value={summary.errorRate}
-            trend={<Sparkline values={series.map((p) => p.errors)} />}
-          />
-          <StatCards.Item label="p50 latency" value={summary.p50} hint="half of requests answer faster" />
-          <StatCards.Item label="p95 latency" value={summary.p95} hint="the slow tail" />
-          <StatCards.Item label="Tokens" value={summary.tokens} hint={RANGE_HINT[range]} />
-          <StatCards.Item label="Cost" value={summary.cost} hint={RANGE_HINT[range]} />
-        </StatCards>
-      ) : stats.isLoading ? (
-        <Skeleton className="h-28 w-full" />
-      ) : null}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+        {summary ? (
+          <StatCards className="lg:col-span-12">
+            <StatCards.Item
+              label="Requests"
+              value={summary.requests}
+              trend={<Sparkline values={series.map((p) => p.requests)} />}
+            />
+            <StatCards.Item
+              label="Error rate"
+              value={summary.errorRate}
+              trend={<Sparkline values={series.map((p) => (p.requests > 0 ? p.errors / p.requests : 0))} />}
+            />
+            <StatCards.Item
+              label="p95 latency"
+              value={summary.p95}
+              hint={`p50 ${summary.p50}`}
+              trend={<Sparkline values={series.map((p) => p.latency_p95_ms ?? 0)} />}
+            />
+            <StatCards.Item
+              label="Tokens"
+              value={summary.tokens}
+              trend={<Sparkline values={series.map((p) => p.total_tokens)} />}
+            />
+            <StatCards.Item
+              label="Cost"
+              value={summary.cost}
+              trend={<Sparkline values={series.map((p) => p.cost_usd)} />}
+            />
+          </StatCards>
+        ) : stats.isLoading ? (
+          <Skeleton className="h-28 w-full lg:col-span-12" />
+        ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-3">
         {stats.data ? (
-          <VolumeChart rows={volumeRows(series)} total={summary?.requests} className="lg:col-span-2" />
+          <VolumeChart rows={volumeRows(series)} total={summary?.requests} className="lg:col-span-8" />
         ) : (
-          <Skeleton className="h-72 lg:col-span-2" />
+          <Skeleton className="h-80 lg:col-span-8" />
+        )}
+        {quota.data ? (
+          <Subscriptions providers={quota.data} now={new Date(now)} className="lg:col-span-4" />
+        ) : quota.error ? (
+          <Panel title="Subscriptions" className="lg:col-span-4">
+            <p className="text-danger p-4 text-sm">Could not load the quota: {errorMessage(quota.error)}</p>
+          </Panel>
+        ) : (
+          <Skeleton className="h-80 lg:col-span-4" />
+        )}
+
+        {stats.data ? (
+          <>
+            <TokenChart rows={overTime} total={summary?.tokens} className="lg:col-span-4" />
+            <CostChart rows={overTime} total={summary?.cost} className="lg:col-span-4" />
+            <LatencyChart
+              rows={overTime}
+              total={summary?.p95 === "—" ? undefined : `p95 ${summary?.p95}`}
+              className="lg:col-span-4"
+            />
+          </>
+        ) : null}
+
+        {stats.data ? (
+          <Breakdown
+            className="lg:col-span-8"
+            models={byModel.data ? breakdownRows(byModel.data.groups) : undefined}
+            modelsError={byModel.error && !byModel.data ? errorMessage(byModel.error) : undefined}
+            providers={breakdownRows(stats.data.groups)}
+          />
+        ) : (
+          <Skeleton className="h-72 lg:col-span-8" />
         )}
         {providers.data ? (
-          <HealthSummary
-            counts={healthCounts(providers.data.items)}
+          <Attention
+            className="lg:col-span-4"
+            health={healthCounts(providers.data.items)}
+            pool={pool.data ?? []}
+            quota={quota.data ?? []}
+            quotaError={quota.error && !quota.data ? errorMessage(quota.error) : undefined}
+            cooling={cooling.data?.items ?? []}
+            coolingTotal={cooling.data?.total ?? 0}
+            now={new Date(now)}
             action={
               providers.data.items.length > 0 ? (
                 <Button size="sm" variant="secondary" isPending={testAll.isPending} onPress={() => testAll.mutate()}>
@@ -198,27 +249,9 @@ function OverviewPage() {
             }
           />
         ) : (
-          <Skeleton className="h-72" />
+          <Skeleton className="h-72 lg:col-span-4" />
         )}
       </div>
-
-      {stats.data ? (
-        <div className="grid gap-4 lg:grid-cols-3">
-          <TokenChart rows={overTime} total={summary?.tokens} />
-          <CostChart rows={overTime} total={summary?.cost} />
-          <LatencyChart rows={overTime} total={summary?.p95 === "—" ? undefined : `p95 ${summary?.p95}`} />
-        </div>
-      ) : null}
-
-      {stats.data ? (
-        <Breakdown
-          models={byModel.data ? breakdownRows(byModel.data.groups) : undefined}
-          modelsError={byModel.error && !byModel.data ? errorMessage(byModel.error) : undefined}
-          providers={breakdownRows(stats.data.groups)}
-        />
-      ) : null}
-
-      {cooling.data ? <CoolingList items={cooling.data.items} total={cooling.data.total} /> : null}
     </div>
   );
 }

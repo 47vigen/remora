@@ -90,7 +90,7 @@ function SettingsPage() {
           <Panel
             id="tokens"
             title="API tokens"
-            description="Tokens call the management API with the same rights as the admin password."
+            description="Tokens call the management API and the MCP server at /mcp, with the same rights as the admin password."
           >
             <TokensPanel />
           </Panel>
@@ -227,7 +227,12 @@ function TokensPanel() {
           setSecret(value);
         }}
       />
-      <SecretOnce title="Token created" value={secret} onClose={() => setSecret(null)} />
+      <SecretOnce
+        title="Token created"
+        value={secret}
+        example={`claude mcp add --transport http remora ${window.location.origin}/mcp \\\n  --header "Authorization: Bearer $REMORA_TOKEN"`}
+        onClose={() => setSecret(null)}
+      />
       <ConfirmDelete
         title={`Delete ${deleting?.name ?? "token"}?`}
         isOpen={deleting !== null}

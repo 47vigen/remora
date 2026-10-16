@@ -1,4 +1,11 @@
-import type { Provider, StatsGroup, StatsPoint, StatsSummary } from "../../../../client/types.gen";
+import type {
+  Provider,
+  QuotaProvider,
+  QuotaWindow,
+  StatsGroup,
+  StatsPoint,
+  StatsSummary,
+} from "../../../../client/types.gen";
 import { formatCost, formatLatency, formatTimestamp } from "../../../../lib/chart";
 import { formatCompactNumber } from "../../../../lib/numbers";
 
@@ -126,4 +133,25 @@ export function breakdownRows(groups: StatsGroup[]): BreakdownRow[] {
       p95: s.latency_p95_ms ?? undefined,
     }))
     .sort((a, b) => b.requests - a.requests || a.name.localeCompare(b.name));
+}
+
+/**
+ * One provider's quota as a few windows: each scope and length averaged over the accounts that reported it, with the
+ * soonest reset. Unknown stays unknown; a window no account reported is left out.
+ */
+export function capacityWindows(p: QuotaProvider): QuotaWindow[] {
+  const by = new Map<string, { w: QuotaWindow; sum: number; known: number }>();
+  for (const { quota } of p.accounts) {
+    for (const w of quota?.windows ?? []) {
+      const key = `${w.scope}/${w.window}`;
+      const at = by.get(key) ?? { w: { ...w, remaining: null, resets_at: null }, sum: 0, known: 0 };
+      if (w.remaining != null) {
+        at.sum += w.remaining;
+        at.known += 1;
+      }
+      if (w.resets_at && (!at.w.resets_at || w.resets_at < at.w.resets_at)) at.w.resets_at = w.resets_at;
+      by.set(key, at);
+    }
+  }
+  return [...by.values()].map(({ w, sum, known }) => ({ ...w, remaining: known > 0 ? sum / known : null }));
 }

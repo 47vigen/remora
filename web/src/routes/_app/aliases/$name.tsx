@@ -36,6 +36,7 @@ import { PageHeader } from "../../../components/page-header/PageHeader";
 import { errorMessage } from "../../../lib/api";
 import { parseListSearch } from "../../../lib/list-search";
 import { invalidateOps } from "../../../lib/query";
+import { StrategyIcon, StrategyValue } from "../../../lib/routing";
 import { ChainPreview } from "./-components/ChainPreview";
 import { MemberList } from "./-components/MemberList";
 import { useChainPreview } from "./-hooks/useChainPreview";
@@ -192,7 +193,7 @@ function AliasEditor({ initial, original }: { initial: AliasDraft; original: str
         description={
           original === undefined
             ? "Name it, choose its kind, and list the members to try in order."
-            : "Requests walk the members in order and fall back past any that fail or are cooling."
+            : "The strategy picks the first member; requests fall back past any that fail or are cooling."
         }
         actions={
           <>
@@ -274,17 +275,18 @@ function AliasEditor({ initial, original }: { initial: AliasDraft; original: str
               >
                 <Label>Strategy</Label>
                 <Select.Trigger>
-                  <Select.Value />
+                  <Select.Value>
+                    {({ selectedText }) => <StrategyValue id={draft.strategy} text={selectedText ?? ""} />}
+                  </Select.Value>
                   <Select.Indicator />
                 </Select.Trigger>
-                <Description>
-                  Which member a request tries first. Busy means requests started in the last minute.
-                </Description>
-                <Select.Popover>
+                <Description>{ALIAS_STRATEGIES.find((x) => x.id === draft.strategy)?.description}</Description>
+                <Select.Popover placement="bottom start">
                   <ListBox aria-label="Strategy">
                     {ALIAS_STRATEGIES.map((s) => (
                       <ListBox.Item key={s.id} id={s.id} textValue={s.label}>
-                        <div className="flex flex-col">
+                        <StrategyIcon id={s.id} />
+                        <div className="flex min-w-0 flex-1 flex-col">
                           <Label>{s.label}</Label>
                           <Description>{s.description}</Description>
                         </div>

@@ -24,6 +24,7 @@ import { errorMessage } from "../../../lib/api";
 import { type ListSearch, parseListSearch } from "../../../lib/list-search";
 import { getOAuthProviderLabel, getProviderLabel, isOAuthProvider } from "../../../lib/providers";
 import { invalidateOps } from "../../../lib/query";
+import { StrategyIcon, StrategyValue } from "../../../lib/routing";
 import { AccountLoginDialog } from "./-components/AccountLoginDialog";
 import { AccountsTable } from "./-components/AccountsTable";
 import { ProviderEditorDrawer } from "./-components/ProviderEditorDrawer";
@@ -126,6 +127,7 @@ function SubscriptionProvider({ providerId }: { providerId: string }) {
   );
   const strategies = useQuery(listAccountStrategiesOptions({ query: { limit: 200 } }));
   const strategy = strategies.data?.items.find((s) => s.provider === providerId)?.strategy ?? "round-robin";
+  const current = ACCOUNT_STRATEGIES.find((s) => s.id === strategy);
   const refresh = () => invalidateOps(qc, "listAccounts", "listProviders", "listAccountStrategies");
   const setSearch = (patch: Partial<DetailSearch>) =>
     void navigate({ search: (prev) => ({ ...prev, page: 1, ...patch }) });
@@ -195,40 +197,47 @@ function SubscriptionProvider({ providerId }: { providerId: string }) {
         </SpecSheet.Item>
       </SpecSheet>
 
-      <Select
-        className="max-w-sm"
-        value={strategy}
-        isDisabled={!strategies.data}
-        onChange={(v) => {
-          const next = ACCOUNT_STRATEGIES.find((x) => x.id === v)?.id;
-          if (next && next !== strategy)
-            setStrategy.mutate({ path: { provider: providerId }, body: { strategy: next } });
-        }}
-      >
-        <Label>Strategy</Label>
-        <Select.Trigger>
-          <Select.Value />
-          <Select.Indicator />
-        </Select.Trigger>
-        <Description>
-          {usesPriority(strategy)
-            ? "Busy means requests started in the last minute."
-            : "Busy means requests started in the last minute. Account priorities do not apply under this strategy."}
-        </Description>
-        <Select.Popover>
-          <ListBox aria-label="Strategy">
-            {ACCOUNT_STRATEGIES.map((s) => (
-              <ListBox.Item key={s.id} id={s.id} textValue={s.label}>
-                <div className="flex flex-col">
-                  <Label>{s.label}</Label>
-                  <Description>{s.description}</Description>
-                </div>
-                <ListBox.ItemIndicator />
-              </ListBox.Item>
-            ))}
-          </ListBox>
-        </Select.Popover>
-      </Select>
+      <section className="bg-surface border-border flex items-center justify-between gap-6 rounded-sm border p-4 max-sm:flex-col max-sm:items-stretch">
+        <div className="flex min-w-0 flex-col gap-1">
+          <h2 className="label-caps text-muted">Routing</h2>
+          <p className="text-sm">
+            {current?.description}
+            {usesPriority(strategy) ? null : " Account priorities do not apply."}
+          </p>
+        </div>
+        <Select
+          aria-label="Strategy"
+          className="w-56 shrink-0 max-sm:w-full"
+          value={strategy}
+          isDisabled={!strategies.data}
+          onChange={(v) => {
+            const next = ACCOUNT_STRATEGIES.find((x) => x.id === v)?.id;
+            if (next && next !== strategy)
+              setStrategy.mutate({ path: { provider: providerId }, body: { strategy: next } });
+          }}
+        >
+          <Select.Trigger>
+            <Select.Value>
+              {({ selectedText }) => <StrategyValue id={strategy} text={selectedText ?? ""} />}
+            </Select.Value>
+            <Select.Indicator />
+          </Select.Trigger>
+          <Select.Popover placement="bottom end">
+            <ListBox aria-label="Strategy">
+              {ACCOUNT_STRATEGIES.map((s) => (
+                <ListBox.Item key={s.id} id={s.id} textValue={s.label}>
+                  <StrategyIcon id={s.id} />
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <Label>{s.label}</Label>
+                    <Description>{s.description}</Description>
+                  </div>
+                  <ListBox.ItemIndicator />
+                </ListBox.Item>
+              ))}
+            </ListBox>
+          </Select.Popover>
+        </Select>
+      </section>
 
       <SectionLabel>Accounts</SectionLabel>
       <DataList>
@@ -246,6 +255,7 @@ function SubscriptionProvider({ providerId }: { providerId: string }) {
             items={accounts.data?.items ?? []}
             onToggle={(a, enabled) => toggle.mutate({ path: { id: a.id }, body: { enabled } })}
             onPriority={(a, priority) => toggle.mutate({ path: { id: a.id }, body: { priority } })}
+            priorityApplies={usesPriority(strategy)}
             onResetCooldown={setResetting}
             onDelete={(a) => {
               remove.reset();

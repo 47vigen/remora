@@ -29,9 +29,10 @@ test("Shell.Nav renders links through the given link component", () => {
   expect(screen.getAllByTestId("custom")).toHaveLength(7);
 });
 
-test("Shell.Nav lists Quota right after Providers", () => {
+test("Shell.Nav monitors with Overview and Quota, and keeps Logs under Access after Keys", () => {
   render(<Shell.Nav current="/" />);
   const names = screen.getAllByRole("link").map((l) => l.textContent);
-  expect(names[names.indexOf("Providers") + 1]).toBe("Quota");
+  expect(names[names.indexOf("Overview") + 1]).toBe("Quota");
+  expect(names[names.indexOf("Keys") + 1]).toBe("Logs");
   expect(screen.getByRole("link", { name: "Quota" })).toHaveAttribute("href", "/quota");
 });

@@ -1,5 +1,5 @@
 import { ArrowRotateLeft, Ellipsis, TrashBin } from "@gravity-ui/icons";
-import { Button, Chip, Dropdown, Label, Meter, NumberField, Switch, Table } from "@heroui/react";
+import { Button, Chip, cn, Dropdown, Label, Meter, NumberField, Switch, Table, Tooltip } from "@heroui/react";
 
 import { accountHealth, isCooling } from "../-lib/accounts";
 import type { Account } from "../../../../client/types.gen";
@@ -16,7 +16,13 @@ function Quota({ quota }: { quota: Account["quota"] }) {
         const left = Math.round(Math.min(1, Math.max(0, q.remaining_fraction ?? 0)) * 100);
         const label = `${q.model ?? "All models"}: ${left}% left`;
         return (
-          <Meter key={q.model ?? i} value={left} valueLabel={label} size="sm">
+          <Meter
+            key={q.model ?? i}
+            value={left}
+            valueLabel={label}
+            size="sm"
+            color={left > 50 ? "success" : left >= 20 ? "warning" : "danger"}
+          >
             <Label className="text-xs">{label}</Label>
             <Meter.Track>
               <Meter.Fill />
@@ -39,9 +45,20 @@ function Models({ models }: { models: string[] }) {
         </Chip>
       ))}
       {rest > 0 ? (
-        <Chip size="sm" variant="soft">
-          <Chip.Label>+{rest}</Chip.Label>
-        </Chip>
+        <Tooltip delay={150}>
+          <Tooltip.Trigger aria-label={`${rest} more models`} className="cursor-default rounded-sm outline-none">
+            <Chip size="sm" variant="soft">
+              <Chip.Label>+{rest}</Chip.Label>
+            </Chip>
+          </Tooltip.Trigger>
+          <Tooltip.Content placement="bottom start" className="max-w-xs">
+            <ul className="flex flex-col gap-0.5 font-mono text-xs">
+              {models.slice(MODEL_CHIPS).map((m) => (
+                <li key={m}>{m}</li>
+              ))}
+            </ul>
+          </Tooltip.Content>
+        </Tooltip>
       ) : null}
     </span>
   );
@@ -51,10 +68,13 @@ export function AccountsTable({
   items,
   onToggle,
   onPriority,
+  priorityApplies = true,
   onResetCooldown,
   onDelete,
 }: {
   items: Account[];
+  /** False when the pool's strategy ignores priorities; the field stays editable but reads as inactive. */
+  priorityApplies?: boolean;
   onToggle(a: Account, enabled: boolean): void;
   onPriority(a: Account, priority: number): void;
   onResetCooldown(a: Account): void;
@@ -107,7 +127,7 @@ export function AccountsTable({
                       onChange={(v) => {
                         if (Number.isInteger(v) && v !== a.priority) onPriority(a, v);
                       }}
-                      className="w-20"
+                      className={cn("w-20", !priorityApplies && "opacity-50")}
                     >
                       <NumberField.Group>
                         <NumberField.Input className="font-mono" />

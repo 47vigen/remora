@@ -10,9 +10,9 @@ import { ChartCard } from "./ChartCard";
 import { ChartTooltip } from "./ChartTooltip";
 
 // Cost per bucket over the window.
-function CostChartImpl({ rows, total }: { rows: SeriesRow[]; total?: string }) {
+function CostChartImpl({ rows, total, className }: { rows: SeriesRow[]; total?: string; className?: string }) {
   return (
-    <ChartCard title="Cost" value={total} isEmpty={!rows.some((r) => r.cost > 0)}>
+    <ChartCard title="Cost" value={total} className={className} isEmpty={!rows.some((r) => r.cost > 0)}>
       <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
         <BarChart data={rows} margin={{ top: 6, right: 4, left: 4, bottom: 0 }} barCategoryGap={1}>
           <CartesianGrid vertical={false} stroke={CHART_COLORS.grid} />

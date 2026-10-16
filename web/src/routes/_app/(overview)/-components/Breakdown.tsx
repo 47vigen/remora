@@ -80,24 +80,26 @@ export function Breakdown({
   models,
   modelsError,
   providers,
+  className,
 }: {
+  className?: string;
   /** Undefined while the separate model query loads. */
   models?: BreakdownRow[];
   modelsError?: string;
   providers: BreakdownRow[];
 }) {
   return (
-    <section className="bg-surface border-border overflow-hidden rounded-sm border">
+    <section className={cn("bg-surface border-border min-w-0 overflow-hidden rounded-sm border", className)}>
       <Tabs defaultSelectedKey="models">
-        <div className="border-border flex items-center justify-between gap-3 border-b px-4 py-2">
+        <div className="border-border flex h-12 items-center justify-between gap-3 border-b px-4">
           <h3 className="label-caps text-muted">Breakdown</h3>
           <Tabs.ListContainer>
             <Tabs.List aria-label="Breakdown" className="p-0.5">
-              <Tabs.Tab id="models" className="h-7 px-3 text-[13px]">
+              <Tabs.Tab id="models" className="h-7 px-3 text-[13px] whitespace-nowrap">
                 Models
                 <Tabs.Indicator />
               </Tabs.Tab>
-              <Tabs.Tab id="providers" className="h-7 px-3 text-[13px]">
+              <Tabs.Tab id="providers" className="h-7 px-3 text-[13px] whitespace-nowrap">
                 Providers
                 <Tabs.Indicator />
               </Tabs.Tab>

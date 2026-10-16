@@ -9,8 +9,16 @@ export const ALIAS_STRATEGIES: { id: RoutingStrategy; label: string; description
   { id: "fill-first", label: "Fill first", description: "Same as priority for an alias." },
   { id: "round-robin", label: "Round robin", description: "Members take turns." },
   { id: "random", label: "Random", description: "A random member goes first." },
-  { id: "p2c", label: "Power of two", description: "Two random members; the less busy one goes first." },
-  { id: "least-used", label: "Least used", description: "The least busy member goes first." },
+  {
+    id: "p2c",
+    label: "Power of two",
+    description: "Two random members; the one with fewer requests in the last minute goes first.",
+  },
+  {
+    id: "least-used",
+    label: "Least used",
+    description: "The member with the fewest requests in the last minute goes first.",
+  },
 ];
 
 /** Capabilities the editor suggests; any other value may be typed. */

@@ -18,18 +18,23 @@ const GROUPS: readonly { label: string; items: readonly NavItem[] }[] = [
     label: "Monitor",
     items: [
       { href: "/", label: "Overview", icon: ChartColumn },
-      { href: "/logs", label: "Logs", icon: ListUl },
+      { href: "/quota", label: "Quota", icon: Speedometer },
     ],
   },
   {
     label: "Route",
     items: [
       { href: "/providers", label: "Providers", icon: Server },
-      { href: "/quota", label: "Quota", icon: Speedometer },
       { href: "/aliases", label: "Aliases", icon: BranchesRight },
     ],
   },
-  { label: "Access", items: [{ href: "/keys", label: "Keys", icon: Key }] },
+  {
+    label: "Access",
+    items: [
+      { href: "/keys", label: "Keys", icon: Key },
+      { href: "/logs", label: "Logs", icon: ListUl },
+    ],
+  },
 ];
 
 const SETTINGS: NavItem = { href: "/settings", label: "Settings", icon: Gear };

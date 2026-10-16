@@ -10,10 +10,11 @@ type Entry = { id: string; label: string; hint?: string; href: string };
 
 const PAGES: Entry[] = [
   { id: "page:/", label: "Overview", href: "/" },
-  { id: "page:/logs", label: "Logs", href: "/logs" },
+  { id: "page:/quota", label: "Quota", href: "/quota" },
   { id: "page:/providers", label: "Providers", href: "/providers" },
   { id: "page:/aliases", label: "Aliases", href: "/aliases" },
   { id: "page:/keys", label: "Keys", href: "/keys" },
+  { id: "page:/logs", label: "Logs", href: "/logs" },
   { id: "page:/settings", label: "Settings", href: "/settings" },
 ];
 
@@ -57,7 +58,7 @@ function Trigger() {
     >
       <Magnifier aria-hidden="true" className="size-3.5 shrink-0" />
       <span className="hidden flex-1 text-left sm:inline">Search</span>
-      <Kbd className="hidden h-5 px-1.5 text-[11px] sm:inline-flex">{isMac ? "⌘K" : "Ctrl K"}</Kbd>
+      <Kbd className="hidden h-5 px-1.5 font-mono text-[11px] sm:inline-flex">{isMac ? "⌘K" : "Ctrl K"}</Kbd>
       <span className="sr-only sm:hidden">Search</span>
     </button>
   );
