@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/47vigen/remora/internal/alias"
@@ -54,14 +53,8 @@ func fromGenAlias(b *gen.Alias) (alias.Alias, error) {
 		if m == "" {
 			return alias.Alias{}, badRequest("a member cannot be empty")
 		}
-		if provider, _, isTarget := strings.Cut(m, "/"); isTarget {
-			_, level, ok := alias.ParseThinking(m)
-			if !ok {
-				return alias.Alias{}, badRequest(fmt.Sprintf("thinking level must be minimal, low, medium, high or a token budget; got %q", level))
-			}
-			if _, sub := cliproxyapi.ProviderByName(provider); level != "" && !sub {
-				return alias.Alias{}, badRequest("a thinking level applies only to subscription models")
-			}
+		if err := alias.CheckThinking(m, cliproxyapi.IsSubscription); err != nil {
+			return alias.Alias{}, badRequest(err.Error())
 		}
 		a.Members = append(a.Members, alias.Member{Ref: m})
 	}

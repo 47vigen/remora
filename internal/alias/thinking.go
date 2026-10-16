@@ -1,6 +1,8 @@
 package alias
 
 import (
+	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -24,4 +26,21 @@ func ParseThinking(ref string) (base, level string, ok bool) {
 	}
 	n, err := strconv.Atoi(level)
 	return base, level, err == nil && n >= 0 && level[0] != '+'
+}
+
+// CheckThinking refuses a member ref whose thinking suffix is not a valid level, or that carries one on a provider
+// isSubscription does not name: there it would reach the provider as an unknown model. Alias names pass.
+func CheckThinking(ref string, isSubscription func(provider string) bool) error {
+	provider, _, isTarget := strings.Cut(ref, "/")
+	if !isTarget {
+		return nil
+	}
+	_, level, ok := ParseThinking(ref)
+	switch {
+	case !ok:
+		return fmt.Errorf("thinking level must be minimal, low, medium, high or a token budget; got %q", level)
+	case level != "" && !isSubscription(provider):
+		return errors.New("a thinking level applies only to subscription models")
+	}
+	return nil
 }

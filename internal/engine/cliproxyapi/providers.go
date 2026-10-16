@@ -28,6 +28,12 @@ func Providers() []Provider {
 	return out
 }
 
+// IsSubscription reports whether name is a subscription provider.
+func IsSubscription(name string) bool {
+	_, ok := ProviderByName(name)
+	return ok
+}
+
 // ProviderByName finds a provider by its user-facing name.
 func ProviderByName(name string) (Provider, bool) {
 	for _, p := range providers {

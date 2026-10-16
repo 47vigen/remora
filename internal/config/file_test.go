@@ -79,6 +79,8 @@ func TestParse_Errors(t *testing.T) {
 		{"alias without members", "aliases:\n  - {name: a, kind: chat}\n", []string{"aliases[0].members"}},
 		{"negative context", "aliases:\n  - {name: a, kind: chat, members: [p/m], context_window: -1}\n", []string{"aliases[0].context_window"}},
 		{"bad strategy", "aliases:\n  - {name: a, kind: chat, members: [p/m], strategy: random}\n", []string{"aliases[0].strategy", "random"}},
+		{"thinking on an api-key member", "aliases:\n  - {name: a, kind: chat, members: [up-a/m1(low)]}\n", []string{"aliases[0].members[0]", "subscription models"}},
+		{"unknown thinking level", "aliases:\n  - {name: a, kind: chat, members: [antigravity/x(extreme)]}\n", []string{"aliases[0].members[0]", "extreme"}},
 		{"duplicate alias", "aliases:\n  - {name: a, kind: chat, members: [p/m]}\n  - {name: a, kind: chat, members: [p/m]}\n", []string{"aliases[1].name"}},
 		{"literal client key", "keys:\n  - {name: a, value: sk-x, allow: ['*']}\n", []string{"keys[0].value", "env:"}},
 		{"duplicate client key", "keys:\n  - {name: a}\n  - {name: a}\n", []string{"keys[1].name"}},

@@ -2,6 +2,7 @@ package alias
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -41,5 +42,22 @@ func TestCompileKeepsThinkingSuffix(t *testing.T) {
 	want := []Target{{Provider: "antigravity", Model: "x(low)"}, {Provider: "antigravity", Model: "x"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Compile = %+v, want %+v", got, want)
+	}
+}
+
+func TestCheckThinking(t *testing.T) {
+	sub := func(p string) bool { return p == "antigravity" }
+	for ref, want := range map[string]string{
+		"antigravity/x(low)":     "",
+		"antigravity/x":          "",
+		"up-a/m1":                "",
+		"inner":                  "",
+		"up-a/m1(low)":           "applies only to subscription models",
+		"antigravity/x(extreme)": `got "extreme"`,
+	} {
+		err := CheckThinking(ref, sub)
+		if (want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), want)) {
+			t.Errorf("CheckThinking(%q) = %v, want %q", ref, err, want)
+		}
 	}
 }

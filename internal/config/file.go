@@ -12,6 +12,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/47vigen/remora/internal/alias"
+	"github.com/47vigen/remora/internal/engine/cliproxyapi"
 )
 
 // File is the one remora.yaml format: the providers, aliases and client keys `remora apply -f` makes the store
@@ -164,6 +165,8 @@ func (f File) Validate() error {
 		for j, m := range a.Members {
 			if m == "" {
 				fail("%s.members[%d]: empty", at, j)
+			} else if err := alias.CheckThinking(m, cliproxyapi.IsSubscription); err != nil {
+				fail("%s.members[%d]: %w", at, j, err)
 			}
 		}
 		if a.ContextWindow < 0 {
