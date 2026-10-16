@@ -145,6 +145,15 @@ admins only ever talk to remora: one key format, one error format, one API, one 
 Using consumer subscriptions through a proxy may conflict with the terms of service of the companies that offer
 them. Read those terms and decide for yourself; remora does not change them.
 
+## Account quota
+
+The **Quota** page shows, for every Antigravity, Codex and Claude account, how much of each quota window is left and
+when it resets. Other subscription providers show their status and cooldowns only. remora checks one account at a
+time, at least 2 seconds apart, through each account's own proxy, and never by sending a prompt. Codex and Claude
+accounts that served traffic recently reuse the quota headers of that traffic instead of being checked. At the
+default `REMORA_QUOTA_INTERVAL`, about 20 Antigravity accounts cost about 80 upstream calls an hour. "Unknown" means
+the provider did not report that number. A manual refresh of one account runs at most once a minute.
+
 ## Dropped parameters
 
 Codex models served through a subscription do not accept `temperature`, `top_p` or `max_tokens`; those
