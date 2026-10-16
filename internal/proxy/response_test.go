@@ -90,3 +90,32 @@ func (c *chunked) Read(p []byte) (int, error) {
 	c.b = c.b[n:]
 	return n, nil
 }
+
+func TestMayHoldEngineWord(t *testing.T) {
+	for in, want := range map[string]bool{
+		"BiFrOsT": true, "x-CLIPROXYAPI": true, "sk-bf-1": true, "routing via bifrost/x": true,
+		"Mon, 01 Jan 2026": false, "": false, "bifros": false, "cliproxy": false,
+	} {
+		if got := mayHoldEngineWord([]byte(in)); got != want {
+			t.Errorf("mayHoldEngineWord(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
+
+func TestScrubUnchangedWhenClean(t *testing.T) {
+	if n := testing.AllocsPerRun(100, func() { _ = scrubString("Mon, 01 Jan 2026 00:00:00 GMT") }); n != 0 {
+		t.Fatalf("allocs = %v, want 0 for a clean value", n)
+	}
+}
+
+func FuzzScrubFastPath(f *testing.F) {
+	for _, s := range []string{"bifrost", "BIFROST x", "sk-bf-abc", "cliproxyapi", "clean", "bIfRoSt sk-bf-x_y-1"} {
+		f.Add([]byte(s))
+	}
+	f.Fuzz(func(t *testing.T, b []byte) {
+		want := engineWords.ReplaceAll(engineKeys.ReplaceAll(b, []byte("[redacted]")), []byte("remora"))
+		if got := scrub(b); !bytes.Equal(got, want) {
+			t.Fatalf("scrub(%q) = %q, want %q", b, got, want)
+		}
+	})
+}

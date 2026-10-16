@@ -46,11 +46,62 @@ var (
 // scrub replaces engine names with "remora" and engine key values with "[redacted]". The replacements are plain
 // ASCII without quotes or backslashes, so a JSON document stays valid.
 func scrub(b []byte) []byte {
+	if !mayHoldEngineWord(b) {
+		return b
+	}
 	b = engineKeys.ReplaceAll(b, []byte("[redacted]"))
 	return engineWords.ReplaceAll(b, []byte("remora"))
 }
 
-func scrubString(s string) string { return string(scrub([]byte(s))) }
+func scrubString(s string) string {
+	if !mayHoldEngineWord([]byte(s)) { // the conversion does not copy here
+		return s
+	}
+	return string(scrub([]byte(s)))
+}
+
+// mayHoldEngineWord reports, without allocating, whether b may contain an engine name in any case or an engine key.
+// A false answer is exact. Any non-ASCII byte answers true: the case-insensitive pattern also folds letters such
+// as the Kelvin sign, so only the regexps can decide.
+func mayHoldEngineWord(b []byte) bool {
+	for i, c := range b {
+		if c >= 0x80 {
+			return true
+		}
+		switch c | 0x20 {
+		case 'b':
+			if hasFoldPrefix(b[i:], "bifrost") {
+				return true
+			}
+		case 'c':
+			if hasFoldPrefix(b[i:], "cliproxyapi") {
+				return true
+			}
+		case 's':
+			if bytes.HasPrefix(b[i:], []byte("sk-bf-")) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hasFoldPrefix reports whether b starts with the lower-case ASCII word w, in any ASCII case.
+func hasFoldPrefix(b []byte, w string) bool {
+	if len(b) < len(w) {
+		return false
+	}
+	for i := range len(w) {
+		c := b[i]
+		if 'A' <= c && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		if c != w[i] {
+			return false
+		}
+	}
+	return true
+}
 
 // Scrub returns b with engine names replaced by remora's and engine keys redacted, for any text an operator or
 // client reads (the CLI uses it on its error output).
