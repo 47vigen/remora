@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -136,6 +135,7 @@ type reqInfo struct {
 	isAlias  bool
 	vk       string
 	body     []byte
+	spans    bodySpans // where the parts of body the proxy reads sit; zero for multipart
 }
 
 type reqInfoKey struct{}
@@ -219,7 +219,7 @@ func bearer(h string) string {
 // forward checks the request's model and hands it to the reverse proxy.
 func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt route, sh shape, key store.ClientKey) {
 	ctx := r.Context()
-	model, raw, err := extractModel(r)
+	model, raw, sp, err := extractModel(r)
 	switch {
 	case errors.Is(err, ErrBodyTooLarge):
 		errTooLarge.write(w, sh)
@@ -245,7 +245,7 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt route, sh sha
 		return
 	}
 
-	info := &reqInfo{in: r, upstream: rt.upstream, shape: sh, model: model, vk: key.VKValue, body: raw}
+	info := &reqInfo{in: r, upstream: rt.upstream, shape: sh, model: model, vk: key.VKValue, body: raw, spans: sp}
 	isAlias, e := p.checkAliasKind(ctx, model, rt.aliasKind, r.URL.Path)
 	if e != nil {
 		e.write(w, sh)
@@ -254,28 +254,47 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt route, sh sha
 	info.isAlias = isAlias
 	body := raw
 	if isAlias {
-		if body, err = withModel(raw, r.Header.Get("Content-Type"), alias.EngineModel(model)); err != nil {
+		if body, err = withModel(raw, sp, r.Header.Get("Content-Type"), alias.EngineModel(model)); err != nil {
 			errModelRequired.write(w, sh)
 			return
 		}
 	}
 
 	out := r.WithContext(context.WithValue(ctx, reqInfoKey{}, info))
-	out.Body = io.NopCloser(bytes.NewReader(body))
+	out.Body = &dropReader{b: body}
 	out.ContentLength = int64(len(body))
 	out.TransferEncoding = nil
 	p.rp.ServeHTTP(w, out)
 }
 
+// dropReader serves b once and lets go of it at EOF or Close, so a long stream does not keep its request body alive.
+type dropReader struct{ b []byte }
+
+func (d *dropReader) Read(p []byte) (int, error) {
+	if len(d.b) == 0 {
+		d.b = nil
+		return 0, io.EOF
+	}
+	n := copy(p, d.b)
+	if d.b = d.b[n:]; len(d.b) == 0 {
+		d.b = nil
+	}
+	return n, nil
+}
+
+func (d *dropReader) Close() error {
+	d.b = nil
+	return nil
+}
+
 // checkAliasKind reports whether model names an alias, and refuses an alias of another kind than the endpoint
 // serves. It fails closed: when the aliases cannot be read, the request is refused rather than sent unchecked.
 func (p *Proxy) checkAliasKind(ctx context.Context, model string, kind alias.Kind, path string) (bool, *apiError) {
-	aliases, err := p.store.Aliases(ctx)
+	a, ok, err := p.store.Alias(ctx, model)
 	if err != nil {
 		p.log.ErrorContext(ctx, "proxy: load aliases", slog.Any("err", err))
 		return false, &errInternal
 	}
-	a, ok := aliases[model]
 	if !ok {
 		return false, nil
 	}
@@ -299,7 +318,7 @@ func (p *Proxy) rewrite(pr *httputil.ProxyRequest) {
 	pr.Out.Host = u.Host
 
 	setUpstreamHeaders(pr.Out.Header, info.vk)
-	pr.Out.Header.Set(headerForwardSession, opencodeSession(pr.In.Header, info.body))
+	pr.Out.Header.Set(headerForwardSession, opencodeSession(pr.In.Header, info.body, info.spans))
 }
 
 // setUpstreamHeaders replaces every client credential and engine control header in h with remora's own.
@@ -330,6 +349,10 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 		if err := rewriteErrorBody(resp, info.shape); err != nil {
 			return err
 		}
+	case isJSON(resp.Header):
+		if err := stripJSONBody(resp); err != nil {
+			return err
+		}
 	}
 	p.hooksMu.RLock()
 	hooks := p.hooks
@@ -338,6 +361,8 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 		h(info.in, info.body, resp)
 	}
 	setDroppedParams(resp.Header, info)
+	// Nothing reads the request body past this point; a stream may run for minutes.
+	info.body, info.spans = nil, bodySpans{}
 	return nil
 }
 
@@ -347,6 +372,7 @@ func (p *Proxy) errorHandler(w http.ResponseWriter, r *http.Request, err error) 
 	sh := shapeOpenAI
 	if info := infoFrom(r.Context()); info != nil {
 		sh = info.shape
+		info.body, info.spans = nil, bodySpans{}
 	}
 	if errors.Is(err, context.Canceled) && r.Context().Err() != nil {
 		p.log.DebugContext(r.Context(), "proxy: client went away", slog.Any("err", err))

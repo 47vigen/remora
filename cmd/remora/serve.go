@@ -94,6 +94,9 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	if err := setSealer(st, cfg); err != nil {
 		return fmt.Errorf("master key: %w", err)
 	}
+	if err := st.Refresh(ctx); err != nil {
+		logger.Error("store: build the key and alias snapshot; reads use the database", "err", err)
+	}
 
 	creds, err := supervise.EnsureCredentials(ctx, st)
 	if err != nil {

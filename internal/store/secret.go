@@ -90,6 +90,7 @@ func (s *Sealer) MAC(data []byte) []byte {
 // SetSealer sets the Sealer the repositories use for secrets.
 func (s *Store) SetSealer(sl *Sealer) {
 	s.sealer.Store(sl)
+	s.snap.Store(nil) // reads use SQL until the next Refresh or Write builds a snapshot under this sealer
 }
 
 // LoadMasterKey returns the master key. env (the value of REMORA_MASTER_KEY, base64 of 32 bytes) wins when set;

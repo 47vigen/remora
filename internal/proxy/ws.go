@@ -199,7 +199,7 @@ func checkClientFrame(data []byte, check func(model string) (bool, *apiError)) (
 	if !mayBeCreate(data) {
 		return data, nil
 	}
-	model, err := jsonModel(data)
+	model, sp, err := scanBody(data)
 	switch {
 	case errors.Is(err, ErrClientFallbacks):
 		return nil, &errClientFallbacks
@@ -210,7 +210,7 @@ func checkClientFrame(data []byte, check func(model string) (bool, *apiError)) (
 	if e != nil || !isAlias {
 		return data, e
 	}
-	out, err := jsonWithModel(data, alias.EngineModel(model))
+	out, err := withModel(data, sp, "application/json", alias.EngineModel(model))
 	if err != nil {
 		return nil, &errModelRequired
 	}

@@ -11,6 +11,7 @@ import (
 	"path"
 	"sort"
 	"strconv"
+	"sync"
 	"sync/atomic"
 
 	_ "modernc.org/sqlite" // registers the "sqlite" database/sql driver
@@ -26,6 +27,9 @@ var migrationFS embed.FS
 type Store struct {
 	db     *sql.DB
 	sealer atomic.Pointer[Sealer] // nil until SetSealer; repositories that touch secrets need it
+
+	snap   atomic.Pointer[snapshot] // nil until the first Refresh, or after one failed: reads use SQL
+	snapMu sync.Mutex               // serialises Refresh
 }
 
 // Open opens (or creates) the database at path and applies the embedded migrations that are missing.

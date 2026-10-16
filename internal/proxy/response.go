@@ -46,11 +46,62 @@ var (
 // scrub replaces engine names with "remora" and engine key values with "[redacted]". The replacements are plain
 // ASCII without quotes or backslashes, so a JSON document stays valid.
 func scrub(b []byte) []byte {
+	if !mayHoldEngineWord(b) {
+		return b
+	}
 	b = engineKeys.ReplaceAll(b, []byte("[redacted]"))
 	return engineWords.ReplaceAll(b, []byte("remora"))
 }
 
-func scrubString(s string) string { return string(scrub([]byte(s))) }
+func scrubString(s string) string {
+	if !mayHoldEngineWord([]byte(s)) { // the conversion does not copy here
+		return s
+	}
+	return string(scrub([]byte(s)))
+}
+
+// mayHoldEngineWord reports, without allocating, whether b may contain an engine name in any case or an engine key.
+// A false answer is exact. Any non-ASCII byte answers true: the case-insensitive pattern also folds letters such
+// as the Kelvin sign, so only the regexps can decide.
+func mayHoldEngineWord(b []byte) bool {
+	for i, c := range b {
+		if c >= 0x80 {
+			return true
+		}
+		switch c | 0x20 {
+		case 'b':
+			if hasFoldPrefix(b[i:], "bifrost") {
+				return true
+			}
+		case 'c':
+			if hasFoldPrefix(b[i:], "cliproxyapi") {
+				return true
+			}
+		case 's':
+			if bytes.HasPrefix(b[i:], []byte("sk-bf-")) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hasFoldPrefix reports whether b starts with the lower-case ASCII word w, in any ASCII case.
+func hasFoldPrefix(b []byte, w string) bool {
+	if len(b) < len(w) {
+		return false
+	}
+	for i := range len(w) {
+		c := b[i]
+		if 'A' <= c && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		if c != w[i] {
+			return false
+		}
+	}
+	return true
+}
 
 // Scrub returns b with engine names replaced by remora's and engine keys redacted, for any text an operator or
 // client reads (the CLI uses it on its error output).
@@ -59,7 +110,8 @@ func Scrub(b []byte) []byte { return scrub(b) }
 // isEngineHeader reports whether a header name belongs to an engine.
 func isEngineHeader(name string) bool {
 	l := strings.ToLower(name)
-	return strings.HasPrefix(l, "x-bf-") || strings.Contains(l, "bifrost") || strings.Contains(l, "cliproxyapi")
+	return strings.HasPrefix(l, "x-bf-") || strings.HasPrefix(l, "x-cpa-") || strings.Contains(l, "bifrost") ||
+		strings.Contains(l, "cliproxyapi")
 }
 
 // cleanResponseHeaders removes engine headers, the Server header and the front door's CORS headers (they describe
@@ -211,11 +263,14 @@ func orNull(r json.RawMessage) json.RawMessage {
 	return r
 }
 
-// rewriteSSELine returns line (with its line ending) unchanged, unless it is a data line carrying an error: the
-// front door's native envelope becomes the route's error shape s, and any other error event (a top-level "error" key or
-// "type":"error") is scrubbed. Content events are never touched.
+// rewriteSSELine returns line (with its line ending) unchanged, unless it is a data line carrying an error or the
+// front door's "extra_fields": the front door's native error envelope becomes the route's error shape s, any other
+// error event (a top-level "error" key or "type":"error") is scrubbed, and a top-level "extra_fields" is removed.
+// Content is never touched.
 func rewriteSSELine(line []byte, s shape) []byte {
-	if !mayBeSSEError(line) {
+	isErr := mayBeSSEError(line)
+	extra := bytes.HasPrefix(line, []byte("data:")) && bytes.Contains(line, []byte(extraFieldsProbe))
+	if !isErr && !extra {
 		return line
 	}
 	payload := line[len("data:"):]
@@ -226,12 +281,22 @@ func rewriteSSELine(line []byte, s shape) []byte {
 	body := bytes.TrimRight(payload, "\r\n")
 	ending := payload[len(body):]
 
-	var out []byte
-	if mapped, ok := mapNativeError(body, s); ok {
-		out = mapped
-	} else if isErrorEvent(body) {
-		out = scrub(body)
-	} else {
+	var (
+		out    []byte
+		mapped bool
+	)
+	if isErr {
+		out, mapped = mapNativeError(body, s)
+	}
+	switch {
+	case mapped:
+	case isErr && isErrorEvent(body):
+		out = stripExtraFields(scrub(body))
+	case extra:
+		if out = stripExtraFields(body); len(out) == len(body) {
+			return line
+		}
+	default:
 		return line
 	}
 	res := make([]byte, 0, len(prefix)+len(out)+len(ending))
@@ -282,9 +347,11 @@ type sseScrubber struct {
 }
 
 func newSSEScrubber(src io.ReadCloser, s shape) *sseScrubber {
-	return &sseScrubber{src: src, shape: s, br: bufio.NewReaderSize(src, 64<<10)}
+	return &sseScrubber{src: src, shape: s, br: bufio.NewReaderSize(src, 8<<10)}
 }
 
+// Read hands over every complete line already buffered in one call, so an event costs one write to the client,
+// not one per line; it waits for the upstream only when nothing is ready.
 func (s *sseScrubber) Read(p []byte) (int, error) {
 	for len(s.pending) == 0 {
 		if s.err != nil {
@@ -294,7 +361,22 @@ func (s *sseScrubber) Read(p []byte) (int, error) {
 	}
 	n := copy(p, s.pending)
 	s.pending = s.pending[n:]
+	for n < len(p) && len(s.pending) == 0 && s.err == nil && s.lineBuffered() {
+		s.fill()
+		m := copy(p[n:], s.pending)
+		s.pending = s.pending[m:]
+		n += m
+	}
 	return n, nil
+}
+
+// lineBuffered reports whether fill would return a whole line without waiting for the upstream.
+func (s *sseScrubber) lineBuffered() bool {
+	if s.passthrough || s.discard || len(s.line) > 0 {
+		return false
+	}
+	buffered, _ := s.br.Peek(s.br.Buffered())
+	return bytes.IndexByte(buffered, '\n') >= 0
 }
 
 // fill reads the next piece of the stream into pending (possibly nothing, while a long line is assembled).
@@ -303,6 +385,12 @@ func (s *sseScrubber) fill() {
 	full := errors.Is(err, bufio.ErrBufferFull)
 	if err != nil && !full {
 		s.err = err
+	}
+	if !full && !s.passthrough && !s.discard && len(s.line) == 0 {
+		// A whole line in one piece: forward it without a copy. chunk stays valid until the next read, and the next
+		// read happens only once pending is drained.
+		s.pending = rewriteSSELine(chunk, s.shape)
+		return
 	}
 	s.line = append(s.line, chunk...) // chunk is only valid until the next read
 	switch {
@@ -335,7 +423,7 @@ func (s *sseScrubber) fill() {
 	case full:
 		// keep assembling the line
 	default:
-		s.pending, s.line = rewriteSSELine(s.line, s.shape), nil
+		s.pending, s.line = rewriteSSELine(s.line, s.shape), s.line[:0]
 	}
 }
 
@@ -345,3 +433,83 @@ func (s *sseScrubber) sseError() []byte {
 }
 
 func (s *sseScrubber) Close() error { return s.src.Close() }
+
+// extraFieldsKey is the member the front door adds to every response object; it names internal providers and keys.
+const extraFieldsKey = `"extra_fields"`
+
+// extraFieldsProbe finds extraFieldsKey faster than the key itself: 'x' is rare in JSON, '"' is everywhere.
+const extraFieldsProbe = `xtra_fields"`
+
+// stripExtraFields removes the top-level "extra_fields" member, with one comma, from the JSON object in b. It returns
+// b itself, without allocating, when there is none or b is not an object.
+func stripExtraFields(b []byte) []byte {
+	if !bytes.Contains(b, []byte(extraFieldsProbe)) {
+		return b
+	}
+	i := skipWS(b, 0)
+	if i >= len(b) || b[i] != '{' {
+		return b
+	}
+	i = skipWS(b, i+1)
+	prevEnd := -1 // just past the previous member's value
+	for i < len(b) && b[i] == '"' {
+		kEnd := skipString(b, i)
+		if kEnd < 0 {
+			return b
+		}
+		j := skipWS(b, kEnd)
+		if j >= len(b) || b[j] != ':' {
+			return b
+		}
+		vEnd := skipValue(b, skipWS(b, j+1))
+		if vEnd < 0 {
+			return b
+		}
+		next := skipWS(b, vEnd)
+		if string(b[i:kEnd]) == extraFieldsKey {
+			from, to := i, vEnd // the only member
+			switch {
+			case next < len(b) && b[next] == ',':
+				to = skipWS(b, next+1) // the member and the comma after it
+			case prevEnd >= 0:
+				from = prevEnd // the last member and the comma before it
+			}
+			out := make([]byte, 0, len(b)-(to-from))
+			out = append(out, b[:from]...)
+			return append(out, b[to:]...)
+		}
+		if next >= len(b) || b[next] != ',' {
+			return b
+		}
+		prevEnd, i = vEnd, skipWS(b, next+1)
+	}
+	return b
+}
+
+// stripJSONBody removes "extra_fields" from a successful JSON answer. A body over MaxBodyBytes passes untouched.
+// shortcut: such a body keeps its extra_fields; stream the strip if one ever shows up.
+func stripJSONBody(resp *http.Response) error {
+	data, err := io.ReadAll(io.LimitReader(resp.Body, MaxBodyBytes+1))
+	if err != nil {
+		_ = resp.Body.Close()
+		return fmt.Errorf("proxy: read upstream body: %w", err)
+	}
+	if len(data) > MaxBodyBytes {
+		resp.Body = struct {
+			io.Reader
+			io.Closer
+		}{io.MultiReader(bytes.NewReader(data), resp.Body), resp.Body}
+		return nil
+	}
+	_ = resp.Body.Close()
+	out := stripExtraFields(data)
+	resp.Body = io.NopCloser(bytes.NewReader(out))
+	resp.Header.Set("Content-Length", strconv.Itoa(len(out)))
+	resp.ContentLength = int64(len(out))
+	return nil
+}
+
+func isJSON(h http.Header) bool {
+	mt, _, _ := mime.ParseMediaType(h.Get("Content-Type"))
+	return mt == "application/json"
+}
