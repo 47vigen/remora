@@ -26,6 +26,10 @@ func createBody(t *testing.T, p bifrost.Provider) []byte {
 		body []byte
 	)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/session/login" {
+			http.SetCookie(w, &http.Cookie{Name: "token", Value: "session-1", HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+			return
+		}
 		if r.Method != http.MethodPost || r.URL.Path != "/api/providers" {
 			http.Error(w, "unexpected "+r.Method+" "+r.URL.Path, http.StatusNotFound)
 			return

@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 )
 
 // ErrNotFound is matched by errors.Is when the engine answers 404.
@@ -37,12 +38,16 @@ func (e *APIError) Is(target error) bool {
 	return target == ErrNotFound && e.Status == http.StatusNotFound
 }
 
-// Client calls the front door's management API.
+// Client calls the front door's management API. It logs in once and sends the session token as a Bearer: the engine
+// checks a Basic credential with bcrypt on every call, which costs tens of milliseconds of CPU each time.
 type Client struct {
 	base     string
 	user     string
 	password string
 	hc       *http.Client
+
+	mu    sync.Mutex
+	token string
 }
 
 // New returns a client for the engine at baseURL (for example "http://127.0.0.1:18080"). A nil hc uses a fresh
@@ -80,26 +85,28 @@ func requireID(what, id string) error {
 // do sends one management call: in (when not nil) as the JSON body, out (when not nil) decoded from a 2xx answer.
 // path must already be escaped.
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
-	var body io.Reader
+	var data []byte
 	if in != nil {
-		data, err := json.Marshal(in)
-		if err != nil {
+		var err error
+		if data, err = json.Marshal(in); err != nil {
 			return fmt.Errorf("bifrost: encode %s %s: %w", method, path, err)
 		}
-		body = bytes.NewReader(data)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.base+path, body)
+	token, err := c.session(ctx, "")
 	if err != nil {
-		return fmt.Errorf("bifrost: %s %s: %w", method, path, err)
+		return err
 	}
-	req.SetBasicAuth(c.user, c.password)
-	req.Header.Set("Accept", "application/json")
-	if in != nil {
-		req.Header.Set("Content-Type", "application/json")
+	resp, err := c.send(ctx, method, path, data, token)
+	if err == nil && resp.StatusCode == http.StatusUnauthorized {
+		// The session expired or the engine lost it: log in again once.
+		_ = resp.Body.Close()
+		if token, err = c.session(ctx, token); err != nil {
+			return err
+		}
+		resp, err = c.send(ctx, method, path, data, token)
 	}
-	resp, err := c.hc.Do(req)
 	if err != nil {
-		return fmt.Errorf("bifrost: %s %s: %w", method, path, err)
+		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -115,6 +122,63 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 		return fmt.Errorf("bifrost: decode %s %s: %w", method, path, err)
 	}
 	return nil
+}
+
+func (c *Client) send(ctx context.Context, method, path string, data []byte, token string) (*http.Response, error) {
+	var body io.Reader
+	if data != nil {
+		body = bytes.NewReader(data)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.base+path, body)
+	if err != nil {
+		return nil, fmt.Errorf("bifrost: %s %s: %w", method, path, err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/json")
+	if data != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("bifrost: %s %s: %w", method, path, err)
+	}
+	return resp, nil
+}
+
+// session returns the current session token, logging in when there is none or when the current one is stale (the
+// token a call was just refused with). Concurrent callers share one login.
+func (c *Client) session(ctx context.Context, stale string) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.token != "" && c.token != stale {
+		return c.token, nil
+	}
+	data, err := json.Marshal(map[string]string{"username": c.user, "password": c.password})
+	if err != nil {
+		return "", fmt.Errorf("bifrost: encode login: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/api/session/login", bytes.NewReader(data))
+	if err != nil {
+		return "", fmt.Errorf("bifrost: login: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("bifrost: login: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		// Not an APIError: a 404 here must not read as ErrNotFound for the object the caller asked about.
+		return "", fmt.Errorf("bifrost: login: status %d: %s", resp.StatusCode, errorMessage(resp.StatusCode, raw))
+	}
+	for _, ck := range resp.Cookies() {
+		if ck.Name == "token" && ck.Value != "" {
+			c.token = ck.Value
+			return c.token, nil
+		}
+	}
+	return "", errors.New("bifrost: login answered without a session token")
 }
 
 // errorMessage picks the message out of an engine error answer. The engine's management handlers answer
