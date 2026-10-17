@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.3](https://github.com/47vigen/remora/compare/v0.5.2...v0.5.3) (2026-10-17)
+
+
+### Performance
+
+* **engine:** log in to the front door once instead of Basic auth per call ([#67](https://github.com/47vigen/remora/issues/67)) ([b69f191](https://github.com/47vigen/remora/commit/b69f1913977c541c7c3c51bd6889fec33a52b8f2))
+
 ## [0.5.2](https://github.com/47vigen/remora/compare/v0.5.1...v0.5.2) (2026-10-17)
 
 
