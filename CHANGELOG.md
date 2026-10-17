@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/47vigen/remora/compare/v0.5.1...v0.5.2) (2026-10-17)
+
+
+### Bug Fixes
+
+* **serve:** exit within Docker's stop grace period ([#65](https://github.com/47vigen/remora/issues/65)) ([14b0503](https://github.com/47vigen/remora/commit/14b05031fdc756f1713d60bd55b046b289f1962f))
+
 ## [0.5.1](https://github.com/47vigen/remora/compare/v0.5.0...v0.5.1) (2026-10-17)
 
 
