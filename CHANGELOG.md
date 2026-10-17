@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/47vigen/remora/compare/v0.4.2...v0.5.0) (2026-10-17)
+
+
+### Features
+
+* **quota:** tell a provider-suspended account from one that must sign in ([#62](https://github.com/47vigen/remora/issues/62)) ([c414642](https://github.com/47vigen/remora/commit/c4146426d4c504c9026ce4849ff8112885f17b87))
+
 ## [0.4.2](https://github.com/47vigen/remora/compare/v0.4.1...v0.4.2) (2026-10-16)
 
 
