@@ -46,7 +46,7 @@ func runHelper(mode string) int {
 	signal.Notify(terms, syscall.SIGTERM)
 
 	status := http.StatusOK
-	if mode == "never-healthy" {
+	if strings.HasPrefix(mode, "never-healthy") {
 		status = http.StatusInternalServerError
 	}
 	mux := http.NewServeMux()
@@ -85,7 +85,7 @@ func runHelper(mode string) int {
 			if err := appendStop(dir, name); err != nil {
 				fmt.Fprintln(os.Stderr, "helper stops:", err)
 			}
-			if mode != "ignore-term" {
+			if !strings.HasSuffix(mode, "ignore-term") {
 				return 0
 			}
 		}

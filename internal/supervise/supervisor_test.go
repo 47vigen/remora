@@ -160,6 +160,30 @@ func TestStartCanceledKillsChildren(t *testing.T) {
 	assertGone(t, pid)
 }
 
+func TestStopBoundsCanceledStartCleanup(t *testing.T) {
+	e, versions := helperEngine(t, "bifrost", "never-healthy-ignore-term")
+	s := New(testLogger(t), versions, Options{HealthInterval: 20 * time.Millisecond, StopTimeout: time.Minute})
+	stopAtCleanup(t, s)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	pid, errc := startAsync(ctx, t, s, e)
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+
+	sctx, scancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer scancel()
+	begin := time.Now()
+	_ = s.Stop(sctx)
+	if d := time.Since(begin); d > 3*time.Second {
+		t.Fatalf("Stop took %v, want it bounded by its ctx", d)
+	}
+	if err := <-errc; !errors.Is(err, context.Canceled) {
+		t.Fatalf("Start = %v, want context.Canceled", err)
+	}
+	assertGone(t, pid)
+}
+
 func TestRestartsCrashedEngine(t *testing.T) {
 	e, versions := helperEngine(t, "cliproxyapi", "crash-after")
 	s := New(testLogger(t), versions, Options{

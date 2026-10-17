@@ -36,8 +36,11 @@ import (
 const (
 	readHeaderTimeout = 10 * time.Second
 	idleTimeout       = 120 * time.Second // closes a client's idle keep-alive connection
-	shutdownTimeout   = 15 * time.Second
-	engineStopTimeout = 45 * time.Second // covers both engines' 15s SIGTERM grace
+	// stopTimeout bounds the whole shutdown after the signal, under Docker's 10s grace (deploy/compose.yaml); the
+	// engines are killed when it ends.
+	stopTimeout = 8 * time.Second
+	// drainTimeout is how long in-flight requests get to finish before their connections are closed.
+	drainTimeout = 5 * time.Second
 	// sweepMargin keeps the speech sweeper off a job a live request still waits on.
 	sweepMargin = 10 * time.Minute
 )
@@ -70,6 +73,11 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	if n := selfMemoryLimit(cfg.MemoryLimit, os.Getenv); n > 0 {
 		debug.SetMemoryLimit(n)
 	}
+	// stopCtx ends stopTimeout after ctx does, and bounds every step of the shutdown.
+	stopCtx, stopCancel := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopCancel()
+	context.AfterFunc(ctx, func() { time.AfterFunc(stopTimeout, stopCancel) })
+
 	if err := prepareDataDir(cfg.DataDir); err != nil {
 		return fmt.Errorf("prepare data dir: %w", err)
 	}
@@ -128,14 +136,11 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	if err != nil {
 		return err
 	}
-	defer stopSpeech()
+	defer stopSpeech(stopCtx)
 
 	sup := supervise.New(logger, versions, supervise.Options{})
 	defer func() {
-		// ctx is already done here; the engines get their own deadline.
-		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), engineStopTimeout)
-		defer cancel()
-		if serr := sup.Stop(sctx); serr != nil {
+		if serr := sup.Stop(stopCtx); serr != nil {
 			err = errors.Join(err, fmt.Errorf("stop engines: %w", serr))
 		}
 	}()
@@ -250,10 +255,11 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	case <-ctx.Done():
 	}
 	logger.Info("shutting down")
-	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
+	dctx, cancel := context.WithTimeout(stopCtx, drainTimeout)
 	defer cancel()
-	if err := srv.Shutdown(sctx); err != nil {
-		return fmt.Errorf("shut down http: %w", err)
+	if err := srv.Shutdown(dctx); err != nil {
+		logger.Warn("requests still in flight after the drain; closing them", "err", err)
+		_ = srv.Close()
 	}
 	return nil
 }
@@ -279,9 +285,9 @@ func newReconciler(cfg config.Config, st *store.Store, engine reconcile.Engine, 
 }
 
 // startSpeech serves the speech-to-text adapter on its loopback address and runs the sweeper of leftover upstream
-// files and transcriptions. The returned stop shuts the listener down (waiting up to shutdownTimeout for running
-// jobs, then closing it) and waits for the sweeper to end.
-func startSpeech(ctx context.Context, cfg config.Config, st *store.Store, logger *slog.Logger) (stop func(), err error) {
+// files and transcriptions. The returned stop shuts the listener down (waiting up to drainTimeout, or until its ctx
+// ends, for running jobs, then closing it) and waits for the sweeper to end.
+func startSpeech(ctx context.Context, cfg config.Config, st *store.Store, logger *slog.Logger) (stop func(context.Context), err error) {
 	log := logger.With("component", "speech")
 	srv := newServer(ctx, cfg.SonioxAddr, soniox.New(soniox.Config{
 		BaseURL:      cfg.SonioxBaseURL,
@@ -316,10 +322,10 @@ func startSpeech(ctx context.Context, cfg config.Config, st *store.Store, logger
 		sweeper.Run(sctx, cfg.SonioxSweepInterval)
 	}()
 
-	return func() {
+	return func(stopCtx context.Context) {
 		scancel()
 		<-swept
-		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
+		dctx, cancel := context.WithTimeout(stopCtx, drainTimeout)
 		defer cancel()
 		if err := srv.Shutdown(dctx); err != nil {
 			log.Warn("speech adapter did not drain; closing it", "err", err)

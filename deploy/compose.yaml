@@ -6,5 +6,7 @@ services:
       REMORA_ADMIN_PASSWORD: ${REMORA_ADMIN_PASSWORD:?set REMORA_ADMIN_PASSWORD}
     volumes: ["remora-data:/data"]
     restart: unless-stopped
+    # remora drains and exits within 8s of SIGTERM; this keeps Docker from killing it first.
+    stop_grace_period: 10s
 volumes:
   remora-data: {}
