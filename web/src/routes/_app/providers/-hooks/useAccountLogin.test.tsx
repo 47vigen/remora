@@ -28,7 +28,8 @@ function setup() {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={qc}>{children}</QueryClientProvider>
   );
-  return renderHook(() => useAccountLogin("codex"), { wrapper });
+  const invalidate = vi.spyOn(qc, "invalidateQueries");
+  return { ...renderHook(() => useAccountLogin("codex"), { wrapper }), invalidate };
 }
 
 afterEach(() => {
@@ -107,4 +108,17 @@ test("polling gives up after the deadline", async () => {
   await waitFor(() =>
     expect(result.current.login).toEqual({ phase: "failed", message: "Sign-in timed out. Start again." }),
   );
+});
+
+test("a failed sign-in refreshes the account lists, since a refused account may be stored", async () => {
+  fakeServer({
+    "POST /api/accounts/logins": () => ({ state: "s1", url: "https://auth.example/x" }),
+    "GET /api/accounts/logins/s1": () => ({ status: "error", message: "refused" }),
+  });
+  const { result, invalidate } = setup();
+  act(() => result.current.start());
+  await waitFor(() => expect(result.current.login).toMatchObject({ phase: "redirect" }));
+  act(() => result.current.submitRedirect("http://localhost:1455/cb?code=abc&state=s1"));
+  await waitFor(() => expect(result.current.login).toEqual({ phase: "failed", message: "refused" }));
+  expect(invalidate).toHaveBeenCalled();
 });

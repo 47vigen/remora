@@ -196,6 +196,12 @@ func (s *Service) adopt(ctx context.Context, state string) (LoginStatus, error) 
 			return LoginStatus{}, fmt.Errorf("accounts: adopt %s login: %w", prov.Name, err)
 		}
 	}
+	if NoProject(prov.Name, *pick) {
+		// The account stays, marked refused, so it can be seen and deleted; the sign-in reports the failure.
+		s.log.Warn("accounts: login finished without a project", "provider", prov.Name, "id", byCred[pick.Name].ID)
+		delete(s.pending, state)
+		return LoginStatus{Status: "error", Message: "signed in, but " + MsgNoProject}, nil
+	}
 	acct := accountFrom(byCred[pick.Name], pick, nil)
 	p.done = &acct
 	return LoginStatus{Status: "ok", Account: p.done}, nil

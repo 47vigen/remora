@@ -86,6 +86,7 @@ func TestTailDeliversOnceInOrder(t *testing.T) {
 		{row("b", 2, "success"), row("c", 3, "error")},
 	}}
 	tl := NewTail(src, time.Second, nil, nil)
+	tl.now = func() time.Time { return t0 }
 	ch, cancel := tl.Subscribe(16, 0)
 	defer cancel()
 	ctx := context.Background()
@@ -109,6 +110,7 @@ func TestTailCatchesLateRow(t *testing.T) {
 		{row("a", 1, "error"), row("b", 300, "error")},
 	}}
 	tl := NewTail(src, time.Second, nil, nil)
+	tl.now = func() time.Time { return t0 }
 	ch, cancel := tl.Subscribe(16, 0)
 	defer cancel()
 	ctx := context.Background()
@@ -129,6 +131,7 @@ func TestTailSkipsProcessing(t *testing.T) {
 		{row("a", 1, "error")},
 	}}
 	tl := NewTail(src, time.Second, nil, nil)
+	tl.now = func() time.Time { return t0 }
 	ch, cancel := tl.Subscribe(16, 0)
 	defer cancel()
 	ctx := context.Background()
@@ -150,6 +153,7 @@ func TestTailPagesBeyondLimit(t *testing.T) {
 	}
 	src := &fakeLogs{polls: [][]Log{rows}}
 	tl := NewTail(src, time.Second, nil, nil)
+	tl.now = func() time.Time { return t0 }
 	ch, cancel := tl.Subscribe(4000, 0)
 	defer cancel()
 	ctx := context.Background()
@@ -179,6 +183,7 @@ func TestTailIdleWithoutSubscribers(t *testing.T) {
 	src := &fakeLogs{polls: [][]Log{{row("a", 1, "error")}}}
 	const interval = 5 * time.Millisecond
 	tl := NewTail(src, interval, nil, nil)
+	tl.now = func() time.Time { return t0 }
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { tl.Run(ctx); close(done) }()
@@ -211,6 +216,7 @@ func TestTailIdleWithoutSubscribers(t *testing.T) {
 func TestTailKeepsSlowSubscriber(t *testing.T) {
 	src := &fakeLogs{polls: [][]Log{{row("a", 1, "error"), row("b", 2, "error"), row("c", 3, "error")}}}
 	tl := NewTail(src, time.Second, nil, nil)
+	tl.now = func() time.Time { return t0 }
 	slow, cancelSlow := tl.Subscribe(1, 2)
 	defer cancelSlow()
 	fast, cancelFast := tl.Subscribe(16, 0)
@@ -234,6 +240,7 @@ func TestTailKeepsSlowSubscriber(t *testing.T) {
 func TestTailDropsSubscriberPastBacklog(t *testing.T) {
 	src := &fakeLogs{polls: [][]Log{{row("a", 1, "error"), row("b", 2, "error"), row("c", 3, "error")}}}
 	tl := NewTail(src, time.Second, nil, nil)
+	tl.now = func() time.Time { return t0 }
 	slow, cancelSlow := tl.Subscribe(1, 1)
 	tl.poll(context.Background())
 
@@ -255,6 +262,7 @@ func TestTailCatchesLongRequest(t *testing.T) {
 		byID: map[string]Log{"a": row("a", 1, "processing")},
 	}
 	tl := NewTail(src, time.Second, nil, nil)
+	tl.now = func() time.Time { return t0 }
 	ch, cancel := tl.Subscribe(16, 0)
 	defer cancel()
 	ctx := context.Background()
@@ -279,6 +287,7 @@ func TestTailCatchesLongRequest(t *testing.T) {
 func TestTailStatusFilter(t *testing.T) {
 	src := &fakeLogs{polls: [][]Log{{row("a", 1, "error")}}}
 	tl := NewTail(src, time.Second, []string{"error"}, nil)
+	tl.now = func() time.Time { return t0 }
 	_, cancel := tl.Subscribe(16, 0)
 	defer cancel()
 	tl.poll(context.Background())
@@ -289,5 +298,22 @@ func TestTailStatusFilter(t *testing.T) {
 		if !eq(f.Status, []string{"error"}) {
 			t.Fatalf("filter status = %v, want [error]", f.Status)
 		}
+	}
+}
+
+func TestTailAdvancesWithoutRows(t *testing.T) {
+	src := &fakeLogs{polls: [][]Log{{row("a", 1, "error")}, {}}}
+	tl := NewTail(src, time.Second, []string{"error"}, nil)
+	clock := t0.Add(time.Second)
+	tl.now = func() time.Time { return clock }
+	_, cancel := tl.Subscribe(16, 0)
+	defer cancel()
+	ctx := context.Background()
+	tl.poll(ctx)
+	clock = t0.Add(24 * time.Hour)
+	tl.poll(ctx)
+	tl.poll(ctx)
+	if want := clock.Add(-defaultLookback); !src.calls[2].Start.Equal(want) {
+		t.Fatalf("third poll start = %v, want %v: an idle feed must not keep reading from its last row", src.calls[2].Start, want)
 	}
 }

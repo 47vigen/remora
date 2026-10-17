@@ -39,7 +39,7 @@ type Tail struct {
 	nextID int
 
 	// Poll state, touched only by the goroutine that polls.
-	cursor  time.Time            // newest timestamp delivered; zero until a row arrives, when the clock stands in
+	cursor  time.Time            // when the last fully read window began, or the newest row it delivered if later
 	seen    map[string]time.Time // delivered row id → its timestamp
 	running map[string]time.Time // id of a row seen in processing → its timestamp, followed until it completes
 }
@@ -128,15 +128,21 @@ func (t *Tail) subscribers() int {
 // poll hands subscribers their backlog, then reads the whole window from cursor − lookback, page by page, and delivers
 // the rows not seen yet. The cursor advances only once every page of the window has been read, so a burst larger than
 // one page is never skipped; a failed page leaves the cursor where it was and the next poll reads the window again.
-// Rows seen in processing that fall behind the window are fetched one by one until they complete.
+// It advances to the poll's own start even when no row arrived: with a status filter the matching rows can be days
+// apart, and a cursor held at the last of them would make every poll read every row since. Rows seen in processing
+// that fall behind the window are fetched one by one until they complete.
 func (t *Tail) poll(ctx context.Context) {
 	t.deliver()
+	began := t.now()
 	from := t.cursor
 	if from.IsZero() {
-		from = t.now()
+		from = began
 	}
 	start := from.Add(-t.lookback)
-	newest := t.cursor
+	newest := began
+	if t.cursor.After(newest) {
+		newest = t.cursor
+	}
 	for offset := 0; ; offset += MaxLogLimit {
 		page, err := t.src.SearchLogs(ctx, LogFilter{
 			Start: &start, Status: t.status, Limit: MaxLogLimit, Offset: offset, SortBy: "timestamp", Order: "asc",
@@ -167,9 +173,6 @@ func (t *Tail) poll(ctx context.Context) {
 		}
 	}
 	t.recheck(ctx, start)
-	if newest.IsZero() {
-		return
-	}
 	t.cursor = newest
 	floor := newest.Add(-t.lookback)
 	for id, ts := range t.seen {

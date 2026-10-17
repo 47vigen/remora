@@ -2,7 +2,7 @@ import type { Account, RoutingStrategy } from "../../../../client/types.gen";
 import type { Health } from "../../../../components/status-chip/StatusChip";
 
 const ACTIVE = new Set(["active", "ok", "ready"]);
-const FAILED = new Set(["error", "missing", "unavailable", "invalid", "expired"]);
+const FAILED = new Set(["error", "missing", "unavailable", "invalid", "expired", "refused"]);
 
 /** Whether the account's cooldown ends in the future. */
 export function isCooling(a: Account, now = Date.now()): boolean {
