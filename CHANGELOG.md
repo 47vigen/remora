@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/47vigen/remora/compare/v0.5.0...v0.5.1) (2026-10-17)
+
+
+### Bug Fixes
+
+* **accounts:** fail refused logins, mark no-project accounts out of the pool ([#61](https://github.com/47vigen/remora/issues/61)) ([2f00b56](https://github.com/47vigen/remora/commit/2f00b56048cf48703076313076296a7a2aa7af7b))
+
 ## [0.5.0](https://github.com/47vigen/remora/compare/v0.4.2...v0.5.0) (2026-10-17)
 
 
