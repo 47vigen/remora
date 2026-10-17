@@ -50,7 +50,8 @@ export function useAccountLogin(providerId: string) {
     queryFn: async (ctx) => {
       if (Date.now() - startedAt.current > LOGIN_DEADLINE_MS) throw new TimedOut();
       const r = await base.queryFn!(ctx);
-      if (r.status === "ok") void invalidateOps(qc, "listAccounts", "listProviders");
+      // A refused sign-in can still have stored the account, so a failure refreshes the lists too.
+      if (r.status !== "wait") void invalidateOps(qc, "listAccounts", "listProviders");
       return r;
     },
     enabled: polling,

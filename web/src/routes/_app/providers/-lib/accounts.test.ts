@@ -20,6 +20,7 @@ test("accountHealth", () => {
   expect(accountHealth(a({ cooldown_until: "2026-10-14T09:00:00Z" }), now)).toBe("active");
   expect(accountHealth(a({ status: "error" }), now)).toBe("error");
   expect(accountHealth(a({ status: "missing" }), now)).toBe("error");
+  expect(accountHealth(a({ status: "refused" }), now)).toBe("error");
   expect(accountHealth(a({ status: "refreshing" }), now)).toBe("unknown");
 });
 

@@ -257,6 +257,27 @@ func TestLoginStatusUnknownState(t *testing.T) {
 	}
 }
 
+func TestLoginStatusWithoutProject(t *testing.T) {
+	e := newEnv(t)
+	l := e.start(t, "antigravity")
+	e.fake.FinishLogin(l.State, cliproxyapi.Credential{Name: "antigravity-a@x.json", Provider: "antigravity", Email: "a@x", Status: "active"})
+
+	st, err := e.svc.LoginStatus(context.Background(), l.State)
+	if err != nil || st.Status != "error" || !strings.Contains(st.Message, MsgNoProject) {
+		t.Fatalf("LoginStatus = %+v, %v; want an error naming the missing project", st, err)
+	}
+	if len(e.svc.PendingProviders()) != 0 {
+		t.Errorf("PendingProviders = %v, want none", e.svc.PendingProviders())
+	}
+	accts, err := e.svc.List(context.Background(), "antigravity")
+	if err != nil || len(accts) != 1 {
+		t.Fatalf("List = %+v, %v; want the one kept account", accts, err)
+	}
+	if a := accts[0]; a.Status != statusRefused || a.StatusMessage != MsgNoProject {
+		t.Errorf("account status %q %q, want refused", a.Status, a.StatusMessage)
+	}
+}
+
 func TestLoginStatusFailed(t *testing.T) {
 	e := newEnv(t)
 	l := e.start(t, "codex")

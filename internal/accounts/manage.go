@@ -25,7 +25,20 @@ var (
 )
 
 // statusMissing is an account's Status when the engine has no credential for it.
-const statusMissing = "missing"
+const (
+	statusMissing = "missing"
+	statusRefused = "refused"
+)
+
+// MsgNoProject is why an account whose provider assigned it no project cannot serve.
+const MsgNoProject = "the provider assigned this account no project, so it serves no model; signing in again will not help until the provider restores the account"
+
+// NoProject reports whether c belongs to a provider that serves only through a project and the provider assigned it
+// none. The sign-in itself succeeds: the provider refuses the account when the engine asks for its project, for
+// example because it suspended the account.
+func NoProject(provider string, c cliproxyapi.Credential) bool {
+	return provider == "antigravity" && c.ProjectID == ""
+}
 
 // Account is a subscription account as users see it: the store row merged with the engine's view of its credential.
 type Account struct {
@@ -48,6 +61,9 @@ func accountFrom(row store.Account, c *cliproxyapi.Credential, models []string) 
 		return a
 	}
 	a.Status, a.StatusMessage = c.Status, scrub(c.StatusMessage)
+	if NoProject(row.Provider, *c) {
+		a.Status, a.StatusMessage = statusRefused, MsgNoProject
+	}
 	a.Unavailable, a.NextRetryAfter = c.Unavailable, c.NextRetryAfter
 	a.Cooldowns = slices.Clone(c.Cooldowns)
 	a.Quota = maps.Clone(c.Quota.Signals)

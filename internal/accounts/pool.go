@@ -12,8 +12,8 @@ import (
 // cooldown for quota or a transient error ends by itself and is not out.
 var outReasons = []string{"invalid_grant", "unauthorized", "payment_required"}
 
-// OutAccount is an enabled account the engine cannot use. Reason is "missing" (no credential), "signed out", or the
-// engine's scrubbed status message.
+// OutAccount is an enabled account the engine cannot use. Reason is "missing" (no credential), "signed out",
+// MsgNoProject, or the engine's scrubbed status message.
 type OutAccount struct {
 	ID            int64
 	Label, Reason string
@@ -28,7 +28,8 @@ type PoolStatus struct {
 
 // Pool reports, per subscription provider with at least one enabled account, which enabled accounts are out of the
 // pool: the credential is missing, or it is unavailable without a cooldown (a refresh that failed for good), or a
-// cooldown's reason says it was signed out or refused payment. One engine call, no model listing.
+// cooldown's reason says it was signed out or refused payment, or the provider assigned it no project. One engine
+// call, no model listing.
 func (s *Service) Pool(ctx context.Context) ([]PoolStatus, error) {
 	rows, err := s.store.Accounts(ctx)
 	if err != nil {
@@ -49,15 +50,15 @@ func (s *Service) Pool(ctx context.Context) ([]PoolStatus, error) {
 			i = len(out) - 1
 		}
 		out[i].Enabled++
-		if reason, isOut := outReason(creds, row.Credential); isOut {
+		if reason, isOut := outReason(creds, row.Provider, row.Credential); isOut {
 			out[i].Out = append(out[i].Out, OutAccount{ID: row.ID, Label: row.Label, Reason: reason})
 		}
 	}
 	return out, nil
 }
 
-// outReason says why the credential named name keeps its account out of the pool, if it does.
-func outReason(creds map[string]cliproxyapi.Credential, name string) (string, bool) {
+// outReason says why the credential named name keeps its account of provider out of the pool, if it does.
+func outReason(creds map[string]cliproxyapi.Credential, provider, name string) (string, bool) {
 	c, ok := creds[name]
 	switch {
 	case !ok:
@@ -67,6 +68,8 @@ func outReason(creds map[string]cliproxyapi.Credential, name string) (string, bo
 			return msg, true
 		}
 		return "signed out", true
+	case NoProject(provider, c) && !c.Disabled:
+		return MsgNoProject, true
 	}
 	for _, cd := range c.Cooldowns {
 		if slices.Contains(outReasons, cd.Reason) {
