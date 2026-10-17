@@ -141,7 +141,7 @@ func TestStartSpeech(t *testing.T) {
 	}
 
 	done := make(chan struct{})
-	go func() { stop(); close(done) }()
+	go func() { stop(t.Context()); close(done) }()
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
