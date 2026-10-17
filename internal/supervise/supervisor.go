@@ -80,6 +80,7 @@ type Supervisor struct {
 	client   *http.Client
 
 	quit chan struct{}  // closed by Stop
+	kill chan struct{}  // closed when the ctx of the first Stop ends
 	wg   sync.WaitGroup // in-flight Start calls and restart monitors
 
 	mu      sync.Mutex
@@ -110,6 +111,7 @@ func New(logger *slog.Logger, versions map[string]EngineVersion, opts Options) *
 		opts:     opts.withDefaults(),
 		client:   &http.Client{},
 		quit:     make(chan struct{}),
+		kill:     make(chan struct{}),
 	}
 }
 
@@ -132,7 +134,7 @@ func (s *Supervisor) Start(ctx context.Context, engines ...Engine) error {
 	s.mu.Unlock()
 	defer s.wg.Done()
 
-	ctx, cancel := s.withQuit(ctx)
+	ctx, cancel := s.withClose(ctx, s.quit)
 	defer cancel()
 
 	started := make([]*proc, 0, len(engines))
@@ -148,7 +150,10 @@ func (s *Supervisor) Start(ctx context.Context, engines ...Engine) error {
 			err = s.waitHealthy(ctx, p)
 		}
 		if err != nil {
-			s.abort(context.WithoutCancel(ctx), started)
+			// A concurrent Stop waits for this cleanup, so its deadline bounds it too.
+			actx, acancel := s.withClose(context.WithoutCancel(ctx), s.kill)
+			s.abort(actx, started)
+			acancel()
 			return err
 		}
 		s.mu.Lock()
@@ -158,7 +163,7 @@ func (s *Supervisor) Start(ctx context.Context, engines ...Engine) error {
 	}
 
 	for _, p := range started {
-		mctx, mcancel := s.withQuit(context.WithoutCancel(ctx))
+		mctx, mcancel := s.withClose(context.WithoutCancel(ctx), s.quit)
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
@@ -176,6 +181,7 @@ func (s *Supervisor) Stop(ctx context.Context) error {
 	if !s.stopped {
 		s.stopped = true
 		close(s.quit)
+		context.AfterFunc(ctx, func() { close(s.kill) })
 	}
 	s.mu.Unlock()
 	s.wg.Wait()
@@ -236,12 +242,12 @@ func (s *Supervisor) verify(e Engine) error {
 	return nil
 }
 
-// withQuit returns a context that is also canceled when Stop is called.
-func (s *Supervisor) withQuit(parent context.Context) (context.Context, context.CancelFunc) {
+// withClose returns a context that is also canceled when ch is closed.
+func (s *Supervisor) withClose(parent context.Context, ch <-chan struct{}) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(parent)
 	go func() {
 		select {
-		case <-s.quit:
+		case <-ch:
 			cancel()
 		case <-ctx.Done():
 		}
