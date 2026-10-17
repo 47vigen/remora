@@ -196,6 +196,31 @@ func parseAntigravitySummary(body []byte) (store.AccountQuota, error) {
 	return finish(q), nil
 }
 
+// parseAntigravitySuspension reads a refusal that names a terms-of-service suspension, and the provider's message.
+func parseAntigravitySuspension(body []byte) (string, bool) {
+	var s struct {
+		Error struct {
+			Message string `json:"message"`
+			Details []struct {
+				Reason string `json:"reason"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &s) != nil {
+		return "", false
+	}
+	for _, d := range s.Error.Details {
+		if d.Reason == "TOS_VIOLATION" {
+			msg := strings.TrimSpace(s.Error.Message)
+			if len(msg) > 300 {
+				msg = msg[:300]
+			}
+			return msg, true
+		}
+	}
+	return "", false
+}
+
 // parseAntigravityPlan reads the plan name from a loadCodeAssist answer; "" when none.
 func parseAntigravityPlan(body []byte) string {
 	type tier struct {

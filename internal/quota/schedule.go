@@ -22,7 +22,7 @@ func nextPoll(a store.Account, c *cliproxyapi.Credential, q *store.AccountQuota,
 	switch {
 	case interval == 0, !a.Enabled, c == nil, c.Disabled, !Supported(a.Provider):
 		return time.Time{}, false
-	case q != nil && q.Error == MsgSignIn && !c.UpdatedAt.After(q.CheckedAt):
+	case q != nil && NeedsOwner(q.Error) && !c.UpdatedAt.After(q.CheckedAt):
 		return time.Time{}, false
 	}
 	var at time.Time

@@ -23,6 +23,7 @@ const antigravity: QuotaProvider = {
   exhausted: 1,
   cooling: 0,
   sign_in: 2,
+  suspended: 0,
   next_reset: "2026-10-16T14:00:00Z",
   accounts: [
     {
@@ -83,6 +84,25 @@ test("one column per window, never 0% for unknown, the error and its own refresh
   expect(onRefresh).toHaveBeenCalledWith({ account_id: "1" });
 });
 
+test("a suspended account says so instead of Active", () => {
+  const error = "the provider suspended this account: appeal to continue";
+  setup({
+    ...antigravity,
+    sign_in: 0,
+    suspended: 1,
+    accounts: [
+      {
+        account: account("2", "b@example.test"),
+        quota: { plan: "", windows: [], limit_reached: false, source: "poll", checked_at: now.toISOString(), error },
+      },
+    ],
+  });
+  expect(screen.getByText("1 suspended")).toBeInTheDocument();
+  expect(screen.getByText(error)).toHaveAttribute("title", error);
+  expect(screen.getByText("Suspended")).toBeInTheDocument();
+  expect(screen.queryByText("Active")).toBeNull();
+});
+
 test("an unsupported provider says so and shows no meter", () => {
   setup({
     provider: "kimi",
@@ -91,6 +111,7 @@ test("an unsupported provider says so and shows no meter", () => {
     exhausted: 0,
     cooling: 0,
     sign_in: 0,
+    suspended: 0,
     accounts: [{ account: account("3", "k@example.test", "kimi") }],
   });
   expect(screen.getByText("Quota is not reported for this provider.")).toBeInTheDocument();

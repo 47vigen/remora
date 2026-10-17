@@ -2,6 +2,11 @@ import type { QuotaAccount, QuotaProvider, QuotaWindow } from "../../../../clien
 
 export type Level = "ok" | "warn" | "critical" | "unknown";
 
+/** Whether a quota error says the provider suspended the account; signing in again does not help. */
+export function isSuspended(error: string | null | undefined): boolean {
+  return !!error?.startsWith("the provider suspended this account");
+}
+
 /** Above half left is ok, a fifth to a half is warn, below a fifth critical; unknown stays unknown. */
 export function level(remaining: number | null | undefined): Level {
   if (remaining == null) return "unknown";

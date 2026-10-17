@@ -172,6 +172,10 @@ export type QuotaProvider = {
      */
     sign_in: number;
     /**
+     * Enabled accounts the provider suspended; a new sign-in does not help. Each enabled account is counted once.
+     */
+    suspended: number;
+    /**
      * The earliest future reset of an exhausted window, else of any window.
      */
     next_reset?: string;

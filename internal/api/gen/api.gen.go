@@ -822,6 +822,9 @@ type QuotaProvider struct {
 
 	// Supported Whether remora can read this provider's quota.
 	Supported bool `json:"supported"`
+
+	// Suspended Enabled accounts the provider suspended; a new sign-in does not help. Each enabled account is counted once.
+	Suspended int `json:"suspended"`
 }
 
 // QuotaRefresh Exactly one of account_id and provider.

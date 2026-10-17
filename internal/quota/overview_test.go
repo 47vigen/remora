@@ -25,16 +25,18 @@ func TestOverviewCountsEachAccountOnce(t *testing.T) {
 	signIn := acct(5, "antigravity", true)
 	disabled := acct(6, "antigravity", false)
 	kimi := acct(7, "kimi", true)
+	suspended := acct(8, "antigravity", true)
 	pool := []accounts.PoolStatus{{Provider: "antigravity", Enabled: 5, Out: []accounts.OutAccount{{ID: 4}}}}
 	snaps := map[int64]store.AccountQuota{
 		1: {AccountID: 1}, 2: {AccountID: 2, LimitReached: true}, 5: {AccountID: 5, Error: MsgSignIn}, 7: {AccountID: 7},
+		8: {AccountID: 8, Error: MsgSuspended + ": appeal"},
 	}
-	got := Overview([]accounts.Account{kimi, healthy, exhaustedCooling, cooling, out, signIn, disabled}, pool, snaps, n)
+	got := Overview([]accounts.Account{kimi, healthy, exhaustedCooling, cooling, out, signIn, disabled, suspended}, pool, snaps, n)
 	if len(got) != 2 || got[0].Provider != "antigravity" || got[1].Provider != "kimi" {
 		t.Fatalf("providers = %+v", got)
 	}
 	ag := got[0]
-	if !ag.Supported || ag.Available != 1 || ag.Exhausted != 1 || ag.Cooling != 1 || ag.SignIn != 2 || len(ag.Accounts) != 6 {
+	if !ag.Supported || ag.Available != 1 || ag.Exhausted != 1 || ag.Cooling != 1 || ag.SignIn != 2 || ag.Suspended != 1 || len(ag.Accounts) != 7 {
 		t.Errorf("antigravity = %+v", ag)
 	}
 	if ag.Accounts[0].Quota == nil || ag.Accounts[2].Quota != nil {
