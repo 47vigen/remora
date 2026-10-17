@@ -45,10 +45,14 @@ var (
 	ErrUnsupported = errors.New("quota is not available for this provider")
 	errSignIn      = errors.New(MsgSignIn)
 	errUnreadable  = errors.New(MsgUnreadable)
+	errSuspended   = errors.New(MsgSuspended)
 )
 
 // upstreamError is a non-2xx provider answer.
-type upstreamError struct{ Status int }
+type upstreamError struct {
+	Status int
+	Body   string
+}
 
 func (e *upstreamError) Error() string { return "quota: provider answered " + strconv.Itoa(e.Status) }
 
@@ -85,7 +89,7 @@ func (f *fetcher) call(ctx context.Context, c cliproxyapi.Credential, method, ra
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return nil, &upstreamError{Status: resp.StatusCode}
+		return nil, &upstreamError{Status: resp.StatusCode, Body: resp.Body}
 	}
 	return []byte(resp.Body), nil
 }
@@ -130,11 +134,23 @@ func (f *fetcher) fetch(ctx context.Context, a store.Account, c cliproxyapi.Cred
 }
 
 func (f *fetcher) antigravity(ctx context.Context, a store.Account, c cliproxyapi.Credential, prev store.AccountQuota) (store.AccountQuota, error) {
-	if c.ProjectID == "" {
-		return store.AccountQuota{}, errSignIn
-	}
 	headers := func() map[string]string {
 		return map[string]string{"Content-Type": "application/json", "User-Agent": f.ver.userAgent(ctx)}
+	}
+	if c.ProjectID == "" {
+		// The engine finds no project when the provider refuses the account; ask once to tell which.
+		_, err := f.call(ctx, c, http.MethodPost, agProdBase+"/v1internal:loadCodeAssist",
+			`{"metadata":{"ideType":"ANTIGRAVITY"}}`, headers())
+		var ue *upstreamError
+		if errors.As(err, &ue) && ue.Status == http.StatusForbidden {
+			if msg, ok := parseAntigravitySuspension([]byte(ue.Body)); ok {
+				if msg == "" {
+					return store.AccountQuota{}, errSuspended
+				}
+				return store.AccountQuota{}, fmt.Errorf("%w: %s", errSuspended, msg)
+			}
+		}
+		return store.AccountQuota{}, errSignIn
 	}
 	data := `{"project":` + strconv.Quote(c.ProjectID) + `}`
 	body, err := f.call(ctx, c, http.MethodPost, agDailyBase+"/v1internal:retrieveUserQuotaSummary", data, headers())

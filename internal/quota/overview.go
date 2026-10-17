@@ -16,17 +16,19 @@ type AccountView struct {
 	Quota   *store.AccountQuota
 }
 
-// ProviderView is one provider's accounts. Each enabled account is counted once, in the first of SignIn,
+// ProviderView is one provider's accounts. Each enabled account is counted once, in the first of Suspended, SignIn,
 // Exhausted, Cooling and Available that matches.
 type ProviderView struct {
 	Provider                              string
 	Supported                             bool
 	Available, Exhausted, Cooling, SignIn int
+	Suspended                             int
 	NextReset                             *time.Time
 	Accounts                              []AccountView
 }
 
-// Overview groups accounts by provider, sorted, listing only providers with accounts. SignIn: out of the pool, or
+// Overview groups accounts by provider, sorted, listing only providers with accounts. Suspended: the provider
+// suspended the account. SignIn: out of the pool, or
 // the snapshot asks for a new sign-in. Exhausted: the limit is reached. Cooling: a retry time or cooldown after now.
 // NextReset: the earliest future reset among windows at 0, else among all windows.
 func Overview(accts []accounts.Account, pool []accounts.PoolStatus, snaps map[int64]store.AccountQuota, now time.Time) []ProviderView {
@@ -60,6 +62,8 @@ func Overview(accts []accounts.Account, pool []accounts.PoolStatus, snaps map[in
 			continue
 		}
 		switch q := av.Quota; {
+		case q != nil && Suspended(q.Error):
+			v.Suspended++
 		case out[a.ID] || (q != nil && q.Error == MsgSignIn):
 			v.SignIn++
 		case q != nil && q.LimitReached:

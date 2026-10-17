@@ -35,7 +35,7 @@ func (s *Server) GetQuota(ctx context.Context, _ gen.GetQuotaRequestObject) (gen
 	for _, v := range views {
 		p := gen.QuotaProvider{
 			Provider: v.Provider, Supported: v.Supported, Available: v.Available, Exhausted: v.Exhausted,
-			Cooling: v.Cooling, SignIn: v.SignIn, NextReset: v.NextReset, Accounts: make([]gen.QuotaAccount, 0, len(v.Accounts)),
+			Cooling: v.Cooling, SignIn: v.SignIn, Suspended: v.Suspended, NextReset: v.NextReset, Accounts: make([]gen.QuotaAccount, 0, len(v.Accounts)),
 		}
 		for _, a := range v.Accounts {
 			qa := gen.QuotaAccount{Account: toGenAccount(toAccount(a.Account))}

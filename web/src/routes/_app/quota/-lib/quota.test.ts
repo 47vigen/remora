@@ -27,6 +27,7 @@ const providers: QuotaProvider[] = [
     exhausted: 0,
     cooling: 0,
     sign_in: 0,
+    suspended: 0,
     accounts: [{ account: account("1", "a@example.test"), quota: snapshot("Pro", "2026-10-16T10:00:00Z") }],
   },
   {
@@ -36,6 +37,7 @@ const providers: QuotaProvider[] = [
     exhausted: 0,
     cooling: 0,
     sign_in: 0,
+    suspended: 0,
     accounts: [{ account: account("2", "b@example.test"), quota: snapshot("plus", "2026-10-16T12:00:00Z") }],
   },
 ];

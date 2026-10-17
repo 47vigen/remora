@@ -1364,7 +1364,7 @@ components:
           $ref: "#/components/schemas/QuotaSnapshot"
     QuotaProvider:
       type: object
-      required: [provider, supported, available, exhausted, cooling, sign_in, accounts]
+      required: [provider, supported, available, exhausted, cooling, sign_in, suspended, accounts]
       properties:
         provider:
           type: string
@@ -1380,6 +1380,9 @@ components:
         sign_in:
           type: integer
           description: Enabled accounts that need a new sign-in. Each enabled account is counted once.
+        suspended:
+          type: integer
+          description: Enabled accounts the provider suspended; a new sign-in does not help. Each enabled account is counted once.
         next_reset:
           type: string
           format: date-time

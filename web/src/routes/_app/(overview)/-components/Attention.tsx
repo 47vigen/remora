@@ -73,6 +73,14 @@ export function Attention({
         detail: q.next_reset ? `next reset ${formatRelative(q.next_reset, now)}` : undefined,
         href: `/quota?provider=${q.provider}`,
       });
+    if (q.suspended > 0)
+      items.push({
+        key: `suspended:${q.provider}`,
+        tone: "danger",
+        title: `${plural(q.suspended, `${label} account`)} suspended by the provider`,
+        detail: "signing in again does not help; appeal to the provider or replace the account",
+        href: `/quota?provider=${q.provider}`,
+      });
     if (q.sign_in > 0)
       items.push({
         key: `signin:${q.provider}`,

@@ -274,9 +274,15 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt route, sh sha
 }
 
 // dropReader serves b once and lets go of it at EOF or Close, so a long stream does not keep its request body alive.
-type dropReader struct{ b []byte }
+// The transport may Close it from another goroutine while a Read runs, hence the lock.
+type dropReader struct {
+	mu sync.Mutex
+	b  []byte
+}
 
 func (d *dropReader) Read(p []byte) (int, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if len(d.b) == 0 {
 		d.b = nil
 		return 0, io.EOF
@@ -289,6 +295,8 @@ func (d *dropReader) Read(p []byte) (int, error) {
 }
 
 func (d *dropReader) Close() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.b = nil
 	return nil
 }

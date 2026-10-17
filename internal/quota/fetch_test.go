@@ -89,9 +89,31 @@ func TestFetchAntigravityFallsBackToSecondBase(t *testing.T) {
 
 func TestFetchAntigravityWithoutProject(t *testing.T) {
 	e := newFakeEngine()
+	e.on(urlAGLoad, reply{status: 200, body: planBody})
 	_, err := newFetcher(e).fetch(context.Background(), store.Account{ID: 1, Provider: "antigravity"}, cliproxyapi.Credential{AuthIndex: "ai"}, store.AccountQuota{})
-	if !errors.Is(err, errSignIn) || len(e.recorded()) != 0 {
-		t.Errorf("err %v, calls %d; want errSignIn and no call", err, len(e.recorded()))
+	if !errors.Is(err, errSignIn) || len(e.recorded()) != 1 {
+		t.Errorf("err %v, calls %d; want errSignIn after one loadCodeAssist", err, len(e.recorded()))
+	}
+}
+
+func TestFetchAntigravitySuspended(t *testing.T) {
+	const banned = `{"error":{"code":403,"message":"This service has been disabled in this account.","status":"PERMISSION_DENIED",` +
+		`"details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"TOS_VIOLATION"}]}}`
+	e := newFakeEngine()
+	e.on(urlAGLoad, reply{status: 403, body: banned})
+	_, err := newFetcher(e).fetch(context.Background(), store.Account{ID: 1, Provider: "antigravity"}, cliproxyapi.Credential{AuthIndex: "ai"}, store.AccountQuota{})
+	if !errors.Is(err, errSuspended) {
+		t.Fatalf("err %v, want errSuspended", err)
+	}
+	if msg, _ := outcome(err); msg != MsgSuspended+": This service has been disabled in this account." || !Suspended(msg) {
+		t.Errorf("outcome %q", msg)
+	}
+
+	e = newFakeEngine()
+	e.on(urlAGLoad, reply{status: 403, body: `{"error":{"message":"denied"}}`})
+	_, err = newFetcher(e).fetch(context.Background(), store.Account{ID: 1, Provider: "antigravity"}, cliproxyapi.Credential{AuthIndex: "ai"}, store.AccountQuota{})
+	if !errors.Is(err, errSignIn) {
+		t.Errorf("a 403 without TOS_VIOLATION: err %v, want errSignIn", err)
 	}
 }
 

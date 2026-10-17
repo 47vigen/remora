@@ -23,6 +23,7 @@ const providers = [
     exhausted: 0,
     cooling: 0,
     sign_in: 0,
+    suspended: 0,
     accounts: [
       {
         account: account("1", "antigravity", "a@example.test"),
@@ -45,6 +46,7 @@ const providers = [
     exhausted: 0,
     cooling: 0,
     sign_in: 0,
+    suspended: 0,
     accounts: [{ account: account("2", "kimi", "k@example.test") }],
   },
 ];

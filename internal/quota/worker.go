@@ -228,6 +228,8 @@ func outcome(err error) (string, bool) {
 		return "", false
 	case errors.Is(err, errSignIn):
 		return MsgSignIn, false
+	case errors.Is(err, errSuspended):
+		return err.Error(), false
 	case errors.Is(err, errUnreadable):
 		return MsgUnreadable, false
 	case errors.As(err, &ue):

@@ -1,7 +1,7 @@
 import { ArrowsRotateRight } from "@gravity-ui/icons";
 import { Button, cn, Link, Meter, Table } from "@heroui/react";
 
-import { level, percentLabel, windowLabel } from "../-lib/quota";
+import { isSuspended, level, percentLabel, windowLabel } from "../-lib/quota";
 import type { QuotaAccount, QuotaProvider, QuotaWindow } from "../../../../client/types.gen";
 import { StatusChip } from "../../../../components/status-chip/StatusChip";
 import { getOAuthProviderLabel } from "../../../../lib/providers";
@@ -69,6 +69,7 @@ export function ProviderQuota({
   const counts = [
     [provider.exhausted, "exhausted", "text-danger"],
     [provider.cooling, "cooling", "text-warning"],
+    [provider.suspended, "suspended", "text-danger"],
     [provider.sign_in, "need sign-in", "text-warning"],
   ] as const;
 
@@ -132,14 +133,23 @@ export function ProviderQuota({
                       <span className="flex max-w-64 min-w-0 flex-col gap-0.5">
                         <span className="truncate text-[13px] font-medium">{name}</span>
                         {quota?.error ? (
-                          <span className="text-danger truncate text-xs">{quota.error}</span>
+                          <span className="text-danger truncate text-xs" title={quota.error}>
+                            {quota.error}
+                          </span>
                         ) : quota?.plan ? (
                           <span className="text-muted text-xs">{quota.plan}</span>
                         ) : null}
                       </span>
                     </Table.Cell>
                     <Table.Cell>
-                      <StatusChip status={accountHealth(account, now.getTime())} until={account.cooldown_until} />
+                      <StatusChip
+                        status={
+                          account.enabled && isSuspended(quota?.error)
+                            ? "suspended"
+                            : accountHealth(account, now.getTime())
+                        }
+                        until={account.cooldown_until}
+                      />
                     </Table.Cell>
                     {windows.map((w) => (
                       <Table.Cell key={key(w)}>

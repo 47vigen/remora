@@ -1,6 +1,16 @@
 import { Chip, cn } from "@heroui/react";
 
-export type Health = "ok" | "degraded" | "down" | "unknown" | "active" | "cooling" | "disabled" | "error" | "success";
+export type Health =
+  | "ok"
+  | "degraded"
+  | "down"
+  | "unknown"
+  | "active"
+  | "cooling"
+  | "disabled"
+  | "error"
+  | "success"
+  | "suspended";
 
 type ChipColor = "success" | "warning" | "danger" | "default";
 
@@ -12,6 +22,7 @@ const COLORS: Record<Health, ChipColor> = {
   cooling: "warning",
   down: "danger",
   error: "danger",
+  suspended: "danger",
   disabled: "default",
   unknown: "default",
 };
