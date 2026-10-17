@@ -14,7 +14,7 @@ func TestSearchLogsQuery(t *testing.T) {
 	start := time.Date(2026, 10, 14, 9, 30, 0, 123456789, time.UTC)
 	var got url.Values
 	var path string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(withLogin(func(w http.ResponseWriter, r *http.Request) {
 		path = r.URL.Path
 		got = r.URL.Query()
 		w.Header().Set("Content-Type", "application/json")
@@ -111,7 +111,7 @@ func TestSearchLogsQueryAllFilters(t *testing.T) {
 	t1 := t0.Add(time.Hour)
 	const search = "سلام\u200cدنیا"
 	var got url.Values
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(withLogin(func(w http.ResponseWriter, r *http.Request) {
 		got = r.URL.Query()
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"logs":[{"id":"c1","parent_request_id":"r","timestamp":"2026-10-14T09:30:01Z",` +
@@ -183,7 +183,7 @@ func TestLogStatsDecode(t *testing.T) {
 	t0 := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
 	var got url.Values
 	var path string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(withLogin(func(w http.ResponseWriter, r *http.Request) {
 		path, got = r.URL.Path, r.URL.Query()
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"total_requests":210,"success_rate":95,"user_facing_success_rate":97.5,` +
@@ -213,7 +213,7 @@ func TestHistogramDecode(t *testing.T) {
 	t0 := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
 	var got url.Values
 	var path string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(withLogin(func(w http.ResponseWriter, r *http.Request) {
 		path, got = r.URL.Path, r.URL.Query()
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"buckets":[{"timestamp":"2026-10-14T00:00:00Z","count":5,"success":4,"error":1,"cancelled":0},` +
@@ -247,7 +247,7 @@ func TestHistogramDecode(t *testing.T) {
 func TestSeriesHistogramsDecode(t *testing.T) {
 	t0 := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
 	paths := map[string]url.Values{}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(withLogin(func(w http.ResponseWriter, r *http.Request) {
 		paths[r.URL.Path] = r.URL.Query()
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {

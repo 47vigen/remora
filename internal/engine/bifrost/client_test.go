@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -16,8 +17,7 @@ import (
 // recorded is one request the fake engine saw.
 type recorded struct {
 	method, path, contentType string
-	user, password            string
-	basicOK                   bool
+	authorization             string
 	body                      map[string]any
 }
 
@@ -36,14 +36,14 @@ type answer struct {
 func newFakeEngine(t *testing.T, answers map[string]answer) (*fakeEngine, *Client) {
 	t.Helper()
 	f := &fakeEngine{answers: answers}
-	srv := httptest.NewServer(http.HandlerFunc(f.serve))
+	srv := httptest.NewServer(withLogin(f.serve))
 	t.Cleanup(srv.Close)
 	return f, New(srv.URL, "admin", "secret", srv.Client())
 }
 
 func (f *fakeEngine) serve(w http.ResponseWriter, r *http.Request) {
 	rec := recorded{method: r.Method, path: r.URL.EscapedPath(), contentType: r.Header.Get("Content-Type")}
-	rec.user, rec.password, rec.basicOK = r.BasicAuth()
+	rec.authorization = r.Header.Get("Authorization")
 	if raw, _ := io.ReadAll(r.Body); len(raw) > 0 {
 		_ = json.Unmarshal(raw, &rec.body)
 	}
@@ -57,6 +57,30 @@ func (f *fakeEngine) serve(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(a.status)
 	_, _ = io.WriteString(w, a.body)
+}
+
+// testSession is the session token withLogin hands out for admin:secret.
+const testSession = "session-1"
+
+func sessionCookie(token string) *http.Cookie {
+	return &http.Cookie{Name: "token", Value: token, Path: "/", HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode}
+}
+
+// withLogin answers the engine's session login for admin:secret and passes every other request to h.
+func withLogin(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/session/login" {
+			h(w, r)
+			return
+		}
+		var in struct{ Username, Password string }
+		if json.NewDecoder(r.Body).Decode(&in) != nil || in.Username != "admin" || in.Password != "secret" {
+			http.Error(w, `{"error":{"message":"Invalid username or password"}}`, http.StatusUnauthorized)
+			return
+		}
+		http.SetCookie(w, sessionCookie(testSession))
+		_, _ = io.WriteString(w, `{"message":"Login successful"}`)
+	}
 }
 
 func (f *fakeEngine) last(t *testing.T) recorded {
@@ -218,8 +242,8 @@ func TestClient_Requests(t *testing.T) {
 			if got.method != tc.method || got.path != tc.path {
 				t.Fatalf("request %s %s, want %s %s", got.method, got.path, tc.method, tc.path)
 			}
-			if !got.basicOK || got.user != "admin" || got.password != "secret" {
-				t.Errorf("basic auth %q:%q (ok=%v), want admin:secret", got.user, got.password, got.basicOK)
+			if got.authorization != "Bearer "+testSession {
+				t.Errorf("Authorization %q, want the session token", got.authorization)
 			}
 			if tc.wantBody != nil {
 				if got.contentType != "application/json" {
@@ -451,5 +475,54 @@ func TestRuleWireSingleTarget(t *testing.T) {
 	w := ruleWire(RoutingRule{Name: "n", CEL: "c", Target: Route{"up-a", "m1"}, Fallbacks: []Route{{"up-b", "m1"}}})
 	if len(w.Targets) != 1 || w.Targets[0].Provider != "up-a" || *w.Targets[0].Model != "m1" || w.Targets[0].Weight != 1 {
 		t.Errorf("targets = %+v, want one at weight 1", w.Targets)
+	}
+}
+
+func TestClient_SessionLoginOnceAndAgainOnExpiry(t *testing.T) {
+	var (
+		mu     sync.Mutex
+		logins int
+		valid  string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if r.URL.Path == "/api/session/login" {
+			logins++
+			valid = "session-" + strconv.Itoa(logins)
+			http.SetCookie(w, sessionCookie(valid))
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer "+valid {
+			http.Error(w, `{"error":{"message":"Unauthorized"}}`, http.StatusUnauthorized)
+			return
+		}
+		_, _ = io.WriteString(w, `{"providers":[]}`)
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL, "admin", "secret", srv.Client())
+	ctx := context.Background()
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			if _, err := c.ListProviders(ctx); err != nil {
+				t.Errorf("ListProviders: %v", err)
+			}
+		})
+	}
+	wg.Wait()
+	if logins != 1 {
+		t.Fatalf("%d logins for 8 calls, want 1", logins)
+	}
+
+	mu.Lock()
+	valid = "expired"
+	mu.Unlock()
+	if _, err := c.ListProviders(ctx); err != nil {
+		t.Fatalf("ListProviders after expiry: %v", err)
+	}
+	if logins != 2 {
+		t.Errorf("%d logins after expiry, want 2", logins)
 	}
 }
