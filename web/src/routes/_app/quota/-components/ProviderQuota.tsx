@@ -143,7 +143,11 @@ export function ProviderQuota({
                     </Table.Cell>
                     <Table.Cell>
                       <StatusChip
-                        status={isSuspended(quota?.error) ? "suspended" : accountHealth(account, now.getTime())}
+                        status={
+                          account.enabled && isSuspended(quota?.error)
+                            ? "suspended"
+                            : accountHealth(account, now.getTime())
+                        }
                         until={account.cooldown_until}
                       />
                     </Table.Cell>

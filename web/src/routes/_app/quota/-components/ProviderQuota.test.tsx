@@ -103,6 +103,29 @@ test("a suspended account says so instead of Active", () => {
   expect(screen.queryByText("Active")).toBeNull();
 });
 
+test("a disabled account stays Disabled even with a suspension on record", () => {
+  setup({
+    ...antigravity,
+    sign_in: 0,
+    suspended: 0,
+    accounts: [
+      {
+        account: { ...account("2", "b@example.test"), enabled: false },
+        quota: {
+          plan: "",
+          windows: [],
+          limit_reached: false,
+          source: "poll",
+          checked_at: now.toISOString(),
+          error: "the provider suspended this account",
+        },
+      },
+    ],
+  });
+  expect(screen.getByText("Disabled")).toBeInTheDocument();
+  expect(screen.queryByText("Suspended")).toBeNull();
+});
+
 test("an unsupported provider says so and shows no meter", () => {
   setup({
     provider: "kimi",
