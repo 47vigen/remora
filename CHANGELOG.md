@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.4](https://github.com/47vigen/remora/compare/v0.5.3...v0.5.4) (2026-10-19)
+
+
+### Bug Fixes
+
+* **mcp:** keep subscriptions/listen streams alive with SSE comments ([#69](https://github.com/47vigen/remora/issues/69)) ([53460df](https://github.com/47vigen/remora/commit/53460df1849141f20479fcf18d76f5a356056380))
+
 ## [0.5.3](https://github.com/47vigen/remora/compare/v0.5.2...v0.5.3) (2026-10-17)
 
 
