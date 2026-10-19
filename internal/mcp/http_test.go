@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -150,4 +151,40 @@ func (b bearerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	r = r.Clone(r.Context())
 	r.Header.Set("Authorization", "Bearer "+string(b))
 	return http.DefaultTransport.RoundTrip(r)
+}
+
+func TestListenStreamSendsHeartbeats(t *testing.T) {
+	e := newMCPEnv(t)
+	tok := e.token(t, "a")
+	defer func(d time.Duration) { listenHeartbeat = d }(listenHeartbeat)
+	listenHeartbeat = 10 * time.Millisecond
+	for _, withHeader := range []bool{true, false} {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		r, _ := http.NewRequestWithContext(ctx, http.MethodPost, e.srv.URL,
+			strings.NewReader(`{"jsonrpc":"2.0","id":"listen:0","method":"subscriptions/listen","params":{}}`))
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Accept", "application/json, text/event-stream")
+		r.Header.Set("Authorization", "Bearer "+tok)
+		if withHeader {
+			r.Header.Set("Mcp-Method", "subscriptions/listen")
+		}
+		resp, err := http.DefaultClient.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "text/event-stream" {
+			t.Errorf("header %v: listen = %d %s", withHeader, resp.StatusCode, resp.Header.Get("Content-Type"))
+		}
+		buf := make([]byte, 64)
+		got := ""
+		for strings.Count(got, ": keepalive\n\n") < 2 {
+			n, err := resp.Body.Read(buf)
+			if err != nil {
+				t.Fatalf("header %v: after %q: %v", withHeader, got, err)
+			}
+			got += string(buf[:n])
+		}
+		cancel()
+		_ = resp.Body.Close()
+	}
 }
