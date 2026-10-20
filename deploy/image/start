@@ -6,8 +6,18 @@ set -u
 if [ "${1:-}" != serve ]; then
 	exec /usr/local/bin/remora "$@"
 fi
+# nginx reaches remora where REMORA_LISTEN puts it; an unspecified or wildcard host is reached on loopback.
+listen="${REMORA_LISTEN:-:8080}"
+port="${listen##*:}"
+host="${listen%:*}"
+case "$host" in "" | 0.0.0.0 | "[::]") host=127.0.0.1 ;; esac
+if [ "$port" = 8080 ]; then
+	echo "start: REMORA_LISTEN=$listen takes port 8080, which nginx serves in this image; pick another port" >&2
+	exit 2
+fi
 mkdir -p /tmp/nginx
-nginx -e stderr -c /etc/remora/nginx.conf -g 'daemon off;' &
+sed "s/127\.0\.0\.1:8081/$host:$port/" /etc/remora/nginx.conf >/tmp/nginx/nginx.conf
+nginx -e stderr -c /tmp/nginx/nginx.conf -g 'daemon off;' &
 web=$!
 /usr/local/bin/remora "$@" &
 app=$!
