@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.5](https://github.com/47vigen/remora/compare/v0.5.4...v0.5.5) (2026-10-20)
+
+
+### Bug Fixes
+
+* **mcp:** acknowledge subscriptions/listen and accept a header-less cancel ([#71](https://github.com/47vigen/remora/issues/71)) ([799876f](https://github.com/47vigen/remora/commit/799876fa432d61639383e133cd309f8ab35f44ac))
+* **serve:** log engine lines at their own level; steady two flaky tests ([#72](https://github.com/47vigen/remora/issues/72)) ([449eba2](https://github.com/47vigen/remora/commit/449eba2c7264977367a14bca26f9ac429b372d5b))
+
 ## [0.5.4](https://github.com/47vigen/remora/compare/v0.5.3...v0.5.4) (2026-10-19)
 
 
