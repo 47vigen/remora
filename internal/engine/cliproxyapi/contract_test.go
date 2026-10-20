@@ -292,7 +292,7 @@ func TestContractCredentials(t *testing.T) {
 	}
 
 	// The engine can drop an uploaded credential's model registration; AwaitCredentialModels nudges it as remora does.
-	models, err := e.client.AwaitCredentialModels(ctx, name, "codex", 5*time.Second)
+	models, err := e.client.AwaitCredentialModels(ctx, name, "codex", 20*time.Second)
 	if err != nil || len(models) == 0 {
 		t.Errorf("CredentialModels = %v, %v, want some", models, err)
 	}

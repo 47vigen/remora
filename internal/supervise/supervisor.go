@@ -452,6 +452,7 @@ type lineLogger struct {
 	log    *slog.Logger
 	stream string
 	buf    []byte
+	carry  *slog.Level // the level of a record split at maxLineLength, for its continuation
 }
 
 func (l *lineLogger) Write(b []byte) (int, error) {
@@ -461,11 +462,11 @@ func (l *lineLogger) Write(b []byte) (int, error) {
 		if i < 0 {
 			break
 		}
-		l.emit(l.buf[:i])
+		l.emit(l.buf[:i], false)
 		l.buf = l.buf[i+1:]
 	}
 	if len(l.buf) >= maxLineLength {
-		l.emit(l.buf)
+		l.emit(l.buf, true)
 		l.buf = nil
 	}
 	return len(b), nil
@@ -474,15 +475,52 @@ func (l *lineLogger) Write(b []byte) (int, error) {
 // flush logs a final line that had no newline.
 func (l *lineLogger) flush() {
 	if len(l.buf) > 0 {
-		l.emit(l.buf)
+		l.emit(l.buf, false)
 		l.buf = nil
 	}
 }
 
-func (l *lineLogger) emit(line []byte) {
+func (l *lineLogger) emit(line []byte, split bool) {
 	line = bytes.TrimRight(line, "\r")
+	level := lineLevel(line)
+	if l.carry != nil {
+		level = *l.carry
+	}
+	l.carry = nil
+	if split {
+		l.carry = &level
+	}
 	if len(line) == 0 {
 		return
 	}
-	l.log.Info("engine output", "stream", l.stream, "line", string(line))
+	log := l.log.Info
+	switch level {
+	case slog.LevelDebug:
+		log = l.log.Debug
+	case slog.LevelWarn:
+		log = l.log.Warn
+	case slog.LevelError:
+		log = l.log.Error
+	}
+	log("engine output", "stream", l.stream, "line", string(line))
+}
+
+// lineLevel reads the level an engine wrote into its own line. Its info lines, an access log line per call, drop to
+// debug; a line without a level stays info.
+func lineLevel(line []byte) slog.Level {
+	for _, m := range []struct {
+		marks []string
+		level slog.Level
+	}{
+		{[]string{`[error]`, `[fatal]`, `[panic]`, `"level":"error"`, `"level":"fatal"`, `"level":"panic"`}, slog.LevelError},
+		{[]string{`[warn ]`, `"level":"warn"`}, slog.LevelWarn},
+		{[]string{`[info ]`, `[debug]`, `"level":"info"`, `"level":"debug"`}, slog.LevelDebug},
+	} {
+		for _, mark := range m.marks {
+			if bytes.Contains(line, []byte(mark)) {
+				return m.level
+			}
+		}
+	}
+	return slog.LevelInfo
 }
