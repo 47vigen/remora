@@ -24,8 +24,8 @@ func Handler(s *sdk.Server, a *auth.Service) http.Handler {
 	sh := sdk.NewStreamableHTTPHandler(func(*http.Request) *sdk.Server { return s },
 		&sdk.StreamableHTTPOptions{Stateless: true, JSONResponse: true, DisableLocalhostProtection: true})
 	h := a.Middleware(nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isListen(r) {
-			serveListen(w, r)
+		if msg, ok := readMessage(r); ok && msg.Method == "subscriptions/listen" {
+			serveListen(w, r, msg)
 			return
 		}
 		sh.ServeHTTP(w, r)
@@ -36,28 +36,65 @@ func Handler(s *sdk.Server, a *auth.Service) http.Handler {
 	})
 }
 
-func isListen(r *http.Request) bool {
-	if r.Method != http.MethodPost {
-		return false
-	}
-	if m := r.Header.Get("Mcp-Method"); m != "" {
-		return m == "subscriptions/listen"
-	}
-	b, err := io.ReadAll(r.Body)
-	r.Body = io.NopCloser(bytes.NewReader(b))
-	var msg struct {
-		Method string `json:"method"`
-	}
-	return err == nil && json.Unmarshal(b, &msg) == nil && msg.Method == "subscriptions/listen"
+type message struct {
+	ID     json.RawMessage `json:"id"`
+	Method string          `json:"method"`
+	Params struct {
+		Notifications sdk.NotificationSubscriptions `json:"notifications"`
+	} `json:"params"`
 }
 
-// serveListen holds the stream open with comments until the client leaves. The go-sdk would hold it silent: it sends
-// no priming event from protocol 2026-07-28 on, so not even the headers leave.
-func serveListen(w http.ResponseWriter, r *http.Request) {
+// maxPeek matches the go-sdk's own request body limit; a larger body is left whole for the go-sdk to refuse.
+const maxPeek = 4 << 20
+
+// readMessage peeks at a POST body and puts it back. A missing Mcp-Method header is filled from the body: Claude Code
+// leaves it off notifications/cancelled, which the go-sdk then refuses with 400. A request that names its method in
+// the header is read only when that method is subscriptions/listen.
+func readMessage(r *http.Request) (message, bool) {
+	var msg message
+	if r.Method != http.MethodPost {
+		return msg, false
+	}
+	if m := r.Header.Get("Mcp-Method"); m != "" && m != "subscriptions/listen" {
+		return msg, false
+	}
+	b, err := io.ReadAll(io.LimitReader(r.Body, maxPeek+1))
+	r.Body = struct {
+		io.Reader
+		io.Closer
+	}{io.MultiReader(bytes.NewReader(b), r.Body), r.Body}
+	if err != nil || len(b) > maxPeek || json.Unmarshal(b, &msg) != nil || msg.Method == "" {
+		return msg, false
+	}
+	if r.Header.Get("Mcp-Method") == "" {
+		r.Header.Set("Mcp-Method", msg.Method)
+	}
+	return msg, true
+}
+
+// serveListen acknowledges the subscription, as the first message must, then holds the stream open with comments until
+// the client leaves. The stateless go-sdk handler writes nothing on it, so a client gives up waiting for the
+// acknowledgement and reopens the stream. Only tools/list_changed is honoured, the one list_changed capability served.
+func serveListen(w http.ResponseWriter, r *http.Request, msg message) {
+	ack, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "notifications/subscriptions/acknowledged",
+		"params": sdk.SubscriptionsAcknowledgedParams{
+			Meta:          sdk.Meta{sdk.MetaKeySubscriptionID: msg.ID},
+			Notifications: sdk.NotificationSubscriptions{ToolsListChanged: msg.Params.Notifications.ToolsListChanged},
+		},
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	rc := http.NewResponseController(w)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache, no-transform")
 	w.WriteHeader(http.StatusOK)
+	if _, err := io.WriteString(w, "event: message\ndata: "+string(ack)+"\n\n"); err != nil {
+		return
+	}
 	t := time.NewTicker(listenHeartbeat)
 	defer t.Stop()
 	for {

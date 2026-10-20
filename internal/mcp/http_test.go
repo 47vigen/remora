@@ -161,7 +161,7 @@ func TestListenStreamSendsHeartbeats(t *testing.T) {
 	for _, withHeader := range []bool{true, false} {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		r, _ := http.NewRequestWithContext(ctx, http.MethodPost, e.srv.URL,
-			strings.NewReader(`{"jsonrpc":"2.0","id":"listen:0","method":"subscriptions/listen","params":{}}`))
+			strings.NewReader(`{"jsonrpc":"2.0","id":"listen:0","method":"subscriptions/listen","params":{"notifications":{"toolsListChanged":true,"promptsListChanged":true}}}`))
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Accept", "application/json, text/event-stream")
 		r.Header.Set("Authorization", "Bearer "+tok)
@@ -177,6 +177,20 @@ func TestListenStreamSendsHeartbeats(t *testing.T) {
 		}
 		buf := make([]byte, 64)
 		got := ""
+		for !strings.Contains(got, "\n\n") {
+			n, err := resp.Body.Read(buf)
+			if err != nil {
+				t.Fatalf("header %v: before the acknowledgement, after %q: %v", withHeader, got, err)
+			}
+			got += string(buf[:n])
+		}
+		ack := `event: message
+data: {"jsonrpc":"2.0","method":"notifications/subscriptions/acknowledged","params":{"_meta":{"io.modelcontextprotocol/subscriptionId":"listen:0"},"notifications":{"toolsListChanged":true}}}
+
+`
+		if !strings.HasPrefix(got, ack) {
+			t.Errorf("header %v: first event = %q, want %q", withHeader, got, ack)
+		}
 		for strings.Count(got, ": keepalive\n\n") < 2 {
 			n, err := resp.Body.Read(buf)
 			if err != nil {
@@ -186,5 +200,64 @@ func TestListenStreamSendsHeartbeats(t *testing.T) {
 		}
 		cancel()
 		_ = resp.Body.Close()
+	}
+}
+
+func TestCancelWithoutMethodHeaderIsAccepted(t *testing.T) {
+	e := newMCPEnv(t)
+	tok := e.token(t, "a")
+	r, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, e.srv.URL,
+		strings.NewReader(`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":"listen:0","_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Accept", "application/json, text/event-stream")
+	r.Header.Set("Mcp-Protocol-Version", "2026-07-28")
+	r.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if b, _ := io.ReadAll(resp.Body); resp.StatusCode != http.StatusAccepted {
+		t.Errorf("cancel without Mcp-Method = %d %s", resp.StatusCode, b)
+	}
+}
+
+func TestListenKeepsANumericIDExact(t *testing.T) {
+	e := newMCPEnv(t)
+	tok := e.token(t, "a")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	r, _ := http.NewRequestWithContext(ctx, http.MethodPost, e.srv.URL,
+		strings.NewReader(`{"jsonrpc":"2.0","id":9007199254740993,"method":"subscriptions/listen","params":{}}`))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Accept", "application/json, text/event-stream")
+	r.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	buf := make([]byte, 512)
+	n, _ := resp.Body.Read(buf)
+	if !strings.Contains(string(buf[:n]), `"io.modelcontextprotocol/subscriptionId":9007199254740993`) {
+		t.Errorf("acknowledgement = %q, want the id unchanged", buf[:n])
+	}
+}
+
+func TestOversizedBodyIsLeftToTheSDK(t *testing.T) {
+	e := newMCPEnv(t)
+	tok := e.token(t, "a")
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"pad":"` + strings.Repeat("x", maxPeek) + `"}}`
+	r, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, e.srv.URL, strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Accept", "application/json, text/event-stream")
+	r.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Errorf("oversized body = %d, want 413 from the go-sdk", resp.StatusCode)
 	}
 }
