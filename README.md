@@ -76,7 +76,7 @@ store and is managed in the UI, through the management API, or with `remora.yaml
 
 | Variable | Default | What it does |
 |---|---|---|
-| `REMORA_LISTEN` | `:8080` | The address of remora's only listener: `/v1`, `/api`, `/healthz` and the UI. |
+| `REMORA_LISTEN` | `:8080`, in the image `127.0.0.1:8081` | The address of remora's listener: `/v1`, `/api`, `/mcp` and `/healthz`. In the image, nginx owns port 8080, serves the UI and proxies those paths here. |
 | `REMORA_DATA` | `/data` | The data directory. Mount a volume here. |
 | `REMORA_ADMIN_PASSWORD` | unset | The admin password, used only while no admin exists. After the first boot the stored password wins; change it in Settings. When unset at first boot, a password is generated and written to the log once. |
 | `REMORA_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. |
@@ -127,13 +127,13 @@ Back up the whole volume, including `master.key`.
 ## Architecture
 
 ```
-                         one port (default 8080)
+                         one port (default 8080), nginx in front
 client ──► remora ──┬── /v1/*  inference proxy ──► routing engine (127.0.0.1) ──┬── API-key providers (OpenRouter, ...)
                     │                              see Credits                  ├── subscription engine (127.0.0.1) ──► Antigravity, Codex, Grok, ...
                     │                                                           │   see Credits
                     │                                                           └── speech-to-text adapter (127.0.0.1, inside remora) ──► Soniox
                     ├── /api/*  management API (OpenAPI)
-                    └── /       web UI (embedded)
+                    └── /       web UI (static files, brotli and gzip built ahead)
 ```
 
 remora is one image with one exposed port. Inside it, remora supervises the engines as child processes bound to

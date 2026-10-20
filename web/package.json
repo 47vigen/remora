@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "gen": "openapi-ts",
-    "build": "vite build && touch ../internal/web/dist/.gitkeep",
+    "build": "vite build",
     "typecheck": "node_modules/typescript-7/bin/tsc --noEmit",
     "lint": "oxlint",
     "format": "oxfmt",
@@ -48,6 +48,7 @@
     "typescript": "6.0.3",
     "typescript-7": "npm:typescript@7.0.2",
     "vite": "^8.3.4",
+    "vite-plugin-compression2": "^2.5.3",
     "vitest": "^5.0.4"
   }
 }

@@ -93,9 +93,6 @@ jobs:
       - name: Build and route tree drift
         run: bun run build && git diff --exit-code -- src/routeTree.gen.ts
       - run: bun run typecheck && bun run test
-      - name: Embedded console
-        working-directory: .
-        run: go test -tags webdist ./internal/web/
 
   image:
     if: ${{ !(startsWith(github.head_ref, 'release-please--') && github.event.pull_request.user.login == 'remora-bot-47vigen[bot]' && github.event.pull_request.head.repo.full_name == github.repository) }}

@@ -1,0 +1,42 @@
+#!/bin/bash
+# The image's entrypoint under tini. `serve` runs nginx and remora side by side; when either exits, the other is
+# stopped and the container exits with the first one's code. On SIGTERM both stop, and the exit code is remora's
+# after it drains. Any other command runs remora alone.
+set -u
+if [ "${1:-}" != serve ]; then
+	exec /usr/local/bin/remora "$@"
+fi
+# nginx reaches remora where REMORA_LISTEN puts it; an unspecified or wildcard host is reached on loopback.
+listen="${REMORA_LISTEN:-:8080}"
+port="${listen##*:}"
+host="${listen%:*}"
+case "$host" in "" | 0.0.0.0 | "[::]") host=127.0.0.1 ;; esac
+if [ "$port" = 8080 ]; then
+	echo "start: REMORA_LISTEN=$listen takes port 8080, which nginx serves in this image; pick another port" >&2
+	exit 2
+fi
+mkdir -p /tmp/nginx
+sed "s/127\.0\.0\.1:8081/$host:$port/" /etc/remora/nginx.conf >/tmp/nginx/nginx.conf
+nginx -e stderr -c /tmp/nginx/nginx.conf -g 'daemon off;' &
+web=$!
+/usr/local/bin/remora "$@" &
+app=$!
+stopping=0
+stop() {
+	stopping=1
+	kill -TERM "$app" 2>/dev/null
+	kill -QUIT "$web" 2>/dev/null
+}
+trap stop TERM INT
+wait -n "$web" "$app"
+code=$?
+if [ "$stopping" = 0 ]; then
+	stop
+fi
+wait "$app"
+app_code=$?
+wait "$web"
+if [ "$code" -gt 128 ] && [ "$stopping" = 1 ]; then
+	code=$app_code
+fi
+exit "$code"
