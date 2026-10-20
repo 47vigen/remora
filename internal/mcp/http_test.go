@@ -161,7 +161,7 @@ func TestListenStreamSendsHeartbeats(t *testing.T) {
 	for _, withHeader := range []bool{true, false} {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		r, _ := http.NewRequestWithContext(ctx, http.MethodPost, e.srv.URL,
-			strings.NewReader(`{"jsonrpc":"2.0","id":"listen:0","method":"subscriptions/listen","params":{}}`))
+			strings.NewReader(`{"jsonrpc":"2.0","id":"listen:0","method":"subscriptions/listen","params":{"notifications":{"toolsListChanged":true,"promptsListChanged":true}}}`))
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Accept", "application/json, text/event-stream")
 		r.Header.Set("Authorization", "Bearer "+tok)
@@ -177,6 +177,20 @@ func TestListenStreamSendsHeartbeats(t *testing.T) {
 		}
 		buf := make([]byte, 64)
 		got := ""
+		for !strings.Contains(got, "\n\n") {
+			n, err := resp.Body.Read(buf)
+			if err != nil {
+				t.Fatalf("header %v: before the acknowledgement, after %q: %v", withHeader, got, err)
+			}
+			got += string(buf[:n])
+		}
+		ack := `event: message
+data: {"jsonrpc":"2.0","method":"notifications/subscriptions/acknowledged","params":{"_meta":{"io.modelcontextprotocol/subscriptionId":"listen:0"},"notifications":{"toolsListChanged":true}}}
+
+`
+		if !strings.HasPrefix(got, ack) {
+			t.Errorf("header %v: first event = %q, want %q", withHeader, got, ack)
+		}
 		for strings.Count(got, ": keepalive\n\n") < 2 {
 			n, err := resp.Body.Read(buf)
 			if err != nil {
@@ -186,5 +200,24 @@ func TestListenStreamSendsHeartbeats(t *testing.T) {
 		}
 		cancel()
 		_ = resp.Body.Close()
+	}
+}
+
+func TestCancelWithoutMethodHeaderIsAccepted(t *testing.T) {
+	e := newMCPEnv(t)
+	tok := e.token(t, "a")
+	r, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, e.srv.URL,
+		strings.NewReader(`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":"listen:0","_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Accept", "application/json, text/event-stream")
+	r.Header.Set("Mcp-Protocol-Version", "2026-07-28")
+	r.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if b, _ := io.ReadAll(resp.Body); resp.StatusCode != http.StatusAccepted {
+		t.Errorf("cancel without Mcp-Method = %d %s", resp.StatusCode, b)
 	}
 }
