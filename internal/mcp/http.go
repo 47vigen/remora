@@ -37,23 +37,33 @@ func Handler(s *sdk.Server, a *auth.Service) http.Handler {
 }
 
 type message struct {
-	ID     any    `json:"id"`
-	Method string `json:"method"`
+	ID     json.RawMessage `json:"id"`
+	Method string          `json:"method"`
 	Params struct {
 		Notifications sdk.NotificationSubscriptions `json:"notifications"`
 	} `json:"params"`
 }
 
+// maxPeek matches the go-sdk's own request body limit; a larger body is left whole for the go-sdk to refuse.
+const maxPeek = 4 << 20
+
 // readMessage peeks at a POST body and puts it back. A missing Mcp-Method header is filled from the body: Claude Code
-// leaves it off notifications/cancelled, which the go-sdk then refuses with 400.
+// leaves it off notifications/cancelled, which the go-sdk then refuses with 400. A request that names its method in
+// the header is read only when that method is subscriptions/listen.
 func readMessage(r *http.Request) (message, bool) {
 	var msg message
 	if r.Method != http.MethodPost {
 		return msg, false
 	}
-	b, err := io.ReadAll(r.Body)
-	r.Body = io.NopCloser(bytes.NewReader(b))
-	if err != nil || json.Unmarshal(b, &msg) != nil || msg.Method == "" {
+	if m := r.Header.Get("Mcp-Method"); m != "" && m != "subscriptions/listen" {
+		return msg, false
+	}
+	b, err := io.ReadAll(io.LimitReader(r.Body, maxPeek+1))
+	r.Body = struct {
+		io.Reader
+		io.Closer
+	}{io.MultiReader(bytes.NewReader(b), r.Body), r.Body}
+	if err != nil || len(b) > maxPeek || json.Unmarshal(b, &msg) != nil || msg.Method == "" {
 		return msg, false
 	}
 	if r.Header.Get("Mcp-Method") == "" {

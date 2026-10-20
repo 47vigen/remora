@@ -221,3 +221,43 @@ func TestCancelWithoutMethodHeaderIsAccepted(t *testing.T) {
 		t.Errorf("cancel without Mcp-Method = %d %s", resp.StatusCode, b)
 	}
 }
+
+func TestListenKeepsANumericIDExact(t *testing.T) {
+	e := newMCPEnv(t)
+	tok := e.token(t, "a")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	r, _ := http.NewRequestWithContext(ctx, http.MethodPost, e.srv.URL,
+		strings.NewReader(`{"jsonrpc":"2.0","id":9007199254740993,"method":"subscriptions/listen","params":{}}`))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Accept", "application/json, text/event-stream")
+	r.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	buf := make([]byte, 512)
+	n, _ := resp.Body.Read(buf)
+	if !strings.Contains(string(buf[:n]), `"io.modelcontextprotocol/subscriptionId":9007199254740993`) {
+		t.Errorf("acknowledgement = %q, want the id unchanged", buf[:n])
+	}
+}
+
+func TestOversizedBodyIsLeftToTheSDK(t *testing.T) {
+	e := newMCPEnv(t)
+	tok := e.token(t, "a")
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"pad":"` + strings.Repeat("x", maxPeek) + `"}}`
+	r, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, e.srv.URL, strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Accept", "application/json, text/event-stream")
+	r.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Errorf("oversized body = %d, want 413 from the go-sdk", resp.StatusCode)
+	}
+}
