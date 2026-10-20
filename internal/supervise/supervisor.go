@@ -484,5 +484,34 @@ func (l *lineLogger) emit(line []byte) {
 	if len(line) == 0 {
 		return
 	}
-	l.log.Info("engine output", "stream", l.stream, "line", string(line))
+	log := l.log.Info
+	switch lineLevel(line) {
+	case slog.LevelDebug:
+		log = l.log.Debug
+	case slog.LevelWarn:
+		log = l.log.Warn
+	case slog.LevelError:
+		log = l.log.Error
+	}
+	log("engine output", "stream", l.stream, "line", string(line))
+}
+
+// lineLevel reads the level an engine wrote into its own line. Its info lines, an access log line per call, drop to
+// debug; a line without a level stays info.
+func lineLevel(line []byte) slog.Level {
+	for _, m := range []struct {
+		marks []string
+		level slog.Level
+	}{
+		{[]string{`[error]`, `"level":"error"`, `"level":"fatal"`, `"level":"panic"`}, slog.LevelError},
+		{[]string{`[warn ]`, `"level":"warn"`}, slog.LevelWarn},
+		{[]string{`[info ]`, `[debug]`, `"level":"info"`, `"level":"debug"`}, slog.LevelDebug},
+	} {
+		for _, mark := range m.marks {
+			if bytes.Contains(line, []byte(mark)) {
+				return m.level
+			}
+		}
+	}
+	return slog.LevelInfo
 }
