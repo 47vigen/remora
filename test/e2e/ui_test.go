@@ -117,6 +117,31 @@ func TestUIServed(t *testing.T) {
 		t.Errorf("GET %s: cache-control %q, want public, max-age=31536000, immutable", asset, cc)
 	}
 
+	// Assets leave as the brotli or gzip file the build wrote, by what the client accepts.
+	for _, enc := range []string{"br", "gzip"} {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, remoraURL(t, asset), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Accept-Encoding", enc)
+		resp, err := anon.Do(req)
+		if err != nil {
+			t.Fatalf("GET %s (%s): %v", asset, enc, err)
+		}
+		_ = resp.Body.Close()
+		if got := resp.Header.Get("Content-Encoding"); got != enc {
+			t.Errorf("GET %s with Accept-Encoding %s: content-encoding %q", asset, enc, got)
+		}
+		if cc := resp.Header.Get("Cache-Control"); cc != "public, max-age=31536000, immutable" {
+			t.Errorf("GET %s (%s): cache-control %q", asset, enc, cc)
+		}
+	}
+
+	// A missing file is 404, not the index.
+	if rep := uiGet(t, anon, "/assets/missing.js"); rep.Status != http.StatusNotFound {
+		t.Errorf("GET /assets/missing.js: status %d, want 404", rep.Status)
+	}
+
 	// An unknown API path is an API answer, never the console: 401 without a session, 404 with one.
 	rep = uiGet(t, anon, "/api/does-not-exist")
 	if rep.Status != http.StatusUnauthorized {

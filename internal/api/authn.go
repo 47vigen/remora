@@ -48,12 +48,17 @@ func (s *Server) GetSession(ctx context.Context, _ gen.GetSessionRequestObject) 
 	return gen.GetSession200JSONResponse{Authenticated: true, Via: gen.SessionVia(p.Via)}, nil
 }
 
-// remoteIP is the client's IP as the listener saw it. Forwarding headers are not trusted: a client could set
-// them to escape the login limiter.
+// remoteIP is the client's IP. X-Real-IP is trusted only from a loopback peer, the nginx in front of remora in its
+// image; from anyone else a client could set it to escape the login limiter.
 func remoteIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		if client := net.ParseIP(r.Header.Get("X-Real-IP")); client != nil {
+			return client.String()
+		}
 	}
 	return host
 }

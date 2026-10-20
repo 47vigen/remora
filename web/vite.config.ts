@@ -3,10 +3,20 @@ import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { compression, defineAlgorithm } from "vite-plugin-compression2";
 
 export default defineConfig({
-  plugins: [tanstackRouter({ target: "react", autoCodeSplitting: true }), react(), tailwindcss()],
-  build: { outDir: "../internal/web/dist", emptyOutDir: true, assetsDir: "assets" },
+  plugins: [
+    tanstackRouter({ target: "react", autoCodeSplitting: true }),
+    react(),
+    tailwindcss(),
+    // nginx serves these .br and .gz siblings as they are (brotli_static, gzip_static), so nothing is compressed per request.
+    compression({
+      algorithms: [defineAlgorithm("brotliCompress", { params: { 1: 11 } }), defineAlgorithm("gzip", { level: 9 })],
+      threshold: 1024,
+    }),
+  ],
+  build: { outDir: "dist", emptyOutDir: true, assetsDir: "assets", target: "es2022" },
   server: {
     proxy: { "/api": { target: "http://localhost:8080", ws: true } },
   },

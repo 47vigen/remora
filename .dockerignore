@@ -13,4 +13,4 @@ web/node_modules
 web/test-results
 web/playwright-report
 # The web stage builds the console; a local build must not leak into the image.
-internal/web/dist/
+web/dist/

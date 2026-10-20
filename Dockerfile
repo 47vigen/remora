@@ -6,7 +6,7 @@
 # Build: make image   (passes BIFROST_VERSION and CLIPROXYAPI_VERSION from engines/versions.env)
 
 # ---------------------------------------------------------------------------
-# web: the console, built by Vite into internal/web/dist and embedded in remora.
+# web: the console, built by Vite into web/dist with a .br and a .gz beside each asset; nginx serves it.
 FROM --platform=$BUILDPLATFORM oven/bun:1.4.3 AS web
 WORKDIR /src/web
 COPY web/package.json web/bun.lock ./
@@ -26,7 +26,6 @@ COPY go.mod go.sum* ./
 RUN go mod download
 COPY cmd/ cmd/
 COPY internal/ internal/
-COPY --from=web /src/internal/web/dist ./internal/web/dist
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
       -ldflags "-s -w -X github.com/47vigen/remora/internal/version.Version=${REMORA_VERSION} -X github.com/47vigen/remora/internal/version.Commit=${REMORA_COMMIT}" \
       -o /out/remora ./cmd/remora
@@ -66,18 +65,21 @@ RUN CGO_ENABLED=1 go build -buildvcs=false -trimpath \
       -o /out/cliproxyapi ./cmd/server
 
 # ---------------------------------------------------------------------------
-# final: glibc runtime with tini as PID 1.
+# final: glibc runtime with tini as PID 1; nginx in front on 8080, remora behind it on loopback.
 FROM debian:13-slim
 ARG BIFROST_VERSION
 ARG CLIPROXYAPI_VERSION
 RUN test -n "$BIFROST_VERSION" && test -n "$CLIPROXYAPI_VERSION"
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates tini \
- && rm -rf /var/lib/apt/lists/* \
+ && apt-get install -y --no-install-recommends ca-certificates tini nginx libnginx-mod-http-brotli-static \
+ && rm -rf /var/lib/apt/lists/* /etc/nginx/sites-enabled /var/www \
  && useradd --system --uid 10001 --home-dir /data --no-create-home --shell /usr/sbin/nologin remora
 COPY --from=remora /out/remora /usr/local/bin/remora
 COPY --from=bifrost /out/bifrost /usr/local/lib/remora/engines/bifrost
 COPY --from=cliproxyapi /out/cliproxyapi /usr/local/lib/remora/engines/cliproxyapi
+COPY --from=web /src/web/dist /usr/share/remora/web
+COPY deploy/image/nginx.conf deploy/image/proxy.conf /etc/remora/
+COPY deploy/image/start /usr/local/lib/remora/start
 RUN printf '{"bifrost":{"version":"%s","sha256":"%s"},"cliproxyapi":{"version":"%s","sha256":"%s"}}\n' \
       "$BIFROST_VERSION" "$(sha256sum /usr/local/lib/remora/engines/bifrost | cut -d' ' -f1)" \
       "$CLIPROXYAPI_VERSION" "$(sha256sum /usr/local/lib/remora/engines/cliproxyapi | cut -d' ' -f1)" \
@@ -87,7 +89,9 @@ RUN printf '{"bifrost":{"version":"%s","sha256":"%s"},"cliproxyapi":{"version":"
 VOLUME /data
 EXPOSE 8080
 ENV REMORA_DATA=/data
+# nginx owns the public port; remora listens behind it.
+ENV REMORA_LISTEN=127.0.0.1:8081
 USER 10001
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/remora"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/lib/remora/start"]
 CMD ["serve"]
-HEALTHCHECK --interval=10s --timeout=5s --start-period=120s CMD ["/usr/local/bin/remora", "healthcheck"]
+HEALTHCHECK --interval=10s --timeout=5s --start-period=120s CMD ["/usr/local/bin/remora", "healthcheck", "http://127.0.0.1:8080/healthz"]

@@ -1,0 +1,32 @@
+#!/bin/bash
+# The image's entrypoint under tini. `serve` runs nginx and remora side by side; when either exits, the other is
+# stopped and the container exits with the first one's code. On SIGTERM both stop, and the exit code is remora's
+# after it drains. Any other command runs remora alone.
+set -u
+if [ "${1:-}" != serve ]; then
+	exec /usr/local/bin/remora "$@"
+fi
+mkdir -p /tmp/nginx
+nginx -e stderr -c /etc/remora/nginx.conf -g 'daemon off;' &
+web=$!
+/usr/local/bin/remora "$@" &
+app=$!
+stopping=0
+stop() {
+	stopping=1
+	kill -TERM "$app" 2>/dev/null
+	kill -QUIT "$web" 2>/dev/null
+}
+trap stop TERM INT
+wait -n "$web" "$app"
+code=$?
+if [ "$stopping" = 0 ]; then
+	stop
+fi
+wait "$app"
+app_code=$?
+wait "$web"
+if [ "$code" -gt 128 ] && [ "$stopping" = 1 ]; then
+	code=$app_code
+fi
+exit "$code"

@@ -8,6 +8,4 @@ coverage.out
 /web/dist/
 /web/test-results/
 /web/playwright-report/
-internal/web/dist/*
-!internal/web/dist/.gitkeep
 bench-results/
