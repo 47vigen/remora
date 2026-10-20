@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/47vigen/remora/compare/v0.5.5...v0.6.0) (2026-10-20)
+
+
+### Features
+
+* **image:** nginx in front serves the console; remora keeps the API ([#74](https://github.com/47vigen/remora/issues/74)) ([7f96fd4](https://github.com/47vigen/remora/commit/7f96fd4bf9e87370c38cb55c49c73a1a79a4331c))
+
 ## [0.5.5](https://github.com/47vigen/remora/compare/v0.5.4...v0.5.5) (2026-10-20)
 
 
