@@ -44,4 +44,7 @@ services:
       - "127.0.0.1::8080"
       - "127.0.0.1::18080"   # published on purpose: proves the engines are bound to loopback
       - "127.0.0.1::18317"
+    # The image's health check runs every 10 s; polling faster lets `up --wait` return as soon as remora is ready.
+    healthcheck:
+      interval: 2s
     depends_on: [fakes]
