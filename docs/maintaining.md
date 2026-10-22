@@ -6,8 +6,11 @@ maintainer with admin rights on the repository does it by hand.
 ## Branch protection (a ruleset on `main`)
 
 - Require a pull request before merging.
-- Required status checks: `lint`, `test` (it also runs the OpenAPI drift check), `image`, `e2e`, `engine`, `web`,
-  `quickstart`, `govulncheck`, `actionlint`.
+- Required status check: `ci`, the last job of the `ci` workflow. It is green when every job that ran passed;
+  a job whose inputs did not change is skipped, and `ci` ignores skipped jobs. The per-job names (`lint`, `test`,
+  `engine`, `web`, `image`, `e2e`, `console`, `quickstart`, `actionlint`) need not be required as well. Do not
+  require `govulncheck`: it is a separate workflow, and on a pull request it runs only when Go code or `go.mod`
+  changes.
 - Squash merge only; require linear history.
 - Block force pushes and deletion.
 - No required approving review: a single maintainer cannot approve their own pull request, and a required review

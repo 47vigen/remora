@@ -1,7 +1,14 @@
 name: govulncheck
 
 on:
+  # A pull request can add a vulnerable dependency or reach one only through Go code; the weekly run and every push
+  # to main cover the rest.
   pull_request:
+    paths:
+      - '**.go'
+      - go.mod
+      - go.sum
+      - .github/workflows/govulncheck.yml
   push:
     branches: [main]
   schedule:
