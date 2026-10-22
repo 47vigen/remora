@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.1](https://github.com/47vigen/remora/compare/v0.6.0...v0.6.1) (2026-10-22)
+
+
+### Dependencies and engines
+
+* Bump github.com/getkin/kin-openapi ([#76](https://github.com/47vigen/remora/issues/76)) ([2eb3c6d](https://github.com/47vigen/remora/commit/2eb3c6ddf7f3ef802cad63951687d850ea5c11c5))
+* Bump the all group across 1 directory with 9 updates ([#79](https://github.com/47vigen/remora/issues/79)) ([1b0ff5b](https://github.com/47vigen/remora/commit/1b0ff5bf3f49ac97d8244471bc960df626df9a77))
+
 ## [0.6.0](https://github.com/47vigen/remora/compare/v0.5.5...v0.6.0) (2026-10-20)
 
 
