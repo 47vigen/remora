@@ -25,7 +25,8 @@ else
 	# The quick start block of README.md at a revision; empty when the revision has none.
 	quickstart() { git show "$1:README.md" 2>/dev/null | sed -n '/<!-- quickstart:begin -->/,/<!-- quickstart:end -->/p'; }
 
-	has '\.go$|^go\.(mod|sum)$|^api/openapi\.yaml$|^\.golangci\.yml$' && go=true
+	# Go tests also read embedded and generated inputs: api/, internal/ assets, engines/, the e2e test data.
+	has '\.go$|^go\.(mod|sum)$|^\.golangci\.yml$|^(api|cmd|internal|engines)/|^test/e2e/testdata/' && go=true
 	has '^web/|^api/openapi\.yaml$' && web=true
 	has '^engines/|^internal/(engine|quota)/|^go\.(mod|sum)$|^docs/patches\.md$|^scripts/check-engine-pins\.sh$' && engine=true
 	has '^(README\.md|docs/)' && docs=true

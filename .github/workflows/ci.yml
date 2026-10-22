@@ -47,7 +47,8 @@ jobs:
           EVENT: ${{ github.event_name }}
         run: |
           if [ "$EVENT" = pull_request ] && git rev-parse -q --verify 'HEAD^2' >/dev/null; then
-            git diff --name-only HEAD^1 HEAD | scripts/ci-changes.sh
+            # --no-renames: a rename lists both its old and its new path
+            git diff --name-only --no-renames HEAD^1 HEAD | scripts/ci-changes.sh
           else
             scripts/ci-changes.sh --all
           fi | tee -a "$GITHUB_OUTPUT"

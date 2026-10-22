@@ -26,7 +26,7 @@ A pull request runs only the jobs its changed files can break; `scripts/ci-chang
 | --- | --- |
 | `CHANGELOG.md` or the version manifest only | none |
 | `README.md` or `docs/` only | `docs` (`go test ./test/docs`) |
-| Go code, `go.mod`, `go.sum`, `api/openapi.yaml` | `lint`, `test` (race detector, OpenAPI drift) |
+| Go code, `go.mod`, `go.sum`, anything under `api/`, `cmd/`, `internal/` or `engines/`, `test/e2e/testdata/` (the Go tests read or embed them) | `lint`, `test` (race detector, OpenAPI drift) |
 | `web/` or `api/openapi.yaml` | `web` |
 | `engines/`, `internal/engine/`, `internal/quota/`, `docs/patches.md` | `engine` (builds the OAuth engine, contract tests, pin check) |
 | shipped code: `cmd/`, `internal/` (not `_test.go`), `web/`, `engines/`, `api/`, `deploy/`, `Dockerfile`, `go.mod`, `test/fakes/`, `test/e2e/` | `image`, then `e2e`, `console` and `quickstart` |
