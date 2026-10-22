@@ -18,6 +18,9 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
+	"github.com/47vigen/remora/internal/auth"
 	"github.com/47vigen/remora/internal/config"
 )
 
@@ -28,6 +31,7 @@ func TestMain(m *testing.M) {
 	case "bifrost", "cliproxyapi":
 		os.Exit(runFakeEngine(os.Args[1:]))
 	}
+	auth.HashCost = bcrypt.MinCost
 	os.Exit(m.Run())
 }
 
