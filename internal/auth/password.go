@@ -21,12 +21,16 @@ var (
 	ErrTooManyAttempts = errors.New("auth: too many failed sign-in attempts; try again later")
 )
 
+// HashCost is the bcrypt cost of every new hash. Production keeps the default; test binaries lower it to
+// bcrypt.MinCost, because under the race detector the default costs about half a second per hash and per check.
+var HashCost = bcrypt.DefaultCost
+
 // HashPassword returns the bcrypt hash of pw. ErrWeakPassword when pw is shorter than 12 or longer than 72 bytes.
 func HashPassword(pw string) (string, error) {
 	if len(pw) < MinPasswordLen || len(pw) > MaxPasswordLen {
 		return "", ErrWeakPassword
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(pw), HashCost)
 	if err != nil {
 		return "", fmt.Errorf("auth: hash password: %w", err)
 	}

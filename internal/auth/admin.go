@@ -42,7 +42,7 @@ func EnsureAdmin(ctx context.Context, s *store.Store, envPassword string) (gener
 		generated = password
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), HashCost)
 	if err != nil {
 		return "", fmt.Errorf("auth: hash admin password: %w", err)
 	}

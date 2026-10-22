@@ -8,34 +8,72 @@ on:
     paths-ignore:
       - CHANGELOG.md
       - .release-please-manifest.json
+  # The whole pipeline, every night, whatever the day's pull requests touched.
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
 
 permissions: {}
 
-# A newer push to the same pull request cancels its run; every commit on main gets its own group and result.
+# A newer push to the same pull request cancels its run; every other run gets its own group and result.
 concurrency:
-  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  group: ci-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: true
 
-# A release pull request changes only the changelog and the version manifest, and release.yml builds and tests
-# the tagged image on both architectures, so its jobs are skipped; a skipped required check counts as passed. Only a
-# pull request the release bot opened from this repository is exempt, never a branch that merely has the name.
+# A pull request runs only the jobs its changed files can break (scripts/ci-changes.sh decides). A release pull
+# request changes only the changelog and the version manifest, so it runs none, and release.yml builds and tests
+# the tagged image on both architectures. A push to main, the nightly run and a manual run run everything.
+# A skipped job counts as passed for branch protection, and the `ci` job at the end is the one name to require.
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      go: ${{ steps.c.outputs.go }}
+      web: ${{ steps.c.outputs.web }}
+      engine: ${{ steps.c.outputs.engine }}
+      docs: ${{ steps.c.outputs.docs }}
+      stack: ${{ steps.c.outputs.stack }}
+      workflows: ${{ steps.c.outputs.workflows }}
+    steps:
+      # A pull request is checked out as its merge with the base: HEAD^1 is the base, so the diff is the PR's own.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - id: c
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" = pull_request ] && git rev-parse -q --verify 'HEAD^2' >/dev/null; then
+            # --no-renames: a rename lists both its old and its new path
+            git diff --name-only --no-renames HEAD^1 HEAD | scripts/ci-changes.sh
+          else
+            scripts/ci-changes.sh --all
+          fi | tee -a "$GITHUB_OUTPUT"
+
   lint:
-    if: ${{ !(startsWith(github.head_ref, 'release-please--') && github.event.pull_request.user.login == 'remora-bot-47vigen[bot]' && github.event.pull_request.head.repo.full_name == github.repository) }}
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     permissions:
       contents: read
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # No setup-go cache here: the test job owns that cache key, and a faster job saving it first would leave the
+      # race-detector build out of it.
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          cache: false
       - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.14
 
   test:
-    if: ${{ !(startsWith(github.head_ref, 'release-please--') && github.event.pull_request.user.login == 'remora-bot-47vigen[bot]' && github.event.pull_request.head.repo.full_name == github.repository) }}
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -48,13 +86,33 @@ jobs:
         run: go generate ./internal/api/gen && git diff --exit-code -- internal/api/gen
       - run: go test -race ./...
 
+  # README.md and docs/ are read by tests (the parity table, the README claims); a documentation change runs only those.
+  docs:
+    needs: changes
+    if: needs.changes.outputs.docs == 'true' && needs.changes.outputs.go != 'true'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: go test ./test/docs
+
   engine:
-    if: ${{ !(startsWith(github.head_ref, 'release-please--') && github.event.pull_request.user.login == 'remora-bot-47vigen[bot]' && github.event.pull_request.head.repo.full_name == github.repository) }}
+    needs: changes
+    if: needs.changes.outputs.engine == 'true'
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
           submodules: recursive
+      - name: Check engine pins
+        run: scripts/check-engine-pins.sh
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
@@ -71,7 +129,8 @@ jobs:
         run: REMORA_CLIPROXYAPI_BIN="$RUNNER_TEMP/cliproxyapi" go test -race -tags engine ./internal/engine/cliproxyapi/ ./internal/quota/
 
   web:
-    if: ${{ !(startsWith(github.head_ref, 'release-please--') && github.event.pull_request.user.login == 'remora-bot-47vigen[bot]' && github.event.pull_request.head.repo.full_name == github.repository) }}
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -83,44 +142,51 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.3
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
       - run: bun install --frozen-lockfile
       - name: OpenAPI client drift
         run: bun run gen && git diff --exit-code -- src/client
-      - run: bun run lint && bun run format:check
-      - name: Build and route tree drift
-        run: bun run build && git diff --exit-code -- src/routeTree.gen.ts
-      - run: bun run typecheck && bun run test
+      # The four checks are independent once the client is generated, so they run side by side.
+      - name: Lint, build, typecheck, test
+        run: |
+          fail=0
+          (bun run lint && bun run format:check) & lint=$!
+          (bun run build && git diff --exit-code -- src/routeTree.gen.ts) & build=$!
+          bun run typecheck & types=$!
+          bun run test & unit=$!
+          for p in "$lint" "$build" "$types" "$unit"; do wait "$p" || fail=1; done
+          exit "$fail"
 
   image:
-    if: ${{ !(startsWith(github.head_ref, 'release-please--') && github.event.pull_request.user.login == 'remora-bot-47vigen[bot]' && github.event.pull_request.head.repo.full_name == github.repository) }}
+    needs: changes
+    if: needs.changes.outputs.stack == 'true'
     permissions:
       contents: read
     runs-on: ubuntu-latest
     steps:
+      # Shallow, with the engines' shallow submodules: the build needs only the files, not their history.
       - uses: actions/checkout@v7
         with:
           submodules: recursive
-          fetch-depth: 0
-      - name: Check engine pins
-        run: scripts/check-engine-pins.sh
       - name: Export build versions
+        # The images are tested and thrown away, so their version strings are fixed: a per-commit value would
+        # invalidate the remora stage's cache on every run. release.yml stamps the real ones.
         run: |
           {
             cat engines/versions.env
-            echo "REMORA_VERSION=$(git describe --tags --always --dirty)"
-            echo "REMORA_COMMIT=$(git rev-parse --short HEAD)"
+            echo "REMORA_VERSION=ci"
+            echo "REMORA_COMMIT=ci"
           } >> "$GITHUB_ENV"
+      - run: mkdir "$RUNNER_TEMP/images"
       - uses: docker/setup-buildx-action@v4
+      # Pull requests read the cache that main wrote and write none of their own: exporting it costs about half a
+      # minute a run, and a pull request's cache is visible to no other branch.
       - name: Build remora image
         uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
           platforms: linux/amd64
-          load: true
+          outputs: type=docker,dest=${{ runner.temp }}/images/remora.tar
           tags: remora:dev
           build-args: |
             BIFROST_VERSION=${{ env.BIFROST_VERSION }}
@@ -128,23 +194,23 @@ jobs:
             REMORA_VERSION=${{ env.REMORA_VERSION }}
             REMORA_COMMIT=${{ env.REMORA_COMMIT }}
           cache-from: type=gha,scope=remora
-          cache-to: type=gha,mode=max,scope=remora
+          cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,mode=max,scope=remora' || '' }}
       - name: Build fakes image
         uses: docker/build-push-action@v7
         with:
           context: .
           file: test/fakes/Dockerfile
           platforms: linux/amd64
-          load: true
+          outputs: type=docker,dest=${{ runner.temp }}/images/fakes.tar
           tags: remora-fakes:dev
           cache-from: type=gha,scope=fakes
-          cache-to: type=gha,mode=max,scope=fakes
-      - name: Save images
-        run: docker save remora:dev remora-fakes:dev -o images.tar
+          cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,mode=max,scope=fakes' || '' }}
+      # The layers are already compressed; zipping them again only costs time.
       - uses: actions/upload-artifact@v7
         with:
           name: images
-          path: images.tar
+          path: ${{ runner.temp }}/images
+          compression-level: 0
           retention-days: 1
 
   e2e:
@@ -162,28 +228,28 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: images
+          path: images
       - name: Load images
-        run: docker load -i images.tar
+        run: docker load -i images/remora.tar && docker load -i images/fakes.tar
+      # The suite needs no module that go.sum would download, so there is no cache to restore.
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          cache: false
       - name: Run e2e suite
-        run: make e2e
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.3
-      - name: Console smoke tests
-        working-directory: web
+        shell: bash
         env:
-          # A fixed test value that compose.yaml sets; never a real secret.
-          REMORA_ADMIN_PASSWORD: e2e-admin-password
+          GOFLAGS: -v
+        run: make e2e 2>&1 | tee e2e.log
+      - name: Slowest e2e tests
+        if: always()
         run: |
-          bun install --frozen-lockfile
-          bunx playwright install --with-deps chromium
-          # compose.yaml publishes remora on an ephemeral host port; REMORA_E2E_KEEP left the stack up.
-          REMORA_URL="http://$(docker compose -f ../test/e2e/compose.yaml -p remora-e2e port remora 8080)"
-          export REMORA_URL
-          bun run e2e
+          {
+            echo '### Slowest e2e tests'
+            echo '```'
+            grep -E '^--- (PASS|FAIL)' e2e.log | sed -E 's/.*\(([0-9.]+)s\)$/\1 &/' | sort -rn | head -15 | cut -d' ' -f2-
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Collect compose logs
         if: failure()
         run: docker compose -f test/e2e/compose.yaml -p remora-e2e logs --no-color > e2e-compose.log 2>&1 || true
@@ -192,11 +258,53 @@ jobs:
         with:
           name: e2e-compose-logs
           path: e2e-compose.log
+
+  # The console smoke tests need their own stack, not the Go suite's: they start in parallel with it.
+  console:
+    permissions:
+      contents: read
+    needs: image
+    runs-on: ubuntu-latest
+    env:
+      REMORA_IMAGE: remora:dev
+      FAKES_IMAGE: remora-fakes:dev
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: images
+          path: images
+      - name: Load images
+        run: docker load -i images/remora.tar && docker load -i images/fakes.tar
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - name: Start the stack
+        run: |
+          docker compose -f test/e2e/compose.yaml -p remora-e2e up -d --wait --wait-timeout 180
+          docker compose -f test/e2e/compose.yaml -p remora-e2e exec -T remora remora apply -f /e2e/remora.yaml --yes
+      - name: Console smoke tests
+        working-directory: web
+        env:
+          # A fixed test value that compose.yaml sets; never a real secret.
+          REMORA_ADMIN_PASSWORD: e2e-admin-password
+        run: |
+          bun install --frozen-lockfile
+          bunx playwright install --with-deps chromium
+          # compose.yaml publishes remora on an ephemeral host port.
+          REMORA_URL="http://$(docker compose -f ../test/e2e/compose.yaml -p remora-e2e port remora 8080)"
+          export REMORA_URL
+          bun run e2e
+      - name: Collect compose logs
+        if: failure()
+        run: docker compose -f test/e2e/compose.yaml -p remora-e2e logs --no-color > console-compose.log 2>&1 || true
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
-          name: web-test-results
-          path: web/test-results
+          name: console-logs
+          path: |
+            console-compose.log
+            web/test-results
           if-no-files-found: ignore
 
   # The README quick start, run verbatim against the fakes on a fresh runner with only Docker.
@@ -210,15 +318,17 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: images
+          path: images
       - name: Load images
-        run: docker load -i images.tar
+        run: docker load -i images/remora.tar && docker load -i images/fakes.tar
       - name: README quick start
         run: REMORA_IMAGE=remora:dev FAKES_IMAGE=remora-fakes:dev scripts/quickstart-smoke.sh
       - name: Compose example
         run: REMORA_ADMIN_PASSWORD=x docker compose -f deploy/compose.yaml config -q
 
   actionlint:
-    if: ${{ !(startsWith(github.head_ref, 'release-please--') && github.event.pull_request.user.login == 'remora-bot-47vigen[bot]' && github.event.pull_request.head.repo.full_name == github.repository) }}
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -226,3 +336,17 @@ jobs:
       - uses: actions/checkout@v7
       - name: Lint workflows
         run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:latest -color
+
+  # The one required check: green when every job that ran passed. A skipped job (nothing it covers changed) is
+  # fine; a failed or cancelled one, or a failed `changes`, is not.
+  ci:
+    if: always()
+    needs: [changes, lint, test, docs, engine, web, image, e2e, console, quickstart, actionlint]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Every job passed or was skipped
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "job results: $RESULTS"
+          case " $RESULTS " in *" failure "* | *" cancelled "*) exit 1 ;; esac

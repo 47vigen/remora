@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -85,14 +86,28 @@ func runCompose(args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
-// compose runs a docker compose command against the e2e project.
+// compose runs a docker compose command against the e2e project. It may restart a service, which can change the
+// ephemeral host ports, so the cached addresses are dropped.
 func compose(t testing.TB, args ...string) (string, error) {
 	t.Helper()
+	defer addrs.Clear()
 	return runCompose(args...)
 }
 
-// lookupAddr returns the host address published for a service port.
+// addrs caches published addresses: every request would otherwise start a `docker compose port` process.
+var addrs sync.Map
+
+// lookupAddr returns the host address published for a service port, from the cache when it has one.
 func lookupAddr(service string, port int) (string, error) {
+	key := fmt.Sprintf("%s:%d", service, port)
+	if addr, ok := addrs.Load(key); ok {
+		return addr.(string), nil
+	}
+	return lookupAddrFresh(service, port)
+}
+
+// lookupAddrFresh asks Docker for the published address and refreshes the cache.
+func lookupAddrFresh(service string, port int) (string, error) {
 	out, err := runCompose("port", service, fmt.Sprint(port))
 	if err != nil {
 		return "", err
@@ -101,6 +116,7 @@ func lookupAddr(service string, port int) (string, error) {
 	if addr == "" || strings.HasSuffix(addr, ":0") {
 		return "", fmt.Errorf("no published address for %s:%d (got %q)", service, port, addr)
 	}
+	addrs.Store(fmt.Sprintf("%s:%d", service, port), addr)
 	return addr, nil
 }
 
@@ -167,14 +183,14 @@ func resetFakes(t testing.TB) {
 }
 
 // waitHealthy polls remora's /healthz until it answers 200. The published port
-// is looked up on every attempt because a restart may change it.
+// is looked up afresh on every attempt because a restart may change it.
 func waitHealthy(t testing.TB, timeout time.Duration) {
 	t.Helper()
 	client := &http.Client{Timeout: 3 * time.Second}
 	deadline := time.Now().Add(timeout)
 	var last string
 	for time.Now().Before(deadline) {
-		addr, err := lookupAddr("remora", 8080)
+		addr, err := lookupAddrFresh("remora", 8080)
 		if err != nil {
 			last = err.Error()
 		} else {
