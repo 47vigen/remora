@@ -188,7 +188,7 @@ func TestLogStatsDecode(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"total_requests":210,"success_rate":95,"user_facing_success_rate":97.5,` +
 			`"user_facing_total_requests":200,"average_latency":12.5,"total_tokens":900,"prompt_tokens":600,` +
-			`"completion_tokens":300,"total_cost":1.75}`))
+			`"completion_tokens":300,"total_cost":1.75,"cache_hit_rate_total_requests":200}`))
 	}))
 	t.Cleanup(srv.Close)
 	c := New(srv.URL, "admin", "secret", srv.Client())
@@ -201,9 +201,13 @@ func TestLogStatsDecode(t *testing.T) {
 		t.Fatalf("request = %s %v", path, got)
 	}
 	want := LogStats{
-		UserFacingTotalRequests: 200, UserFacingSuccessRate: 97.5, PromptTokens: 600, CompletionTokens: 300,
+		Completed: new(int64(200)), SuccessRate: 95, PromptTokens: 600, CompletionTokens: 300,
 		TotalTokens: 900, TotalCost: 1.75,
 	}
+	if st.Completed == nil || *st.Completed != 200 {
+		t.Fatalf("completed = %v", st.Completed)
+	}
+	st.Completed, want.Completed = nil, nil
 	if st != want {
 		t.Fatalf("stats = %+v, want %+v", st, want)
 	}

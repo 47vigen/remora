@@ -13,21 +13,19 @@ import (
 	"github.com/47vigen/remora/internal/engine/bifrost"
 )
 
-// percentile is the p-quantile (0 < p ≤ 1) of the latency of the successful attempts f matches, by nearest rank:
-// it counts them, then reads the one row at rank ceil(p·n) from the list sorted by latency. It is nil when nothing
-// matches. The front door's log store keeps no median, so this is exact rather than read from a histogram.
-func percentile(ctx context.Context, src LogSource, f bifrost.LogFilter, p float64) (*float64, error) {
-	f.Status, f.Limit, f.Offset, f.SortBy, f.Order = []string{"success"}, 1, 0, "", ""
-	count, err := src.SearchLogs(ctx, f)
-	if err != nil {
-		return nil, err
-	}
-	n := count.Total
-	if n == 0 {
+// percentile is the p-quantile (0 < p ≤ 1) of the latency of the n successful attempts f matches, by nearest rank: it
+// reads the one row at rank ceil(p·n) from the list sorted by latency. It is nil when n is 0. The front door's log
+// store keeps no median, so this is exact rather than read from a histogram. The engine sorts the whole range for it
+// and the cost grows with the offset, so the rank is counted from whichever end of the list is nearer.
+func percentile(ctx context.Context, src LogSource, f bifrost.LogFilter, p float64, n int64) (*float64, error) {
+	if n <= 0 {
 		return nil, nil
 	}
-	rank := int64(math.Ceil(p*float64(n) - 1e-9))
-	f.SortBy, f.Order, f.Offset = "latency", "asc", int(min(max(rank, 1), n)-1)
+	rank := min(max(int64(math.Ceil(p*float64(n)-1e-9)), 1), n)
+	f.Status, f.Limit, f.SortBy, f.Order, f.Offset = []string{"success"}, 1, "latency", "asc", int(rank-1)
+	if rank > n-rank+1 {
+		f.Order, f.Offset = "desc", int(n-rank)
+	}
 	row, err := src.SearchLogs(ctx, f)
 	if err != nil {
 		return nil, err
@@ -38,25 +36,31 @@ func percentile(ctx context.Context, src LogSource, f bifrost.LogFilter, p float
 	return new(*row.Logs[0].Latency), nil
 }
 
-// summary is the stats of what f matches. Requests and errors count a fallback chain once, as the user saw it.
+// summary is the stats of what f matches, one row per log row: a fallback attempt counts as a request of its own,
+// as in the series and the log list.
 func (s *Server) summary(ctx context.Context, f bifrost.LogFilter) (gen.StatsSummary, error) {
 	st, err := s.d.Logs.LogStats(ctx, f)
 	if err != nil {
 		return gen.StatsSummary{}, err
 	}
-	out := gen.StatsSummary{
-		Requests: int(st.UserFacingTotalRequests), PromptTokens: int(st.PromptTokens),
-		CompletionTokens: int(st.CompletionTokens), TotalTokens: int(st.TotalTokens), CostUsd: finite(st.TotalCost),
+	var done int64
+	if st.Completed != nil {
+		done = *st.Completed
 	}
-	if out.Requests == 0 {
+	out := gen.StatsSummary{
+		Requests: int(done), PromptTokens: int(st.PromptTokens), CompletionTokens: int(st.CompletionTokens),
+		TotalTokens: int(st.TotalTokens), CostUsd: finite(st.TotalCost),
+	}
+	if done == 0 {
 		return out, nil
 	}
-	out.ErrorRate = min(max((100-finite(st.UserFacingSuccessRate))/100, 0), 1)
-	out.Errors = int(math.Round(float64(out.Requests) * out.ErrorRate))
-	if out.LatencyP50Ms, err = percentile(ctx, s.d.Logs, f, 0.5); err != nil {
-		return gen.StatsSummary{}, err
-	}
-	if out.LatencyP95Ms, err = percentile(ctx, s.d.Logs, f, 0.95); err != nil {
+	ok := int64(math.Round(float64(done) * min(max(finite(st.SuccessRate), 0), 100) / 100))
+	out.Errors = int(done - ok)
+	out.ErrorRate = float64(out.Errors) / float64(done)
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() (err error) { out.LatencyP50Ms, err = percentile(gctx, s.d.Logs, f, 0.5, ok); return err })
+	g.Go(func() (err error) { out.LatencyP95Ms, err = percentile(gctx, s.d.Logs, f, 0.95, ok); return err })
+	if err := g.Wait(); err != nil {
 		return gen.StatsSummary{}, err
 	}
 	return out, nil
@@ -80,15 +84,18 @@ type group struct {
 }
 
 // stats answers the stats over f's range: the summary, the series and, with group_by, one summary per member of
-// the set that saw requests.
-func (s *Server) stats(ctx context.Context, f bifrost.LogFilter, groupBy string) (gen.Stats, error) {
+// the set that saw requests. With groupsOnly the summary and the series are left empty, for a caller that already
+// has them.
+func (s *Server) stats(ctx context.Context, f bifrost.LogFilter, groupBy string, groupsOnly bool) (gen.Stats, error) {
 	out := gen.Stats{From: *f.Start, To: *f.End, Series: []gen.StatsPoint{}, Groups: []gen.StatsGroup{}}
 	var err error
-	if out.Summary, err = s.summary(ctx, f); err != nil {
-		return gen.Stats{}, err
-	}
-	if out.Series, err = s.series(ctx, f); err != nil {
-		return gen.Stats{}, err
+	if !groupsOnly {
+		if out.Summary, err = s.summary(ctx, f); err != nil {
+			return gen.Stats{}, err
+		}
+		if out.Series, err = s.series(ctx, f); err != nil {
+			return gen.Stats{}, err
+		}
 	}
 	members, err := s.groups(ctx, f, groupBy)
 	if err != nil {
@@ -122,7 +129,7 @@ func (s *Server) stats(ctx context.Context, f bifrost.LogFilter, groupBy string)
 
 // series is the time buckets over f's range: the engine's request, token, cost and latency histograms merged by
 // bucket start, plus each bucket's median read the way the summary's is. The p95 comes from the engine's latency
-// histogram over the successful attempts, the same set the median ranks.
+// histogram over the successful attempts, the same set the median ranks, whose size the histogram also gives.
 func (s *Server) series(ctx context.Context, f bifrost.LogFilter) ([]gen.StatsPoint, error) {
 	var (
 		counts []bifrost.HistogramBucket
@@ -157,28 +164,33 @@ func (s *Server) series(ctx context.Context, f bifrost.LogFilter) ([]gen.StatsPo
 			out[i].CostUsd = finite(b.TotalCost)
 		}
 	}
+	ranked := make([]int64, len(counts)) // successful attempts with a latency, per bucket
 	for _, b := range lat {
 		if i, ok := at[b.Timestamp.Unix()]; ok && b.TotalRequests > 0 {
 			out[i].LatencyP95Ms = new(finite(b.P95Latency))
+			ranked[i] = b.TotalRequests
 		}
 	}
 	// The engine has no median histogram, so each bucket that saw a success ranks its own window.
 	g, gctx = errgroup.WithContext(ctx)
 	g.SetLimit(groupReads)
-	for i, b := range counts {
-		if b.Success == 0 {
+	for i := range counts {
+		if ranked[i] == 0 {
 			continue
 		}
 		start, end := *f.Start, *f.End
-		if b.Timestamp.After(start) {
-			start = b.Timestamp
+		if ts := counts[i].Timestamp; ts.After(start) {
+			start = ts
 		}
 		if i+1 < len(counts) && counts[i+1].Timestamp.Before(end) {
 			end = counts[i+1].Timestamp.Add(-time.Nanosecond)
 		}
 		bf := f
 		bf.Start, bf.End = &start, &end
-		g.Go(func() (err error) { out[i].LatencyP50Ms, err = percentile(gctx, s.d.Logs, bf, 0.5); return err })
+		g.Go(func() (err error) {
+			out[i].LatencyP50Ms, err = percentile(gctx, s.d.Logs, bf, 0.5, ranked[i])
+			return err
+		})
 	}
 	if err := g.Wait(); err != nil {
 		return nil, err
@@ -329,7 +341,7 @@ func (s *Server) GetStats(ctx context.Context, req gen.GetStatsRequestObject) (g
 	} else if err != nil {
 		return nil, err
 	}
-	out, err := s.stats(ctx, f, string(deref(p.GroupBy)))
+	out, err := s.stats(ctx, f, string(deref(p.GroupBy)), deref(p.GroupsOnly))
 	if err != nil {
 		return nil, err
 	}
@@ -353,7 +365,7 @@ func (s *Server) GetKeyUsage(ctx context.Context, req gen.GetKeyUsageRequestObje
 	if !ok {
 		return gen.GetKeyUsage200JSONResponse(emptyStats(start, end)), nil
 	}
-	out, err := s.stats(ctx, bifrost.LogFilter{Start: &start, End: &end, VirtualKeyIDs: []string{vk}}, "")
+	out, err := s.stats(ctx, bifrost.LogFilter{Start: &start, End: &end, VirtualKeyIDs: []string{vk}}, "", false)
 	if err != nil {
 		return nil, err
 	}

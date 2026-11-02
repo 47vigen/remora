@@ -82,7 +82,7 @@ function OverviewPage() {
     placeholderData: keepPreviousData,
   });
   const byModel = useQuery({
-    ...getStatsOptions({ query: { group_by: "model", from } }),
+    ...getStatsOptions({ query: { group_by: "model", groups_only: true, from } }),
     refetchInterval: STATS_REFRESH_MS,
     placeholderData: keepPreviousData,
   });
