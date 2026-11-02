@@ -7,7 +7,7 @@
 
 # ---------------------------------------------------------------------------
 # web: the console, built by Vite into web/dist with a .br and a .gz beside each asset; nginx serves it.
-FROM --platform=$BUILDPLATFORM oven/bun:1.4.3 AS web
+FROM --platform=$BUILDPLATFORM oven/bun:1.4.4 AS web
 WORKDIR /src/web
 COPY web/package.json web/bun.lock ./
 RUN bun install --frozen-lockfile
