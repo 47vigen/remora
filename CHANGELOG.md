@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.6.1](https://github.com/47vigen/remora/compare/v0.6.0...v0.6.1) (2026-11-02)
+
+
+### Bug Fixes
+
+* **logs,stats:** live tail replay and flapping; cheaper overview stats ([#85](https://github.com/47vigen/remora/issues/85)) ([2c8de27](https://github.com/47vigen/remora/commit/2c8de27301c46f1c017ec56c650e9bdad3550fce))
+
+
+### Dependencies and engines
+
+* Bump github.com/getkin/kin-openapi ([#76](https://github.com/47vigen/remora/issues/76)) ([2eb3c6d](https://github.com/47vigen/remora/commit/2eb3c6ddf7f3ef802cad63951687d850ea5c11c5))
+* Bump oven/bun from 1.4.3 to 1.4.4 in the all group ([#81](https://github.com/47vigen/remora/issues/81)) ([7084564](https://github.com/47vigen/remora/commit/7084564aaf17c8a29c9037676d69c086cb35cd2b))
+* Bump the all group across 1 directory with 9 updates ([#79](https://github.com/47vigen/remora/issues/79)) ([1b0ff5b](https://github.com/47vigen/remora/commit/1b0ff5bf3f49ac97d8244471bc960df626df9a77))
+* Bump the all group in /web with 3 updates ([#83](https://github.com/47vigen/remora/issues/83)) ([12475ad](https://github.com/47vigen/remora/commit/12475adbd884517b46bb42766953fe9d0f3c1856))
+* Bump the all group with 3 updates ([#82](https://github.com/47vigen/remora/issues/82)) ([d48631a](https://github.com/47vigen/remora/commit/d48631a555aca221af9a9d402b06af9e5317e191))
+* **engines:** bump bifrost to transports/v2.4.0 and cliproxyapi to v8.0.51 ([#84](https://github.com/47vigen/remora/issues/84)) ([05dfad3](https://github.com/47vigen/remora/commit/05dfad3acd45191321b3e384590a359f198556c1))
+
 ## [0.6.0](https://github.com/47vigen/remora/compare/v0.5.5...v0.6.0) (2026-10-20)
 
 
