@@ -24,6 +24,7 @@ test("formatBody leaves a bare JSON scalar and plain text alone", () => {
 test("formatTokens / formatTime", () => {
   expect(formatTokens(1200, 340)).toBe("1.2K → 340");
   expect(formatTime("2026-10-14T10:00:00Z", new Date("2026-10-14T10:00:12Z"))).toBe("12s ago");
+  expect(formatTime("2026-10-14T10:00:38Z", new Date("2026-10-14T10:00:00Z"))).toBe("just now");
   expect(formatTime("2026-10-14T08:02:03Z", new Date("2026-10-14T10:00:00Z"))).toMatch(/^Oct 1[34], \d\d:\d\d:03$/);
 });
 

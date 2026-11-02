@@ -15,6 +15,12 @@ const (
 	defaultLookback = 10 * time.Minute
 	// maxRunning bounds the requests still in processing that a Tail follows past the lookback.
 	maxRunning = 10_000
+	// liveNarrow is how far back most polls of a live tail reach; every liveWideEvery-th poll reads the whole lookback
+	// for the rows of requests that ran longer than that.
+	liveNarrow    = time.Minute
+	liveWideEvery = 10
+	// livePrimeTimeout bounds the read Subscribe makes when it opens an idle live tail.
+	livePrimeTimeout = 10 * time.Second
 )
 
 // LogSource is what a Tail polls; *Client satisfies it.
@@ -31,6 +37,7 @@ type Tail struct {
 	interval time.Duration
 	lookback time.Duration
 	status   []string // the row statuses each poll asks for; nil = every row
+	live     bool     // see Live
 	log      *slog.Logger
 	now      func() time.Time
 
@@ -38,10 +45,12 @@ type Tail struct {
 	subs   map[int]*subscriber
 	nextID int
 
-	// Poll state, touched only by the goroutine that polls.
+	// Poll state, touched only with pollMu held: by Run's goroutine, and by Subscribe when it primes a live tail.
+	pollMu  sync.Mutex
 	cursor  time.Time            // when the last fully read window began, or the newest row it delivered if later
 	seen    map[string]time.Time // delivered row id → its timestamp
 	running map[string]time.Time // id of a row seen in processing → its timestamp, followed until it completes
+	narrow  int                  // live polls since the last one that read the whole lookback
 }
 
 // subscriber is one subscription: its channel and up to backlog rows that did not fit it yet.
@@ -79,15 +88,36 @@ func NewTail(src LogSource, interval time.Duration, status []string, log *slog.L
 	}
 }
 
+// Live tunes the tail for viewers of the log. A viewer wants what completes from now on, and it has the page it loaded
+// for the rest, so when a viewer arrives at an idle tail Subscribe first reads the rows that exist, before the viewer
+// is registered, and what completes after that reaches it.
+// And most polls read only the last liveNarrow rather than the whole lookback: a row is written when its request
+// completes and carries the start time, so a request that ran longer than that shows up on the next poll that reads
+// everything, at most liveWideEvery polls later.
+func (t *Tail) Live() *Tail {
+	t.live = true
+	return t
+}
+
 // Subscribe returns a channel of completed rows with room for buffer rows, and a function that ends the
 // subscription. Up to backlog more rows wait in the tail and are handed over on later polls, so a subscriber that
 // falls behind loses nothing; one that falls further behind is dropped: its channel is closed. The cancel function is
-// safe to call more than once and after a drop.
-func (t *Tail) Subscribe(buffer, backlog int) (<-chan Log, func()) {
+// safe to call more than once and after a drop. ctx bounds the read that primes an idle live tail (see Live).
+func (t *Tail) Subscribe(ctx context.Context, buffer, backlog int) (<-chan Log, func()) {
 	if buffer < 1 {
 		buffer = 1
 	}
 	ch := make(chan Log, buffer)
+	if t.live {
+		// Holding pollMu until the viewer is registered keeps Run from treating the tail as idle in between.
+		t.pollMu.Lock()
+		defer t.pollMu.Unlock()
+		if t.cursor.IsZero() {
+			pctx, cancel := context.WithTimeout(ctx, livePrimeTimeout)
+			t.poll(pctx)
+			cancel()
+		}
+	}
 	t.mu.Lock()
 	id := t.nextID
 	t.nextID++
@@ -112,9 +142,16 @@ func (t *Tail) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-			if t.subscribers() > 0 {
+			t.pollMu.Lock()
+			switch {
+			case t.subscribers() > 0:
 				t.poll(ctx)
+			case t.live:
+				t.cursor = time.Time{}
+				clear(t.seen)
+				clear(t.running)
 			}
+			t.pollMu.Unlock()
 		}
 	}
 }
@@ -135,10 +172,19 @@ func (t *Tail) poll(ctx context.Context) {
 	t.deliver()
 	began := t.now()
 	from := t.cursor
+	fresh := t.live && from.IsZero()
 	if from.IsZero() {
 		from = began
 	}
-	start := from.Add(-t.lookback)
+	wide := !t.live || fresh || t.narrow >= liveWideEvery-1
+	back := t.lookback
+	if wide {
+		t.narrow = 0
+	} else {
+		back = min(back, liveNarrow)
+		t.narrow++
+	}
+	start := from.Add(-back)
 	newest := began
 	if t.cursor.After(newest) {
 		newest = t.cursor
@@ -166,13 +212,17 @@ func (t *Tail) poll(ctx context.Context) {
 			if l.Timestamp.After(newest) {
 				newest = l.Timestamp
 			}
-			t.deliver(l)
+			if !fresh {
+				t.deliver(l)
+			}
 		}
 		if len(page.Logs) < MaxLogLimit {
 			break
 		}
 	}
-	t.recheck(ctx, start)
+	if wide {
+		t.recheck(ctx, start)
+	}
 	t.cursor = newest
 	floor := newest.Add(-t.lookback)
 	for id, ts := range t.seen {

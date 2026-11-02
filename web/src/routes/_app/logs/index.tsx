@@ -15,14 +15,17 @@ import { DataList } from "../../../components/data-list/DataList";
 import { PageHeader } from "../../../components/page-header/PageHeader";
 import type { ListSearch } from "../../../lib/list-search";
 import { invalidateOps } from "../../../lib/query";
+import { useNow } from "../../../lib/use-now";
 import { LogDetail } from "./-components/LogDetail";
 import { LogFilters } from "./-components/LogFilters";
 import { LogsTable } from "./-components/LogsTable";
 import { useLiveLogs } from "./-hooks/useLiveLogs";
 import {
   type LogSearch,
+  type LiveState,
   type LogSummary,
   matchesLogFilters,
+  mergeCatchUp,
   parseLogSearch,
   prependLive,
   rangeToWindow,
@@ -31,6 +34,11 @@ import {
 
 /** The API caps a page at 200; filter pickers offer what fits in one page. */
 const MAX_LIMIT = 200;
+
+/** Live mode keeps this many rows at most, so a busy stream stays cheap to render. */
+const LIVE_ROWS = 50;
+/** How often the relative times in the table move on. */
+const CLOCK_MS = 15_000;
 
 export const Route = createFileRoute("/_app/logs/")({
   validateSearch: parseLogSearch,
@@ -52,6 +60,7 @@ function LogsPage() {
   // oxlint-disable-next-line react/purity
   if (clock.key !== filterKey) setClock({ key: filterKey, now: new Date() });
   const span = rangeToWindow(search, clock.now);
+  const now = useNow(CLOCK_MS);
 
   const [keyQuery, setKeyQuery] = useState("");
   const keys = useQuery(listKeysOptions({ query: { limit: MAX_LIMIT } }));
@@ -79,38 +88,55 @@ function LogsPage() {
   );
 
   const effectivePage = live ? 1 : page;
-  const list = useQuery(
-    listLogsOptions({
-      query: {
-        limit: pageSize,
-        offset: (effectivePage - 1) * pageSize,
-        q: q || undefined,
-        key: search.keyId,
-        alias: search.alias,
-        provider: search.provider,
-        model: search.servedModel,
-        status: search.status,
-        ...span,
-      },
-    }),
-  );
+  const listOptions = listLogsOptions({
+    query: {
+      limit: pageSize,
+      offset: (effectivePage - 1) * pageSize,
+      q: q || undefined,
+      key: search.keyId,
+      alias: search.alias,
+      provider: search.provider,
+      model: search.servedModel,
+      status: search.status,
+      ...span,
+    },
+  });
+  const list = useQuery(listOptions);
   const pageRows = useMemo(() => (list.data?.items ?? []).map((e) => toLogSummary(e, keyNames)), [list.data, keyNames]);
 
-  // Live mode starts from page 1 and prepends what arrives, within the same filters.
-  const [liveRows, setLiveRows] = useState<LogSummary[] | null>(null);
+  // Live mode starts from page 1 and prepends what arrives, within the same filters. The rows carry the filters they
+  // belong to, so a read that finishes after the filters changed cannot add its page to the new rows.
+  const liveCap = Math.min(pageSize, LIVE_ROWS);
+  const [liveState, setLive] = useState<LiveState | null>(null);
+  const liveRows = liveState?.key === filterKey ? liveState.rows : null;
+  const edit = (key: string, change: (rows: LogSummary[]) => LogSummary[]) =>
+    setLive((s) => (s === null ? { key, rows: change([]) } : s.key === key ? { key, rows: change(s.rows) } : s));
   // New filters restart live mode from the new first page; rows that matched the old filters must not linger.
-  const [liveFilters, setLiveFilters] = useState(filterKey);
-  if (liveFilters !== filterKey) {
-    setLiveFilters(filterKey);
-    setLiveRows(null);
-  }
-  if (live && liveRows === null && list.data && !list.isPlaceholderData && liveFilters === filterKey)
-    setLiveRows(pageRows);
-  if (!live && liveRows !== null) setLiveRows(null);
-  const { isConnected } = useLiveLogs(live === true, (l) => {
-    const row = l.keyId !== undefined ? { ...l, keyName: keyNames.get(l.keyId) } : l;
-    if (matchesLogFilters(row, search)) setLiveRows((rows) => prependLive(rows ?? [], row, pageSize));
-  });
+  if (liveState !== null && liveState.key !== filterKey) setLive(null);
+  if (live && liveState === null && list.data && !list.isPlaceholderData)
+    setLive({ key: filterKey, rows: pageRows.slice(0, liveCap) });
+  if (!live && liveState !== null) setLive(null);
+  // The page Live starts from may be old and the stream only carries what completes after it connects, so each
+  // connection reads page 1 again and merges in the rows the stream did not bring.
+  const { isConnected } = useLiveLogs(
+    live === true,
+    (batch) => {
+      const fresh = batch
+        .map((l) => (l.keyId !== undefined ? { ...l, keyName: keyNames.get(l.keyId) } : l))
+        .filter((l) => matchesLogFilters(l, search));
+      if (fresh.length > 0) edit(filterKey, (rows) => prependLive(rows, fresh, liveCap));
+    },
+    async () => {
+      const key = filterKey;
+      try {
+        const data = await queryClient.fetchQuery({ ...listOptions, staleTime: 0 });
+        const page = data.items.map((e) => toLogSummary(e, keyNames));
+        setLive((s) => mergeCatchUp(s, key, page, liveCap));
+      } catch {
+        // Filters changed under the read, or it failed: the stream carries on and the next connection reads again.
+      }
+    },
+  );
   const rows = live ? (liveRows ?? pageRows) : pageRows;
 
   const detail = useQuery({ ...getLogOptions({ path: { id: search.log ?? "" } }), enabled: search.log !== undefined });
@@ -165,7 +191,7 @@ function LogsPage() {
       >
         <LogsTable
           items={rows}
-          now={clock.now}
+          now={now}
           highlightNew={live === true}
           onOpen={(id) => void navigate({ search: (prev) => ({ ...prev, log: id }) })}
         />

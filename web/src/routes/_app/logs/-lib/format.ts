@@ -88,10 +88,13 @@ const timeFormat = new Intl.DateTimeFormat("en-US", {
   hour12: false,
 });
 
-/** Relative under an hour ("12s ago"), otherwise the local date and time ("Oct 14, 10:02:03"). */
+/**
+ * Relative under an hour ("12s ago"), otherwise the local date and time ("Oct 14, 10:02:03"). A request is never in
+ * the future: a time ahead of `now` (this browser's clock behind the server's) reads "just now".
+ */
 export function formatTime(iso: string, now: Date): string {
   const t = new Date(iso);
   if (Number.isNaN(t.getTime())) return "–";
-  if (Math.abs(now.getTime() - t.getTime()) < 3_600_000) return formatRelative(iso, now);
+  if (Math.abs(now.getTime() - t.getTime()) < 3_600_000) return formatRelative(iso, t > now ? t : now);
   return timeFormat.format(t);
 }

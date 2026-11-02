@@ -403,6 +403,9 @@ export type LogList = {
 };
 
 export type StatsSummary = {
+    /**
+     * Log rows that finished, a fallback attempt counting as a request, as in `series` and the log list.
+     */
     requests: number;
     errors: number;
     error_rate: number;
@@ -1978,6 +1981,10 @@ export type GetStatsData = {
          * With a value other than `none`, `groups` holds one summary per key, alias, provider or model. A model group is named `<provider>/<model>` and lists the 100 busiest models of the range.
          */
         group_by?: 'none' | 'key' | 'alias' | 'provider' | 'model';
+        /**
+         * When true, `summary` is all zeros and `series` is empty; only `groups` is computed. For a caller that already holds the summary and the series of the same range.
+         */
+        groups_only?: boolean;
         /**
          * A client key id.
          */

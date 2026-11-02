@@ -938,8 +938,10 @@ type StatsSummary struct {
 	// LatencyP95Ms Null when there are no requests in the range.
 	LatencyP95Ms *float64 `json:"latency_p95_ms,omitempty"`
 	PromptTokens int      `json:"prompt_tokens"`
-	Requests     int      `json:"requests"`
-	TotalTokens  int      `json:"total_tokens"`
+
+	// Requests Log rows that finished, a fallback attempt counting as a request, as in `series` and the log list.
+	Requests    int `json:"requests"`
+	TotalTokens int `json:"total_tokens"`
 }
 
 // TokenUsage defines model for TokenUsage.
@@ -1145,6 +1147,9 @@ type GetStatsParams struct {
 
 	// GroupBy With a value other than `none`, `groups` holds one summary per key, alias, provider or model. A model group is named `<provider>/<model>` and lists the 100 busiest models of the range.
 	GroupBy *GetStatsParamsGroupBy `form:"group_by,omitempty" json:"group_by,omitempty"`
+
+	// GroupsOnly When true, `summary` is all zeros and `series` is empty; only `groups` is computed. For a caller that already holds the summary and the series of the same range.
+	GroupsOnly *bool `form:"groups_only,omitempty" json:"groups_only,omitempty"`
 
 	// Key A client key id.
 	Key *KeyFilter `form:"key,omitempty" json:"key,omitempty"`
@@ -5068,6 +5073,18 @@ func NewGetStatsRequest(server string, params *GetStatsParams) (*http.Request, e
 		if params.GroupBy != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "group_by", *params.GroupBy, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.GroupsOnly != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "groups_only", *params.GroupsOnly, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
 				return nil, err
 			} else {
 				for _, qp := range strings.Split(queryFrag, "&") {
@@ -12118,6 +12135,19 @@ func (siw *ServerInterfaceWrapper) GetStats(w http.ResponseWriter, r *http.Reque
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "group_by"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "group_by", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "groups_only" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "groups_only", r.URL.Query(), &params.GroupsOnly, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "groups_only"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "groups_only", Err: err})
 		}
 		return
 	}

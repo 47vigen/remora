@@ -104,9 +104,73 @@ test("live mode prepends matching entries and hides paging", async () => {
   expect(await screen.findByText("Connected")).toBeInTheDocument();
   act(() => ws.onmessage?.({ data: JSON.stringify(entry("l9", { model: "new-model" })) }));
   act(() => ws.onmessage?.({ data: JSON.stringify(entry("l8", { alias: "slow", model: "skipped" })) }));
-  const rows = await screen.findAllByRole("row");
-  expect(rows[1]).toHaveTextContent("or/new-model");
+  await findRow("or/new-model");
+  expect(screen.getAllByRole("row")[1]).toHaveTextContent("or/new-model");
   expect(screen.queryByText("or/skipped")).toBeNull();
+});
+
+test("live mode reads page 1 again on connecting and adds the rows the stream missed", async () => {
+  let page = [entry("l1")];
+  renderRoute("/logs?live=true", (req, url) =>
+    url.pathname === "/api/logs" ? Response.json({ items: page, total: page.length }) : api(req, url),
+  );
+  await findRow("or/x");
+  page = [entry("l2", { model: "missed" }), entry("l1")];
+  const ws = FakeSocket.last!;
+  act(() => {
+    ws.readyState = 1;
+    ws.onopen?.();
+  });
+  await findRow("or/missed");
+  expect(screen.getAllByRole("row")).toHaveLength(3);
+});
+
+test("live mode keeps its newest rows when the page read on connecting is longer than the cap", async () => {
+  const at = (i: number) => new Date(Date.now() - i * 1000).toISOString();
+  const page = Array.from({ length: 60 }, (_, i) => entry(`p${i}`, { model: `m${i}`, time: at(i) }));
+  renderRoute("/logs?live=true&pageSize=100", (req, url) =>
+    url.pathname === "/api/logs" ? Response.json({ items: page, total: page.length }) : api(req, url),
+  );
+  await findRow("or/m0");
+  const ws = FakeSocket.last!;
+  act(() => {
+    ws.readyState = 1;
+    ws.onopen?.();
+  });
+  act(() => ws.onmessage?.({ data: JSON.stringify(entry("live", { model: "streamed" })) }));
+  await findRow("or/streamed");
+  await screen.findByText("Connected");
+  expect(screen.getAllByRole("row")).toHaveLength(51);
+  expect(screen.getByText("or/m48")).toBeInTheDocument();
+  expect(screen.queryByText("or/m49")).toBeNull();
+});
+
+test("a page read that finishes after the filters changed is not merged into the new rows", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  let reads = 0;
+  const { router } = renderRoute("/logs?live=true&alias=fast", async (req, url) => {
+    if (url.pathname === "/api/logs" && url.searchParams.get("alias") === "slow")
+      return Response.json({ items: [entry("l5", { alias: "slow", model: "slow-model" })], total: 1 });
+    if (url.pathname === "/api/logs" && ++reads === 2) {
+      await gate;
+      return Response.json({ items: [entry("old", { model: "stale-model" })], total: 1 });
+    }
+    return api(req, url);
+  });
+  await findRow("or/x");
+  const ws = FakeSocket.last!;
+  act(() => {
+    ws.readyState = 1;
+    ws.onopen?.();
+  });
+  await waitFor(() => expect(reads).toBe(2));
+  act(() => router.history.push("/logs?live=true&alias=slow"));
+  await findRow("or/slow-model");
+  release();
+  await new Promise((r) => setTimeout(r, 50));
+  expect(screen.queryByText("or/stale-model")).toBeNull();
+  expect(screen.getByText("or/slow-model")).toBeInTheDocument();
 });
 
 test("live mode drops the old filter's rows when a filter changes", async () => {

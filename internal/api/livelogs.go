@@ -14,6 +14,9 @@ import (
 const (
 	// liveBuffer is how many rows a live viewer may fall behind before the tail drops it.
 	liveBuffer = 64
+	// liveBacklog is how many more rows wait in the tail for a viewer whose channel is full, so a burst does not cost
+	// the viewer its connection.
+	liveBacklog = 1000
 	// liveWriteTimeout bounds one frame's write to a viewer.
 	liveWriteTimeout = 10 * time.Second
 	// liveRootAliases bounds the remembered aliases of requests whose fallback attempts may still arrive.
@@ -33,8 +36,9 @@ func (f liveFilter) match(e gen.LogEntry) bool {
 // streamLogs serves GET /api/logs/live: a WebSocket of completed log entries, one JSON gen.LogEntry per text frame,
 // fed by the server's one front-door log tail. It sits behind the same authentication as every /api route (the
 // session cookie, which a same-origin browser WebSocket sends, or an API token) and accepts only the request's own
-// origin. Frames from the client (the UI's "ping" keepalive) are read and discarded. A viewer that falls behind is
-// dropped by the tail and closed with 1013, try again later; the tail never waits for it.
+// origin. Frames from the client (the UI's "ping" keepalive) are read and discarded. A viewer that falls further behind
+// than liveBuffer plus liveBacklog rows is dropped by the tail and closed with 1013, try again later; the tail never
+// waits for it.
 func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 	if s.d.Tail == nil || s.d.Names == nil {
 		s.writeError(w, r, errNotImplemented)
@@ -47,7 +51,7 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Subscribe before the upgrade, so every row completed once the client is connected reaches it.
-	rows, unsubscribe := s.d.Tail.Subscribe(liveBuffer, 0)
+	rows, unsubscribe := s.d.Tail.Subscribe(r.Context(), liveBuffer, liveBacklog)
 	defer unsubscribe()
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: []string{r.Host}})
 	if err != nil {

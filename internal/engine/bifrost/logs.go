@@ -114,15 +114,15 @@ type TokenUsage struct {
 	TotalTokens      int64 `json:"total_tokens"`
 }
 
-// LogStats is GET /api/logs/stats over a filter. The user-facing figures count a fallback chain once, as its root
-// request; UserFacingSuccessRate is a percentage.
+// LogStats is GET /api/logs/stats over a filter, counted per log row: Completed is the rows that finished and
+// SuccessRate the percentage of them that succeeded. Completed is nil when the filter matches nothing.
 type LogStats struct {
-	UserFacingTotalRequests int64   `json:"user_facing_total_requests"`
-	UserFacingSuccessRate   float64 `json:"user_facing_success_rate"`
-	PromptTokens            int64   `json:"prompt_tokens"`
-	CompletionTokens        int64   `json:"completion_tokens"`
-	TotalTokens             int64   `json:"total_tokens"`
-	TotalCost               float64 `json:"total_cost"`
+	Completed        *int64  `json:"cache_hit_rate_total_requests"`
+	SuccessRate      float64 `json:"success_rate"`
+	PromptTokens     int64   `json:"prompt_tokens"`
+	CompletionTokens int64   `json:"completion_tokens"`
+	TotalTokens      int64   `json:"total_tokens"`
+	TotalCost        float64 `json:"total_cost"`
 }
 
 // HistogramBucket is one time bucket of GET /api/logs/histogram: the rows that started in it, by outcome.

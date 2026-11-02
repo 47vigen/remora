@@ -87,7 +87,7 @@ func TestTailDeliversOnceInOrder(t *testing.T) {
 	}}
 	tl := NewTail(src, time.Second, nil, nil)
 	tl.now = func() time.Time { return t0 }
-	ch, cancel := tl.Subscribe(16, 0)
+	ch, cancel := tl.Subscribe(context.Background(), 16, 0)
 	defer cancel()
 	ctx := context.Background()
 	tl.poll(ctx)
@@ -111,7 +111,7 @@ func TestTailCatchesLateRow(t *testing.T) {
 	}}
 	tl := NewTail(src, time.Second, nil, nil)
 	tl.now = func() time.Time { return t0 }
-	ch, cancel := tl.Subscribe(16, 0)
+	ch, cancel := tl.Subscribe(context.Background(), 16, 0)
 	defer cancel()
 	ctx := context.Background()
 	tl.poll(ctx)
@@ -132,7 +132,7 @@ func TestTailSkipsProcessing(t *testing.T) {
 	}}
 	tl := NewTail(src, time.Second, nil, nil)
 	tl.now = func() time.Time { return t0 }
-	ch, cancel := tl.Subscribe(16, 0)
+	ch, cancel := tl.Subscribe(context.Background(), 16, 0)
 	defer cancel()
 	ctx := context.Background()
 	tl.poll(ctx)
@@ -154,7 +154,7 @@ func TestTailPagesBeyondLimit(t *testing.T) {
 	src := &fakeLogs{polls: [][]Log{rows}}
 	tl := NewTail(src, time.Second, nil, nil)
 	tl.now = func() time.Time { return t0 }
-	ch, cancel := tl.Subscribe(4000, 0)
+	ch, cancel := tl.Subscribe(context.Background(), 4000, 0)
 	defer cancel()
 	ctx := context.Background()
 	tl.poll(ctx)
@@ -192,7 +192,7 @@ func TestTailIdleWithoutSubscribers(t *testing.T) {
 		t.Fatalf("SearchLogs called %d times without subscribers", n)
 	}
 
-	ch, unsubscribe := tl.Subscribe(4, 0)
+	ch, unsubscribe := tl.Subscribe(context.Background(), 4, 0)
 	select {
 	case l := <-ch:
 		if l.ID != "a" {
@@ -217,9 +217,9 @@ func TestTailKeepsSlowSubscriber(t *testing.T) {
 	src := &fakeLogs{polls: [][]Log{{row("a", 1, "error"), row("b", 2, "error"), row("c", 3, "error")}}}
 	tl := NewTail(src, time.Second, nil, nil)
 	tl.now = func() time.Time { return t0 }
-	slow, cancelSlow := tl.Subscribe(1, 2)
+	slow, cancelSlow := tl.Subscribe(context.Background(), 1, 2)
 	defer cancelSlow()
-	fast, cancelFast := tl.Subscribe(16, 0)
+	fast, cancelFast := tl.Subscribe(context.Background(), 16, 0)
 	defer cancelFast()
 	ctx := context.Background()
 	tl.poll(ctx)
@@ -241,7 +241,7 @@ func TestTailDropsSubscriberPastBacklog(t *testing.T) {
 	src := &fakeLogs{polls: [][]Log{{row("a", 1, "error"), row("b", 2, "error"), row("c", 3, "error")}}}
 	tl := NewTail(src, time.Second, nil, nil)
 	tl.now = func() time.Time { return t0 }
-	slow, cancelSlow := tl.Subscribe(1, 1)
+	slow, cancelSlow := tl.Subscribe(context.Background(), 1, 1)
 	tl.poll(context.Background())
 
 	if l, ok := <-slow; !ok || l.ID != "a" {
@@ -263,7 +263,7 @@ func TestTailCatchesLongRequest(t *testing.T) {
 	}
 	tl := NewTail(src, time.Second, nil, nil)
 	tl.now = func() time.Time { return t0 }
-	ch, cancel := tl.Subscribe(16, 0)
+	ch, cancel := tl.Subscribe(context.Background(), 16, 0)
 	defer cancel()
 	ctx := context.Background()
 	tl.poll(ctx)
@@ -288,7 +288,7 @@ func TestTailStatusFilter(t *testing.T) {
 	src := &fakeLogs{polls: [][]Log{{row("a", 1, "error")}}}
 	tl := NewTail(src, time.Second, []string{"error"}, nil)
 	tl.now = func() time.Time { return t0 }
-	_, cancel := tl.Subscribe(16, 0)
+	_, cancel := tl.Subscribe(context.Background(), 16, 0)
 	defer cancel()
 	tl.poll(context.Background())
 	if len(src.calls) == 0 {
@@ -306,7 +306,7 @@ func TestTailAdvancesWithoutRows(t *testing.T) {
 	tl := NewTail(src, time.Second, []string{"error"}, nil)
 	clock := t0.Add(time.Second)
 	tl.now = func() time.Time { return clock }
-	_, cancel := tl.Subscribe(16, 0)
+	_, cancel := tl.Subscribe(context.Background(), 16, 0)
 	defer cancel()
 	ctx := context.Background()
 	tl.poll(ctx)
@@ -315,5 +315,57 @@ func TestTailAdvancesWithoutRows(t *testing.T) {
 	tl.poll(ctx)
 	if want := clock.Add(-defaultLookback); !src.calls[2].Start.Equal(want) {
 		t.Fatalf("third poll start = %v, want %v: an idle feed must not keep reading from its last row", src.calls[2].Start, want)
+	}
+}
+
+// A viewer who opens the log after an idle spell gets what completes from then on, not the minutes before it, which
+// its page already shows. The existing rows are read before the viewer is registered, so a request that completes
+// between the subscription and the first poll is delivered, not taken for history.
+func TestLiveTailSkipsHistoryButNotCompletionsAfterSubscribe(t *testing.T) {
+	src := &fakeLogs{polls: [][]Log{
+		{row("old1", 1, "success"), row("old2", 2, "success")},
+		{row("old1", 1, "success"), row("old2", 2, "success"), row("new", 3, "success")},
+	}}
+	tl := NewTail(src, time.Second, nil, nil).Live()
+	tl.now = func() time.Time { return t0.Add(10 * time.Second) }
+	ch, cancel := tl.Subscribe(context.Background(), 16, 0)
+	defer cancel()
+	if src.callCount() != 1 {
+		t.Fatalf("Subscribe read the log %d times, want 1", src.callCount())
+	}
+	if got := drain(ch); len(got) != 0 {
+		t.Fatalf("history delivered: %v", got)
+	}
+	tl.poll(context.Background())
+	if got := drain(ch); !eq(got, []string{"new:success"}) {
+		t.Fatalf("delivered %v", got)
+	}
+}
+
+// Most live polls read the last minute; every tenth reads the whole lookback so a long request is found.
+func TestLiveTailReadsNarrowWindowMostPolls(t *testing.T) {
+	src := &fakeLogs{}
+	tl := NewTail(src, time.Second, nil, nil).Live()
+	now := t0
+	var nows []time.Time
+	tl.now = func() time.Time { nows = append(nows, now); return now }
+	_, cancel := tl.Subscribe(context.Background(), 16, 0) // reads the whole lookback once, to prime the tail
+	defer cancel()
+	ctx := context.Background()
+	for range 2 * liveWideEvery {
+		now = now.Add(time.Second)
+		tl.poll(ctx)
+	}
+	wide := 0
+	for i, c := range src.calls {
+		back := nows[i].Sub(*c.Start)
+		if back >= defaultLookback {
+			wide++
+		} else if back > liveNarrow+time.Second {
+			t.Fatalf("poll %d reaches back %v", i, back)
+		}
+	}
+	if wide != 3 {
+		t.Fatalf("%d of %d polls read the whole lookback, want the priming read and 2", wide, len(src.calls))
 	}
 }

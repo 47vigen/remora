@@ -850,6 +850,15 @@ paths:
             type: string
             enum: [none, key, alias, provider, model]
             default: none
+        - name: groups_only
+          in: query
+          required: false
+          description: >-
+            When true, `summary` is all zeros and `series` is empty; only `groups` is computed. For a caller that
+            already holds the summary and the series of the same range.
+          schema:
+            type: boolean
+            default: false
         - $ref: "#/components/parameters/KeyFilter"
         - $ref: "#/components/parameters/AliasFilter"
         - $ref: "#/components/parameters/ProviderFilter"
@@ -1765,6 +1774,7 @@ components:
       properties:
         requests:
           type: integer
+          description: Log rows that finished, a fallback attempt counting as a request, as in `series` and the log list.
         errors:
           type: integer
         error_rate:

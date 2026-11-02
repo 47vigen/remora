@@ -2,6 +2,8 @@ import type { LogEntry } from "../../../../client";
 import {
   type LogSummary,
   matchesLogFilters,
+  mergeCatchUp,
+  mergeLive,
   parseLogSearch,
   prependLive,
   rangeToWindow,
@@ -54,9 +56,32 @@ test("matchesLogFilters applies every set filter", () => {
 test("prependLive caps and de-duplicates", () => {
   const a = { id: "a" } as LogSummary,
     b = { id: "b" } as LogSummary;
-  expect(prependLive([a], b, 1).map((l) => l.id)).toEqual(["b"]);
-  expect(prependLive([a], a, 5).map((l) => l.id)).toEqual(["a"]);
-  expect(prependLive([a], b, 5).map((l) => l.id)).toEqual(["b", "a"]);
+  expect(prependLive([a], [b], 1).map((l) => l.id)).toEqual(["b"]);
+  expect(prependLive([a], [a], 5).map((l) => l.id)).toEqual(["a"]);
+  expect(prependLive([a], [b], 5).map((l) => l.id)).toEqual(["b", "a"]);
+  // a batch arrives oldest first and lands newest on top
+  const c = { ...a, id: "c" };
+  expect(prependLive([a], [b, c], 5).map((l) => l.id)).toEqual(["c", "b", "a"]);
+});
+
+test("mergeLive adds missed rows by time, de-duplicates and caps", () => {
+  const row = (id: string, sec: number) => ({ id, ts: new Date(sec * 1000).toISOString() }) as LogSummary;
+  const ids = (l: LogSummary[]) => l.map((r) => r.id);
+  expect(ids(mergeLive([row("b", 2)], [row("c", 3), row("b", 2), row("a", 1)], 5))).toEqual(["c", "b", "a"]);
+  // a page longer than the cap, with nothing missed: the newest rows stay, the older page rows do not displace them
+  const live = [row("e", 5), row("d", 4)];
+  expect(ids(mergeLive(live, [row("e", 5), row("d", 4), row("c", 3), row("b", 2), row("a", 1)], 2))).toEqual([
+    "e",
+    "d",
+  ]);
+});
+
+test("mergeCatchUp ignores a page read under other filters", () => {
+  const row = (id: string) => ({ id, ts: "2026-10-14T10:00:00Z" }) as LogSummary;
+  const state = { key: "slow", rows: [row("s")] };
+  expect(mergeCatchUp(state, "fast", [row("f")], 5)).toBe(state);
+  expect(mergeCatchUp(null, "fast", [row("f")], 5)).toBeNull();
+  expect(mergeCatchUp(state, "slow", [row("t")], 5)?.rows.map((l) => l.id)).toEqual(["s", "t"]);
 });
 
 test("toLogSummary maps an entry and marks fallbacks", () => {

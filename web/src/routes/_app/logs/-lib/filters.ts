@@ -89,9 +89,26 @@ export function matchesLogFilters(l: LogSummary, s: LogSearch): boolean {
   return true;
 }
 
-/** Puts `incoming` first, drops an older copy of the same id, and keeps at most `cap` rows. */
-export function prependLive(list: LogSummary[], incoming: LogSummary, cap: number): LogSummary[] {
-  return [incoming, ...list.filter((l) => l.id !== incoming.id)].slice(0, cap);
+/** Puts `incoming` (oldest first) ahead of `list`, newest on top, drops older copies of the same ids, and keeps at most `cap` rows. */
+export function prependLive(list: LogSummary[], incoming: LogSummary[], cap: number): LogSummary[] {
+  const ids = new Set(incoming.map((l) => l.id));
+  return [...incoming.toReversed(), ...list.filter((l) => !ids.has(l.id))].slice(0, cap);
+}
+
+/** `list` and `page` together, one row per id, newest first by time, at most `cap`: a page read late adds what the stream missed and nothing else. */
+export function mergeLive(list: LogSummary[], page: LogSummary[], cap: number): LogSummary[] {
+  const have = new Set(list.map((l) => l.id));
+  return [...list, ...page.filter((l) => !have.has(l.id))]
+    .sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts))
+    .slice(0, cap);
+}
+
+/** Live rows and the filters they were read under. */
+export type LiveState = { key: string; rows: LogSummary[] };
+
+/** Adds a page read under filters `key` to the live rows, unless those rows are gone or belong to other filters. */
+export function mergeCatchUp(s: LiveState | null, key: string, page: LogSummary[], cap: number): LiveState | null {
+  return s !== null && s.key === key ? { key, rows: mergeLive(s.rows, page, cap) } : s;
 }
 
 export function toLogSummary(e: LogEntry, keyNames?: Map<string, string>): LogSummary {

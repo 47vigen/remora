@@ -42,10 +42,9 @@ func TestPercentile(t *testing.T) {
 	for i := 10; i >= 1; i-- {
 		logs.add(bifrost.Log{ID: string(rune('a' + i)), Timestamp: ts, Status: "success", Latency: ptr(float64(i * 10))})
 	}
-	logs.add(bifrost.Log{ID: "slow-error", Timestamp: ts, Status: "error", Latency: ptr(5000.0)})
 	ctx := context.Background()
 
-	p50, err := percentile(ctx, logs, bifrost.LogFilter{}, 0.5)
+	p50, err := percentile(ctx, logs, bifrost.LogFilter{}, 0.5, 10)
 	if err != nil || p50 == nil || *p50 != 50 {
 		t.Fatalf("p50 = %v, %v", p50, err)
 	}
@@ -53,15 +52,16 @@ func TestPercentile(t *testing.T) {
 	if f.Offset != 4 || f.Limit != 1 || f.SortBy != "latency" || f.Order != "asc" || !slices.Equal(f.Status, []string{"success"}) {
 		t.Errorf("p50 query = %+v", f)
 	}
-	p95, err := percentile(ctx, logs, bifrost.LogFilter{}, 0.95)
+	// The top of the list is read from its own end, where the engine's sort stays short.
+	p95, err := percentile(ctx, logs, bifrost.LogFilter{}, 0.95, 10)
 	if err != nil || p95 == nil || *p95 != 100 {
 		t.Fatalf("p95 = %v, %v", p95, err)
 	}
-	if f, _ := logs.lastSearch(); f.Offset != 9 {
-		t.Errorf("p95 offset = %d", f.Offset)
+	if f, _ := logs.lastSearch(); f.Order != "desc" || f.Offset != 0 {
+		t.Errorf("p95 query = %+v", f)
 	}
 
-	none, err := percentile(ctx, &fakeLogs{}, bifrost.LogFilter{}, 0.5)
+	none, err := percentile(ctx, &fakeLogs{}, bifrost.LogFilter{}, 0.5, 0)
 	if err != nil || none != nil {
 		t.Fatalf("empty p50 = %v, %v", none, err)
 	}
@@ -90,29 +90,49 @@ func TestStatsSummary(t *testing.T) {
 	env := newTestEnv(t)
 	env.logs.stats = func(bifrost.LogFilter) bifrost.LogStats {
 		return bifrost.LogStats{
-			UserFacingTotalRequests: 200, UserFacingSuccessRate: 97.5, PromptTokens: 600, CompletionTokens: 300,
+			Completed: new(int64(4)), SuccessRate: 75, PromptTokens: 600, CompletionTokens: 300,
 			TotalTokens: 900, TotalCost: 1.75,
 		}
 	}
 	ts := time.Now().UTC().Truncate(time.Hour)
-	env.logs.histogram = []bifrost.HistogramBucket{{Timestamp: ts, Count: 7, Success: 5, Error: 2}}
-	env.logs.add(bifrost.Log{ID: "a", Timestamp: ts, Status: "success", Latency: ptr(42.0)})
+	env.logs.histogram = []bifrost.HistogramBucket{{Timestamp: ts, Count: 4, Success: 3, Error: 1}}
+	env.logs.latency = []bifrost.LatencyBucket{{Timestamp: ts, P95Latency: 30, TotalRequests: 3}}
+	for i, ms := range []float64{30, 10, 20} {
+		env.logs.add(bifrost.Log{ID: string(rune('a' + i)), Timestamp: ts, Status: "success", Latency: ptr(ms)})
+	}
 	s, raw := getStats(t, env, "/api/stats")
 	want := map[string]any{
-		"requests": 200.0, "errors": 5.0, "error_rate": 0.025, "prompt_tokens": 600.0, "completion_tokens": 300.0,
-		"total_tokens": 900.0, "cost_usd": 1.75, "latency_p50_ms": 42.0, "latency_p95_ms": 42.0,
+		"requests": 4.0, "errors": 1.0, "error_rate": 0.25, "prompt_tokens": 600.0, "completion_tokens": 300.0,
+		"total_tokens": 900.0, "cost_usd": 1.75, "latency_p50_ms": 20.0, "latency_p95_ms": 30.0,
 	}
 	for k, v := range want {
 		if s.Summary[k] != v {
 			t.Errorf("summary.%s = %v, want %v", k, s.Summary[k], v)
 		}
 	}
-	if len(s.Series) != 1 || s.Series[0]["requests"] != 7.0 || s.Series[0]["errors"] != 2.0 ||
+	if len(s.Series) != 1 || s.Series[0]["requests"] != s.Summary["requests"] || s.Series[0]["errors"] != s.Summary["errors"] ||
 		s.Series[0]["time"] != ts.Format(time.RFC3339) {
 		t.Errorf("series = %s", raw)
 	}
 	if len(s.Groups) != 0 {
 		t.Errorf("groups without group_by = %v", s.Groups)
+	}
+}
+
+// A caller that holds the summary and the series already asks for the groups alone.
+func TestStatsGroupsOnly(t *testing.T) {
+	env := newTestEnv(t)
+	env.names.targets = map[[2]string]alias.Target{{"fd-or", "gpt-x"}: {Provider: "or", Model: "gpt-x"}}
+	env.logs.usage = []bifrost.ModelUsage{{Provider: "fd-or", Model: "gpt-x", TotalRequests: 4}}
+	env.logs.stats = func(bifrost.LogFilter) bifrost.LogStats {
+		return bifrost.LogStats{Completed: new(int64(4)), SuccessRate: 100}
+	}
+	s, raw := getStats(t, env, "/api/stats?group_by=model&groups_only=true")
+	if len(s.Groups) != 1 || s.Groups[0].Summary["requests"] != 4.0 {
+		t.Fatalf("groups = %s", raw)
+	}
+	if s.Summary["requests"] != 0.0 || len(s.Series) != 0 || len(env.logs.histCalls) != 0 || len(env.logs.statsCalls) != 1 {
+		t.Errorf("summary or series computed: %s, %d histogram calls, %d stats calls", raw, len(env.logs.histCalls), len(env.logs.statsCalls))
 	}
 }
 
@@ -128,11 +148,11 @@ func TestStatsGroupByAlias(t *testing.T) {
 	env.logs.stats = func(f bifrost.LogFilter) bifrost.LogStats {
 		switch {
 		case slices.Equal(f.RoutingRuleIDs, []string{"r1"}):
-			return bifrost.LogStats{UserFacingTotalRequests: 10, UserFacingSuccessRate: 100}
+			return bifrost.LogStats{Completed: new(int64(10)), SuccessRate: 100}
 		case slices.Equal(f.RoutingRuleIDs, []string{"r2"}):
-			return bifrost.LogStats{UserFacingTotalRequests: 4, UserFacingSuccessRate: 50}
+			return bifrost.LogStats{Completed: new(int64(4)), SuccessRate: 50}
 		case len(f.RoutingRuleIDs) == 0:
-			return bifrost.LogStats{UserFacingTotalRequests: 14, UserFacingSuccessRate: 85.7}
+			return bifrost.LogStats{Completed: new(int64(14)), SuccessRate: 85.7}
 		}
 		return bifrost.LogStats{}
 	}
@@ -168,7 +188,7 @@ func TestStatsGroupByProviderAndKey(t *testing.T) {
 	env.names.keys = map[string]string{k.ID: "vk1"}
 	env.logs.stats = func(f bifrost.LogFilter) bifrost.LogStats {
 		if len(f.Providers) > 0 || len(f.VirtualKeyIDs) > 0 {
-			return bifrost.LogStats{UserFacingTotalRequests: 3, UserFacingSuccessRate: 100}
+			return bifrost.LogStats{Completed: new(int64(3)), SuccessRate: 100}
 		}
 		return bifrost.LogStats{}
 	}
@@ -210,7 +230,7 @@ func TestKeyUsage(t *testing.T) {
 	}
 	env.names.keys = map[string]string{k.ID: "vk1"}
 	env.logs.stats = func(bifrost.LogFilter) bifrost.LogStats {
-		return bifrost.LogStats{UserFacingTotalRequests: 8, UserFacingSuccessRate: 75}
+		return bifrost.LogStats{Completed: new(int64(8)), SuccessRate: 75}
 	}
 	s, _ := getStats(t, env, "/api/keys/"+k.ID+"/usage")
 	if f := env.logs.statsCalls[0]; !slices.Equal(f.VirtualKeyIDs, []string{"vk1"}) {
@@ -231,7 +251,7 @@ func TestStatsSubscriptionProvidersSplitByModel(t *testing.T) {
 	env.accounts.accounts = []Account{{ID: "1", Provider: "antigravity"}, {ID: "2", Provider: "codex"}, {ID: "3", Provider: "grok"}}
 	env.logs.models = []string{"antigravity/g-1", "antigravity/g-2(8192)", "codex/c-1", "or/antigravity/x"}
 	env.logs.stats = func(f bifrost.LogFilter) bifrost.LogStats {
-		return bifrost.LogStats{UserFacingTotalRequests: int64(len(f.Models)), UserFacingSuccessRate: 100}
+		return bifrost.LogStats{Completed: new(int64(len(f.Models))), SuccessRate: 100}
 	}
 	s, raw := getStats(t, env, "/api/stats?group_by=provider")
 	got := map[string]float64{}
@@ -305,9 +325,9 @@ func TestStatsGroupByModel(t *testing.T) {
 	env.logs.stats = func(f bifrost.LogFilter) bifrost.LogStats {
 		switch {
 		case slices.Equal(f.Models, []string{"gpt-x"}) && slices.Equal(f.Providers, []string{"fd-or"}):
-			return bifrost.LogStats{UserFacingTotalRequests: 4, UserFacingSuccessRate: 100}
+			return bifrost.LogStats{Completed: new(int64(4)), SuccessRate: 100}
 		case slices.Equal(f.Models, []string{"codex/c-1"}) && slices.Equal(f.Providers, []string{bifrost.OAuthProvider}):
-			return bifrost.LogStats{UserFacingTotalRequests: 2, UserFacingSuccessRate: 50}
+			return bifrost.LogStats{Completed: new(int64(2)), SuccessRate: 50}
 		}
 		return bifrost.LogStats{}
 	}
