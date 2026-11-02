@@ -22,9 +22,10 @@ import { LogsTable } from "./-components/LogsTable";
 import { useLiveLogs } from "./-hooks/useLiveLogs";
 import {
   type LogSearch,
+  type LiveState,
   type LogSummary,
   matchesLogFilters,
-  missedLive,
+  mergeCatchUp,
   parseLogSearch,
   prependLive,
   rangeToWindow,
@@ -87,49 +88,53 @@ function LogsPage() {
   );
 
   const effectivePage = live ? 1 : page;
-  const list = useQuery(
-    listLogsOptions({
-      query: {
-        limit: pageSize,
-        offset: (effectivePage - 1) * pageSize,
-        q: q || undefined,
-        key: search.keyId,
-        alias: search.alias,
-        provider: search.provider,
-        model: search.servedModel,
-        status: search.status,
-        ...span,
-      },
-    }),
-  );
+  const listOptions = listLogsOptions({
+    query: {
+      limit: pageSize,
+      offset: (effectivePage - 1) * pageSize,
+      q: q || undefined,
+      key: search.keyId,
+      alias: search.alias,
+      provider: search.provider,
+      model: search.servedModel,
+      status: search.status,
+      ...span,
+    },
+  });
+  const list = useQuery(listOptions);
   const pageRows = useMemo(() => (list.data?.items ?? []).map((e) => toLogSummary(e, keyNames)), [list.data, keyNames]);
 
-  // Live mode starts from page 1 and prepends what arrives, within the same filters.
+  // Live mode starts from page 1 and prepends what arrives, within the same filters. The rows carry the filters they
+  // belong to, so a read that finishes after the filters changed cannot add its page to the new rows.
   const liveCap = Math.min(pageSize, LIVE_ROWS);
-  const [liveRows, setLiveRows] = useState<LogSummary[] | null>(null);
+  const [liveState, setLive] = useState<LiveState | null>(null);
+  const liveRows = liveState?.key === filterKey ? liveState.rows : null;
+  const edit = (key: string, change: (rows: LogSummary[]) => LogSummary[]) =>
+    setLive((s) => (s === null ? { key, rows: change([]) } : s.key === key ? { key, rows: change(s.rows) } : s));
   // New filters restart live mode from the new first page; rows that matched the old filters must not linger.
-  const [liveFilters, setLiveFilters] = useState(filterKey);
-  if (liveFilters !== filterKey) {
-    setLiveFilters(filterKey);
-    setLiveRows(null);
-  }
-  if (live && liveRows === null && list.data && !list.isPlaceholderData && liveFilters === filterKey)
-    setLiveRows(pageRows.slice(0, liveCap));
-  if (!live && liveRows !== null) setLiveRows(null);
+  if (liveState !== null && liveState.key !== filterKey) setLive(null);
+  if (live && liveState === null && list.data && !list.isPlaceholderData)
+    setLive({ key: filterKey, rows: pageRows.slice(0, liveCap) });
+  if (!live && liveState !== null) setLive(null);
   // The page Live starts from may be old and the stream only carries what completes after it connects, so each
-  // connection reads page 1 again and adds the rows the stream did not bring.
+  // connection reads page 1 again and merges in the rows the stream did not bring.
   const { isConnected } = useLiveLogs(
     live === true,
     (batch) => {
       const fresh = batch
         .map((l) => (l.keyId !== undefined ? { ...l, keyName: keyNames.get(l.keyId) } : l))
         .filter((l) => matchesLogFilters(l, search));
-      if (fresh.length > 0) setLiveRows((rows) => prependLive(rows ?? [], fresh, liveCap));
+      if (fresh.length > 0) edit(filterKey, (rows) => prependLive(rows, fresh, liveCap));
     },
     async () => {
-      const { data } = await list.refetch();
-      const page = (data?.items ?? []).map((e) => toLogSummary(e, keyNames));
-      setLiveRows((rows) => (rows === null ? rows : prependLive(rows, missedLive(rows, page), liveCap)));
+      const key = filterKey;
+      try {
+        const data = await queryClient.fetchQuery({ ...listOptions, staleTime: 0 });
+        const page = data.items.map((e) => toLogSummary(e, keyNames));
+        setLive((s) => mergeCatchUp(s, key, page, liveCap));
+      } catch {
+        // Filters changed under the read, or it failed: the stream carries on and the next connection reads again.
+      }
     },
   );
   const rows = live ? (liveRows ?? pageRows) : pageRows;

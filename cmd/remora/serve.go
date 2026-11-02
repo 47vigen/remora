@@ -344,7 +344,7 @@ const (
 // subscription that fell behind.
 func runCooling(ctx context.Context, cooler *cooling.Cooler, tail *bifrost.Tail, fd *bifrost.Client, logger *slog.Logger) {
 	for {
-		rows, cancel := tail.Subscribe(coolingFeedBuffer, coolingFeedBacklog)
+		rows, cancel := tail.Subscribe(ctx, coolingFeedBuffer, coolingFeedBacklog)
 		err := cooler.Run(ctx, rows, fd.GetLog, 0)
 		cancel()
 		if ctx.Err() != nil {

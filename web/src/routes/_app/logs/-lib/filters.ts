@@ -95,10 +95,20 @@ export function prependLive(list: LogSummary[], incoming: LogSummary[], cap: num
   return [...incoming.toReversed(), ...list.filter((l) => !ids.has(l.id))].slice(0, cap);
 }
 
-/** What a page holds that `list` does not, for rows the stream missed; `list` keeps its order, the new rows go on top. */
-export function missedLive(list: LogSummary[], page: LogSummary[]): LogSummary[] {
+/** `list` and `page` together, one row per id, newest first by time, at most `cap`: a page read late adds what the stream missed and nothing else. */
+export function mergeLive(list: LogSummary[], page: LogSummary[], cap: number): LogSummary[] {
   const have = new Set(list.map((l) => l.id));
-  return page.filter((l) => !have.has(l.id)).toReversed();
+  return [...list, ...page.filter((l) => !have.has(l.id))]
+    .sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts))
+    .slice(0, cap);
+}
+
+/** Live rows and the filters they were read under. */
+export type LiveState = { key: string; rows: LogSummary[] };
+
+/** Adds a page read under filters `key` to the live rows, unless those rows are gone or belong to other filters. */
+export function mergeCatchUp(s: LiveState | null, key: string, page: LogSummary[], cap: number): LiveState | null {
+  return s !== null && s.key === key ? { key, rows: mergeLive(s.rows, page, cap) } : s;
 }
 
 export function toLogSummary(e: LogEntry, keyNames?: Map<string, string>): LogSummary {
