@@ -20,7 +20,7 @@ func TestVersionReadsManifestAtMostEvery3h(t *testing.T) {
 	v := newVersionCache(srv.Client(), srv.URL)
 	v.now = func() time.Time { return now }
 	for range 10 {
-		if got := v.userAgent(context.Background()); got != "antigravity/hub/2.30.1 darwin/arm64" {
+		if got := v.userAgent(context.Background()); got != "antigravity/hub/2.30.1 (aidev_client; os_type=darwin; arch=arm64)" {
 			t.Fatalf("userAgent = %q", got)
 		}
 		now = now.Add(17 * time.Minute)
@@ -54,12 +54,12 @@ func TestVersionFallsBackToFloor(t *testing.T) {
 	}
 	fail.Store(false)
 	now = now.Add(antigravityVersionTTL)
-	if got := v.userAgent(context.Background()); got != "antigravity/hub/2.31.0 darwin/arm64" {
+	if got := v.userAgent(context.Background()); got != "antigravity/hub/2.31.0 (aidev_client; os_type=darwin; arch=arm64)" {
 		t.Errorf("after a good read: %q", got)
 	}
 	fail.Store(true)
 	now = now.Add(antigravityVersionTTL)
-	if got := v.userAgent(context.Background()); got != "antigravity/hub/2.31.0 darwin/arm64" {
+	if got := v.userAgent(context.Background()); got != "antigravity/hub/2.31.0 (aidev_client; os_type=darwin; arch=arm64)" {
 		t.Errorf("a later failure: %q, want the last good version", got)
 	}
 }

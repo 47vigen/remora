@@ -21,7 +21,7 @@ const (
 	codexBody    = `{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":30,"limit_window_seconds":18000}}}`
 	claudeBody   = `{"five_hour":{"utilization":10}}`
 	planBody     = `{"paidTier":{"id":"g1-pro-tier","name":"Pro"}}`
-	agFloorAgent = "antigravity/hub/2.23.0 darwin/arm64"
+	agFloorAgent = "antigravity/hub/2.24.0 (aidev_client; os_type=darwin; arch=arm64)"
 )
 
 func newFetcher(e *fakeEngine) *fetcher {

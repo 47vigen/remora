@@ -18,7 +18,7 @@ func TestCodexDroppedParams(t *testing.T) {
 			path: "/v1/chat/completions",
 			body: `{"model":"codex/gpt-x","messages":[],"temperature":0.5,"top_p":0.9,"max_tokens":10,` +
 				`"parallel_tool_calls":false,"stop":["x"]}`,
-			want: []string{"max_tokens", "parallel_tool_calls", "stop", "temperature", "top_p"},
+			want: []string{"max_tokens", "stop", "temperature", "top_p"},
 		},
 		{
 			name: "chat keeps what the translator carries",
@@ -53,7 +53,7 @@ func TestCodexDroppedParams(t *testing.T) {
 			path: "/v1/responses",
 			body: `{"model":"m","input":"hi","temperature":1,"top_p":1,"max_completion_tokens":5,"truncation":"auto",` +
 				`"prompt_cache_options":{},"prompt_cache_retention":"24h","context_management":[],` +
-				`"parallel_tool_calls":false,"service_tier":7,"metadata":{}}`,
+				`"parallel_tool_calls":"no","service_tier":7,"metadata":{}}`,
 			want: []string{
 				"context_management", "max_completion_tokens", "parallel_tool_calls", "prompt_cache_options",
 				"prompt_cache_retention", "service_tier", "temperature", "top_p", "truncation",

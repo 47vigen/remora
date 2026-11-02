@@ -55,11 +55,11 @@ func CodexDroppedParams(path string, body []byte) []string {
 			}
 		}
 		out = appendIf(out, obj, "service_tier", func(v json.RawMessage) bool { return !codexKnownTier(v) })
-		out = appendIf(out, obj, "parallel_tool_calls", notJSON("true"))
+		out = appendIf(out, obj, "parallel_tool_calls", notBool)
 	case "/v1/responses":
 		out = appendPresent(out, obj, codexResponsesDropped)
 		out = appendIf(out, obj, "service_tier", func(v json.RawMessage) bool { return !codexKnownTier(v) })
-		out = appendIf(out, obj, "parallel_tool_calls", notJSON("true"))
+		out = appendIf(out, obj, "parallel_tool_calls", notBool)
 		out = appendIf(out, obj, "store", notJSON("false"))
 	case "/v1/messages":
 		out = appendPresent(out, obj, codexMessagesDropped)
@@ -92,6 +92,12 @@ func appendIf(out []string, obj map[string]json.RawMessage, key string, dropped 
 // notJSON reports a value other than the JSON literal want, which the translator forces in its place.
 func notJSON(want string) func(json.RawMessage) bool {
 	return func(v json.RawMessage) bool { return !bytes.Equal(bytes.TrimSpace(v), []byte(want)) }
+}
+
+// notBool reports a value other than true or false: the translator keeps an explicit false and forces everything
+// else, absent included, to true (since v8.0.4x; before that it forced true over false too).
+func notBool(v json.RawMessage) bool {
+	return notJSON("true")(v) && notJSON("false")(v)
 }
 
 // codexKnownTier reports whether a service_tier value is one the Codex translator keeps: a string naming
