@@ -183,7 +183,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	// the lookback and then fails is still followed; reading every row re-read the whole window, bodies included,
 	// every poll. Live log viewers get their own tail, which polls only while one is open.
 	coolTail := bifrost.NewTail(fd, cfg.Cooling.Poll, []string{"error", "processing"}, logger)
-	liveTail := bifrost.NewTail(fd, cfg.Cooling.Poll, nil, logger)
+	liveTail := bifrost.NewTail(fd, cfg.Cooling.Poll, nil, logger).Live()
 	loops.Go(func() { coolTail.Run(rctx) })
 	loops.Go(func() { liveTail.Run(rctx) })
 	loops.Go(func() { runCooling(rctx, cooler, coolTail, fd, logger) })

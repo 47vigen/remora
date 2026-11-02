@@ -34,11 +34,17 @@ const listeners = new Set<(entry: LogEntry) => void>();
 
 /**
  * Streams new log entries while `enabled`. The session cookie authenticates the socket; each text frame is one
- * LogEntry. Turning it off, or leaving the page, closes the socket.
+ * LogEntry. Entries that arrive within one animation frame reach `onLogs` together, oldest first, so a busy stream
+ * costs one render a frame; `onOpen` runs each time a connection opens. Turning it off, or leaving the page, closes the socket.
  */
-export function useLiveLogs(enabled: boolean, onLog: (l: LogSummary) => void): { isConnected: boolean } {
+export function useLiveLogs(
+  enabled: boolean,
+  onLogs: (batch: LogSummary[]) => void,
+  onOpen?: () => void,
+): { isConnected: boolean } {
   const [isConnected, setIsConnected] = useState(false);
-  const deliver = useEffectEvent((entry: LogEntry) => onLog(toLogSummary(entry)));
+  const deliver = useEffectEvent((batch: LogSummary[]) => onLogs(batch));
+  const opened = useEffectEvent(() => onOpen?.());
 
   useEffect(() => {
     if (!enabled) return;
@@ -46,7 +52,18 @@ export function useLiveLogs(enabled: boolean, onLog: (l: LogSummary) => void): {
     // Set when this mount adopts a socket created by an earlier mount;
     // removes the open/close listeners that keep this mount's state honest.
     let detachAdopted: (() => void) | null = null;
-    const listener = (entry: LogEntry) => deliver(entry);
+    let pending: LogSummary[] = [];
+    let frame = 0;
+    const flush = () => {
+      frame = 0;
+      const batch = pending;
+      pending = [];
+      deliver(batch);
+    };
+    const listener = (entry: LogEntry) => {
+      pending.push(toLogSummary(entry));
+      frame ||= requestAnimationFrame(flush);
+    };
     listeners.add(listener);
 
     const connect = () => {
@@ -76,6 +93,7 @@ export function useLiveLogs(enabled: boolean, onLog: (l: LogSummary) => void): {
       ws.onopen = () => {
         if (getSocket() !== ws) return;
         if (mounted) setIsConnected(true);
+        opened();
         resetRetryCount(); // Reset retry count on successful connection
         clearReconnectTimer();
         // The heartbeat belongs to the socket, not to this mount.
@@ -118,6 +136,7 @@ export function useLiveLogs(enabled: boolean, onLog: (l: LogSummary) => void): {
 
     return () => {
       mounted = false;
+      cancelAnimationFrame(frame);
       listeners.delete(listener);
       setActiveConnect(null);
       clearReconnectTimer();

@@ -30,9 +30,15 @@ class FakeSocket {
   }
 }
 
+let frames: FrameRequestCallback[] = [];
+const flushFrame = () => act(() => frames.splice(0).forEach((cb) => cb(0)));
+
 beforeEach(() => {
   FakeSocket.instances = [];
+  frames = [];
   vi.stubGlobal("WebSocket", FakeSocket);
+  vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => frames.push(cb));
+  vi.stubGlobal("cancelAnimationFrame", () => {});
 });
 afterEach(() => {
   stopWebSocket();
@@ -51,7 +57,7 @@ const entry = {
 };
 
 test("connects to the live endpoint on this host, maps frames and reports the state", () => {
-  const onLog = vi.fn<(l: LogSummary) => void>();
+  const onLog = vi.fn<(batch: LogSummary[]) => void>();
   const { result, unmount } = renderHook(() => useLiveLogs(true, onLog));
   const ws = FakeSocket.instances[0]!;
   expect(ws.url).toBe(`ws://${location.host}/api/logs/live`);
@@ -59,12 +65,27 @@ test("connects to the live endpoint on this host, maps frames and reports the st
   act(() => ws.open());
   expect(result.current.isConnected).toBe(true);
   act(() => ws.onmessage?.({ data: JSON.stringify(entry) }));
-  expect(onLog).toHaveBeenCalledWith(expect.objectContaining({ id: "l1", provider: "or", fallback: false }));
+  flushFrame();
+  expect(onLog).toHaveBeenCalledWith([expect.objectContaining({ id: "l1", provider: "or", fallback: false })]);
   act(() => ws.onmessage?.({ data: "not json" }));
+  flushFrame();
   expect(onLog).toHaveBeenCalledTimes(1);
   unmount();
   expect(ws.readyState).toBe(3);
   expect(getSocket()).toBeNull();
+});
+
+test("entries within one frame arrive as one batch", () => {
+  const onLog = vi.fn<(batch: LogSummary[]) => void>();
+  renderHook(() => useLiveLogs(true, onLog));
+  const ws = FakeSocket.instances[0]!;
+  act(() => ws.open());
+  for (const id of ["a", "b", "c"]) act(() => ws.onmessage?.({ data: JSON.stringify({ ...entry, id }) }));
+  expect(frames).toHaveLength(1);
+  expect(onLog).not.toHaveBeenCalled();
+  flushFrame();
+  expect(onLog).toHaveBeenCalledOnce();
+  expect(onLog.mock.calls[0]![0].map((l) => l.id)).toEqual(["a", "b", "c"]);
 });
 
 test("nothing connects while disabled, and turning it off closes the socket", () => {

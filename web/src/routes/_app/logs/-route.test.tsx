@@ -104,9 +104,25 @@ test("live mode prepends matching entries and hides paging", async () => {
   expect(await screen.findByText("Connected")).toBeInTheDocument();
   act(() => ws.onmessage?.({ data: JSON.stringify(entry("l9", { model: "new-model" })) }));
   act(() => ws.onmessage?.({ data: JSON.stringify(entry("l8", { alias: "slow", model: "skipped" })) }));
-  const rows = await screen.findAllByRole("row");
-  expect(rows[1]).toHaveTextContent("or/new-model");
+  await findRow("or/new-model");
+  expect(screen.getAllByRole("row")[1]).toHaveTextContent("or/new-model");
   expect(screen.queryByText("or/skipped")).toBeNull();
+});
+
+test("live mode reads page 1 again on connecting and adds the rows the stream missed", async () => {
+  let page = [entry("l1")];
+  renderRoute("/logs?live=true", (req, url) =>
+    url.pathname === "/api/logs" ? Response.json({ items: page, total: page.length }) : api(req, url),
+  );
+  await findRow("or/x");
+  page = [entry("l2", { model: "missed" }), entry("l1")];
+  const ws = FakeSocket.last!;
+  act(() => {
+    ws.readyState = 1;
+    ws.onopen?.();
+  });
+  await findRow("or/missed");
+  expect(screen.getAllByRole("row")).toHaveLength(3);
 });
 
 test("live mode drops the old filter's rows when a filter changes", async () => {

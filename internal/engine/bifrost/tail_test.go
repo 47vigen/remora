@@ -317,3 +317,52 @@ func TestTailAdvancesWithoutRows(t *testing.T) {
 		t.Fatalf("third poll start = %v, want %v: an idle feed must not keep reading from its last row", src.calls[2].Start, want)
 	}
 }
+
+// A viewer who opens the log after an idle spell gets what completes from then on, not the minutes before it, which
+// its page already shows.
+func TestLiveTailSkipsHistoryAfterIdle(t *testing.T) {
+	src := &fakeLogs{polls: [][]Log{
+		{row("old1", 1, "success"), row("old2", 2, "success")},
+		{row("old1", 1, "success"), row("old2", 2, "success"), row("new", 3, "success")},
+	}}
+	tl := NewTail(src, time.Second, nil, nil).Live()
+	tl.now = func() time.Time { return t0.Add(10 * time.Second) }
+	ch, cancel := tl.Subscribe(16, 0)
+	defer cancel()
+	ctx := context.Background()
+	tl.poll(ctx)
+	if got := drain(ch); len(got) != 0 {
+		t.Fatalf("history delivered: %v", got)
+	}
+	tl.poll(ctx)
+	if got := drain(ch); !eq(got, []string{"new:success"}) {
+		t.Fatalf("delivered %v", got)
+	}
+}
+
+// Most live polls read the last minute; every tenth reads the whole lookback so a long request is found.
+func TestLiveTailReadsNarrowWindowMostPolls(t *testing.T) {
+	src := &fakeLogs{}
+	tl := NewTail(src, time.Second, nil, nil).Live()
+	now := t0
+	tl.now = func() time.Time { return now }
+	_, cancel := tl.Subscribe(16, 0)
+	defer cancel()
+	ctx := context.Background()
+	for range 2 * liveWideEvery {
+		tl.poll(ctx)
+		now = now.Add(time.Second)
+	}
+	wide := 0
+	for i, c := range src.calls {
+		back := t0.Add(time.Duration(i) * time.Second).Sub(*c.Start)
+		if back >= defaultLookback {
+			wide++
+		} else if back > liveNarrow+time.Second {
+			t.Fatalf("poll %d reaches back %v", i, back)
+		}
+	}
+	if wide != 2 {
+		t.Fatalf("%d of %d polls read the whole lookback, want 2", wide, len(src.calls))
+	}
+}

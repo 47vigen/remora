@@ -89,9 +89,16 @@ export function matchesLogFilters(l: LogSummary, s: LogSearch): boolean {
   return true;
 }
 
-/** Puts `incoming` first, drops an older copy of the same id, and keeps at most `cap` rows. */
-export function prependLive(list: LogSummary[], incoming: LogSummary, cap: number): LogSummary[] {
-  return [incoming, ...list.filter((l) => l.id !== incoming.id)].slice(0, cap);
+/** Puts `incoming` (oldest first) ahead of `list`, newest on top, drops older copies of the same ids, and keeps at most `cap` rows. */
+export function prependLive(list: LogSummary[], incoming: LogSummary[], cap: number): LogSummary[] {
+  const ids = new Set(incoming.map((l) => l.id));
+  return [...incoming.toReversed(), ...list.filter((l) => !ids.has(l.id))].slice(0, cap);
+}
+
+/** What a page holds that `list` does not, for rows the stream missed; `list` keeps its order, the new rows go on top. */
+export function missedLive(list: LogSummary[], page: LogSummary[]): LogSummary[] {
+  const have = new Set(list.map((l) => l.id));
+  return page.filter((l) => !have.has(l.id)).toReversed();
 }
 
 export function toLogSummary(e: LogEntry, keyNames?: Map<string, string>): LogSummary {

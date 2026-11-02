@@ -2,6 +2,7 @@ import type { LogEntry } from "../../../../client";
 import {
   type LogSummary,
   matchesLogFilters,
+  missedLive,
   parseLogSearch,
   prependLive,
   rangeToWindow,
@@ -54,9 +55,17 @@ test("matchesLogFilters applies every set filter", () => {
 test("prependLive caps and de-duplicates", () => {
   const a = { id: "a" } as LogSummary,
     b = { id: "b" } as LogSummary;
-  expect(prependLive([a], b, 1).map((l) => l.id)).toEqual(["b"]);
-  expect(prependLive([a], a, 5).map((l) => l.id)).toEqual(["a"]);
-  expect(prependLive([a], b, 5).map((l) => l.id)).toEqual(["b", "a"]);
+  expect(prependLive([a], [b], 1).map((l) => l.id)).toEqual(["b"]);
+  expect(prependLive([a], [a], 5).map((l) => l.id)).toEqual(["a"]);
+  expect(prependLive([a], [b], 5).map((l) => l.id)).toEqual(["b", "a"]);
+  // a batch arrives oldest first and lands newest on top
+  const c = { ...a, id: "c" };
+  expect(prependLive([a], [b, c], 5).map((l) => l.id)).toEqual(["c", "b", "a"]);
+});
+
+test("missedLive lists the page rows the live list lacks, oldest first", () => {
+  const row = (id: string) => ({ id }) as LogSummary;
+  expect(missedLive([row("b")], [row("c"), row("b"), row("a")]).map((l) => l.id)).toEqual(["a", "c"]);
 });
 
 test("toLogSummary maps an entry and marks fallbacks", () => {
