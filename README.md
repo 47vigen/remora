@@ -169,10 +169,11 @@ non-streaming answers alike, but not on the Responses WebSocket route, where it 
   `reasoning_effort`, `response_format`, `text`, `tool_choice`, `tools`, `service_tier` and
   `parallel_tool_calls`. So `temperature`, `top_p`, `top_k`, `max_tokens`, `max_completion_tokens`, `stop`, `user`,
   `n`, `seed` and the rest are all reported. Also `service_tier` unless it is `priority`, `fast` or `ultrafast`
-  (any case), and `parallel_tool_calls` unless it is `true`, because Codex always runs tool calls in parallel.
+  (any case), and `parallel_tool_calls` unless it is `true` or `false`; Codex runs tool calls in parallel unless
+  the request says `false`.
 - **`/v1/responses`**: `max_output_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `truncation`,
   `prompt_cache_options`, `prompt_cache_retention`, `user` and `context_management`; `service_tier` unless it is
-  `priority`, `fast` or `ultrafast` (any case); `parallel_tool_calls` unless it is `true`; and `store` unless it
+  `priority`, `fast` or `ultrafast` (any case); `parallel_tool_calls` unless it is `true` or `false`; and `store` unless it
   is `false`.
 - **`/v1/messages`**: `temperature`, `top_p` and `max_tokens`.
 - Any other endpoint: nothing.

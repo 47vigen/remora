@@ -42,7 +42,7 @@ func (v *versionCache) userAgent(ctx context.Context) string {
 	if version == "" {
 		version = antigravityVersionFloor
 	}
-	return "antigravity/hub/" + version + " " + antigravityPlatform
+	return "antigravity/hub/" + version + " (aidev_client; " + antigravityPlatform + ")"
 }
 
 func readManifest(ctx context.Context, hc *http.Client, manifestURL string) (string, error) {

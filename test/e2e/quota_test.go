@@ -135,7 +135,7 @@ func TestQuotaEndToEnd(t *testing.T) {
 		t.Fatalf("summary requests = %d", len(summary))
 	}
 	h := summary[0].Header
-	if h.Get("Authorization") != "Bearer fake-antigravity-token" || h.Get("User-Agent") != "antigravity/hub/9.9.9 darwin/arm64" ||
+	if h.Get("Authorization") != "Bearer fake-antigravity-token" || h.Get("User-Agent") != "antigravity/hub/9.9.9 (aidev_client; os_type=darwin; arch=arm64)" ||
 		string(summary[0].Body) != `{"project":"e2e-project"}` {
 		t.Errorf("summary request: %v %s", h, summary[0].Body)
 	}

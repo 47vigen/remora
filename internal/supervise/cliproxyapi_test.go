@@ -49,6 +49,7 @@ func TestCLIProxyAPIEngineRendersSettings(t *testing.T) {
 		{[]string{"routing", "session-affinity"}, true},
 		{[]string{"routing", "session-affinity-ttl"}, "1h"},
 		{[]string{"routing", "session-affinity-rebind-on"}, "quota"},
+		{[]string{"server", "response-compression", "enabled"}, false},
 		{[]string{"requests", "streaming", "bootstrap-retries"}, 1},
 		{[]string{"requests", "streaming", "keepalive-seconds"}, 15},
 		{[]string{"oauth", "providers", "antigravity", "connection-pool", "enabled"}, true},

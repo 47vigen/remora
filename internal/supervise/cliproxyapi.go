@@ -73,6 +73,13 @@ type cliproxyCodex struct {
 type cliproxyServer struct {
 	Host string `yaml:"host"`
 	Port int    `yaml:"port"`
+	// ResponseCompression is off (on by default since v8.0.4x): the only client is the front door on loopback, so
+	// compressing a stream only costs CPU and encoder memory.
+	ResponseCompression cliproxyResponseCompression `yaml:"response-compression"`
+}
+
+type cliproxyResponseCompression struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 type cliproxyManagement struct {

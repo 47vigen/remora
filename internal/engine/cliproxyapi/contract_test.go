@@ -559,15 +559,15 @@ func TestContractCodexChatDrops(t *testing.T) {
 			t.Errorf("upstream body has %q: %v", k, rec[k])
 		}
 	}
-	if rec["parallel_tool_calls"] != true {
-		t.Errorf("upstream parallel_tool_calls = %v, want true", rec["parallel_tool_calls"])
+	if rec["parallel_tool_calls"] != false {
+		t.Errorf("upstream parallel_tool_calls = %v, want the explicit false kept", rec["parallel_tool_calls"])
 	}
 	if rec["model"] != "gpt-test" {
 		t.Errorf("upstream model = %v, want gpt-test (prefix stripped)", rec["model"])
 	}
 	// What x-remora-dropped-params reports for this body (plan 03, Task 7).
 	reported := proxy.CodexDroppedParams("/v1/chat/completions", mustJSON(t, body))
-	want := []string{"max_tokens", "parallel_tool_calls", "stop", "temperature", "top_p"}
+	want := []string{"max_tokens", "stop", "temperature", "top_p"}
 	if !slices.Equal(reported, want) {
 		t.Errorf("CodexDroppedParams = %q, want %q", reported, want)
 	}
@@ -601,11 +601,11 @@ func TestContractCodexResponsesDrops(t *testing.T) {
 	if rec["store"] != false {
 		t.Errorf("upstream store = %v, want false", rec["store"])
 	}
-	if rec["parallel_tool_calls"] != true {
-		t.Errorf("upstream parallel_tool_calls = %v, want true", rec["parallel_tool_calls"])
+	if rec["parallel_tool_calls"] != false {
+		t.Errorf("upstream parallel_tool_calls = %v, want the explicit false kept", rec["parallel_tool_calls"])
 	}
 	reported := proxy.CodexDroppedParams("/v1/responses", mustJSON(t, body))
-	want := []string{"max_output_tokens", "parallel_tool_calls", "store", "temperature", "top_p", "truncation", "user"}
+	want := []string{"max_output_tokens", "store", "temperature", "top_p", "truncation", "user"}
 	if !slices.Equal(reported, want) {
 		t.Errorf("CodexDroppedParams = %q, want %q", reported, want)
 	}
