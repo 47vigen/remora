@@ -22,6 +22,7 @@ type statsJSON struct {
 
 type statsGroupJSON struct {
 	Name    string         `json:"name"`
+	Label   *string        `json:"label"`
 	Summary map[string]any `json:"summary"`
 }
 
@@ -193,14 +194,14 @@ func TestStatsGroupByProviderAndKey(t *testing.T) {
 		return bifrost.LogStats{}
 	}
 	s, raw := getStats(t, env, "/api/stats?group_by=provider")
-	if len(s.Groups) != 1 || s.Groups[0].Name != "or" {
+	if len(s.Groups) != 1 || s.Groups[0].Name != "or" || s.Groups[0].Label != nil {
 		t.Fatalf("provider groups = %s", raw)
 	}
 	if f := env.logs.statsCalls[len(env.logs.statsCalls)-1]; !slices.Equal(f.Providers, []string{"fd-or"}) {
 		t.Errorf("provider filter = %v", f.Providers)
 	}
 	s, raw = getStats(t, env, "/api/stats?group_by=key")
-	if len(s.Groups) != 1 || s.Groups[0].Name != k.ID {
+	if len(s.Groups) != 1 || s.Groups[0].Name != k.ID || s.Groups[0].Label == nil || *s.Groups[0].Label != "svc" {
 		t.Fatalf("key groups = %s", raw)
 	}
 }
