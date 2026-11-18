@@ -42,6 +42,24 @@ func TestLoadDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadDrainTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		value       string
+		drain, stop time.Duration
+	}{
+		{"", 5 * time.Second, 8 * time.Second},
+		{"90s", 90 * time.Second, 93 * time.Second},
+	} {
+		c, err := Load(envFrom(map[string]string{"REMORA_DRAIN_TIMEOUT": tc.value}))
+		if err != nil {
+			t.Fatalf("Load(%q): %v", tc.value, err)
+		}
+		if c.DrainTimeout != tc.drain || c.StopTimeout() != tc.stop {
+			t.Errorf("Load(%q): drain %v, stop %v; want %v, %v", tc.value, c.DrainTimeout, c.StopTimeout(), tc.drain, tc.stop)
+		}
+	}
+}
+
 func TestLoadOverrides(t *testing.T) {
 	c, err := Load(envFrom(map[string]string{
 		"REMORA_LISTEN":         "127.0.0.1:9000",
@@ -51,6 +69,7 @@ func TestLoadOverrides(t *testing.T) {
 		"REMORA_ENGINE_DIR":     "/opt/e",
 		"REMORA_MASTER_KEY":     "a2V5",
 		"REMORA_PORT_ROUTER":    "28080",
+		"REMORA_DRAIN_TIMEOUT":  "2500ms",
 	}))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -63,6 +82,7 @@ func TestLoadOverrides(t *testing.T) {
 		EngineDir:     "/opt/e",
 		MasterKey:     "a2V5",
 		Ports:         Ports{Bifrost: 28080, CLIProxyAPI: 18317, Soniox: 18090},
+		DrainTimeout:  2500 * time.Millisecond,
 		Cooling:       Cooling{Count429: 3, Window429: time.Minute, Default: 5 * time.Minute, Poll: time.Second, SubscriptionDefault: 30 * time.Second},
 
 		SonioxAddr:          "127.0.0.1:18090",
@@ -95,6 +115,9 @@ func TestLoadRejects(t *testing.T) {
 		{"poll interval unparsable", map[string]string{"REMORA_SONIOX_POLL_INTERVAL": "soon"}, "REMORA_SONIOX_POLL_INTERVAL"},
 		{"deadline not positive", map[string]string{"REMORA_SONIOX_DEADLINE": "0s"}, "REMORA_SONIOX_DEADLINE"},
 		{"sweep interval negative", map[string]string{"REMORA_SONIOX_SWEEP_INTERVAL": "-1m"}, "REMORA_SONIOX_SWEEP_INTERVAL"},
+		{"drain timeout not a duration", map[string]string{"REMORA_DRAIN_TIMEOUT": "soon"}, "REMORA_DRAIN_TIMEOUT"},
+		{"drain timeout not positive", map[string]string{"REMORA_DRAIN_TIMEOUT": "0s"}, "REMORA_DRAIN_TIMEOUT"},
+		{"drain timeout leaves no room for stop", map[string]string{"REMORA_DRAIN_TIMEOUT": "9223372036854775807ns"}, "REMORA_DRAIN_TIMEOUT"},
 		{"soniox base URL not http", map[string]string{"REMORA_SONIOX_BASE_URL": "ftp://x.test"}, "REMORA_SONIOX_BASE_URL"},
 	}
 	for _, tt := range tests {

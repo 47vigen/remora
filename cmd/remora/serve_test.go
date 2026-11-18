@@ -1,13 +1,16 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -52,6 +55,52 @@ func TestNewServer_IdleTimeout(t *testing.T) {
 	}
 	if srv.ReadHeaderTimeout != readHeaderTimeout {
 		t.Errorf("ReadHeaderTimeout = %v, want %v", srv.ReadHeaderTimeout, readHeaderTimeout)
+	}
+}
+
+func TestDrainInFlightStream(t *testing.T) {
+	var drain requestDrain
+	finish := make(chan struct{})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	srv := httptest.NewServer(drain.wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: first\n\n")
+		_ = http.NewResponseController(w).Flush()
+		select {
+		case <-finish:
+			_, _ = io.WriteString(w, "data: last\n\n")
+		case <-r.Context().Done():
+		}
+	})))
+	defer srv.Close()
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/v1/chat/completions", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body := bufio.NewReader(resp.Body)
+	if first, err := body.ReadString('\n'); err != nil || first != "data: first\n" {
+		t.Fatalf("first event = %q, %v", first, err)
+	}
+	done := drain.begin()
+	select {
+	case <-done:
+		t.Fatal("drained before the stream finished")
+	default:
+	}
+	close(finish)
+	if rest, err := io.ReadAll(body); err != nil || string(rest) != "\ndata: last\n\n" {
+		t.Fatalf("remaining events = %q, %v", rest, err)
+	}
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("drain did not finish after the stream")
 	}
 }
 

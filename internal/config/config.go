@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"net/url"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 // Environment variables read by Load.
 const (
 	EnvListen        = "REMORA_LISTEN"
+	EnvDrainTimeout  = "REMORA_DRAIN_TIMEOUT"
 	EnvData          = "REMORA_DATA"
 	EnvAdminPassword = "REMORA_ADMIN_PASSWORD" //nolint:gosec // G101: a variable name, not a credential.
 	EnvLogLevel      = "REMORA_LOG_LEVEL"
@@ -42,6 +44,7 @@ const (
 // Defaults applied when a variable is unset or empty.
 const (
 	DefaultListen       = ":8080"
+	DefaultDrainTimeout = 5 * time.Second
 	DefaultDataDir      = "/data"
 	DefaultEngineDir    = "/usr/local/lib/remora/engines"
 	DefaultPortRouter   = 18080
@@ -86,13 +89,14 @@ type Cooling struct {
 
 // Config is remora's runtime configuration.
 type Config struct {
-	Listen        string     // REMORA_LISTEN, default ":8080"
-	DataDir       string     // REMORA_DATA, default "/data"
-	AdminPassword string     // REMORA_ADMIN_PASSWORD, "" = generate at first boot
-	LogLevel      slog.Level // REMORA_LOG_LEVEL, default info
-	EngineDir     string     // REMORA_ENGINE_DIR, default "/usr/local/lib/remora/engines"
-	MasterKey     string     // REMORA_MASTER_KEY, "" = $REMORA_DATA/master.key
-	Ports         Ports      // REMORA_PORT_ROUTER, REMORA_PORT_ACCOUNTS, REMORA_PORT_SPEECH
+	Listen        string        // REMORA_LISTEN, default ":8080"
+	DataDir       string        // REMORA_DATA, default "/data"
+	AdminPassword string        // REMORA_ADMIN_PASSWORD, "" = generate at first boot
+	LogLevel      slog.Level    // REMORA_LOG_LEVEL, default info
+	EngineDir     string        // REMORA_ENGINE_DIR, default "/usr/local/lib/remora/engines"
+	MasterKey     string        // REMORA_MASTER_KEY, "" = $REMORA_DATA/master.key
+	Ports         Ports         // REMORA_PORT_ROUTER, REMORA_PORT_ACCOUNTS, REMORA_PORT_SPEECH
+	DrainTimeout  time.Duration // REMORA_DRAIN_TIMEOUT, default 5s
 
 	// The speech-to-text adapter.
 	SonioxAddr          string        // "127.0.0.1:" + Ports.Soniox
@@ -131,6 +135,12 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 
 	var err error
+	if c.DrainTimeout, err = positiveDuration(getenv, EnvDrainTimeout, DefaultDrainTimeout); err != nil {
+		return Config{}, err
+	}
+	if c.DrainTimeout > time.Duration(math.MaxInt64)-stopReserve {
+		return Config{}, fmt.Errorf("config: %s is too long to leave room for shutdown", EnvDrainTimeout)
+	}
 	if c.Ports.Bifrost, err = port(getenv, EnvPortRouter, DefaultPortRouter); err != nil {
 		return Config{}, err
 	}
@@ -222,6 +232,11 @@ func positiveDuration(getenv func(string) string, env string, def time.Duration)
 	}
 	return d, nil
 }
+
+const stopReserve = 3 * time.Second
+
+// StopTimeout bounds shutdown, including the time reserved for cleanup after the drain.
+func (c Config) StopTimeout() time.Duration { return c.DrainTimeout + stopReserve }
 
 // DBPath is the path of the SQLite store.
 func (c Config) DBPath() string {
