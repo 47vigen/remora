@@ -6,11 +6,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -67,9 +69,16 @@ func TestDrainThroughNginx(t *testing.T) {
 	if err := stop.Start(); err != nil {
 		t.Fatalf("start docker stop: %v", err)
 	}
+	stopped := make(chan struct{})
+	var stopErr error
+	go func() {
+		stopErr = stop.Wait()
+		close(stopped)
+	}()
 	t.Cleanup(func() {
-		if err := stop.Wait(); err != nil {
-			t.Errorf("docker stop: %v\n%s", err, stderr.String())
+		<-stopped
+		if stopErr != nil {
+			t.Errorf("docker stop: %v\n%s", stopErr, stderr.String())
 		}
 		if out, err := compose(t, "start", "--wait", "--wait-timeout", "60", "remora"); err != nil {
 			t.Fatalf("restore remora: %v\n%s", err, out)
@@ -77,22 +86,51 @@ func TestDrainThroughNginx(t *testing.T) {
 	})
 
 	probe := &http.Client{Timeout: time.Second}
+	probeReq, err := http.NewRequestWithContext(ctx, http.MethodGet, probeURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	probeReq.Header.Set("Authorization", "Bearer "+keyFull)
+	tick := time.NewTicker(50 * time.Millisecond)
+	defer tick.Stop()
+	sawDrain := false
+probing:
 	for {
-		resp, err := healthz(ctx, probe, probeURL)
-		if err != nil {
-			t.Fatalf("new /v1 request through nginx during stop: %v", err)
+		res, err := probe.Do(probeReq.Clone(ctx))
+		if err == nil {
+			_ = res.Body.Close()
+			switch {
+			case res.StatusCode == http.StatusOK && !sawDrain:
+				// The stop signal has not reached remora yet.
+			case res.StatusCode == http.StatusServiceUnavailable && res.Header.Get("Retry-After") == "1" &&
+				strings.HasPrefix(res.Header.Get("Content-Type"), "application/json"):
+				sawDrain = true
+			default:
+				t.Fatalf("new /v1 request during stop: status %d, Retry-After %q, Content-Type %q; want 200 before drain or a JSON 503 with Retry-After: 1",
+					res.StatusCode, res.Header.Get("Retry-After"), res.Header.Get("Content-Type"))
+			}
+		} else {
+			disconnected := errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, io.EOF)
+			// The host's Docker port forwarder may leave a socket hanging after the container exits.
+			if errors.Is(err, context.DeadlineExceeded) {
+				select {
+				case <-stopped:
+					disconnected = true
+				default:
+				}
+			}
+			if !sawDrain || !disconnected {
+				t.Fatalf("new /v1 request during stop: %v", err)
+			}
 		}
-		_ = resp.Body.Close()
-		if resp.StatusCode == http.StatusUnauthorized {
-			// The stop signal has not reached remora yet.
-			time.Sleep(20 * time.Millisecond)
-			continue
+		select {
+		case <-stopped:
+			break probing
+		case <-tick.C:
 		}
-		if resp.StatusCode != http.StatusServiceUnavailable || resp.Header.Get("Retry-After") != "1" {
-			t.Fatalf("new /v1 request during stop: status %d, Retry-After %q; want 503 with Retry-After: 1",
-				resp.StatusCode, resp.Header.Get("Retry-After"))
-		}
-		break
+	}
+	if !sawDrain {
+		t.Fatal("no probe observed a drain response")
 	}
 
 	rest, err := io.ReadAll(body)

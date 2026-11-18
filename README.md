@@ -104,7 +104,9 @@ Behind a reverse proxy, restrict `REMORA_TRUSTED_PROXIES` to proxy hops you cont
 
 When changing `REMORA_DRAIN_TIMEOUT`, set Compose `stop_grace_period` (or `docker stop -t` in seconds) to at least
 the drain timeout plus 5 seconds. remora allows 3 extra seconds for its own shutdown; the remaining time lets nginx
-finish gracefully.
+finish gracefully. While nginx is still listening after the remora listener closes, nginx returns `503` with
+`Retry-After: 1` instead of `502`. The same fallback applies to nginx-generated `502` responses outside shutdown;
+HTTP errors returned by remora itself pass through unchanged.
 
 The internal ports are bound to `127.0.0.1` inside the container and are never published. Change them only when
 they collide with something else in the container.
