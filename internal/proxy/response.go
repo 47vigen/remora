@@ -165,7 +165,7 @@ func rewriteErrorBody(resp *http.Response, s shape) error {
 	if len(raw) > maxErrorBody {
 		out = errUpstreamBody(resp.StatusCode).body(s)
 		resp.Header.Set("Content-Type", "application/json")
-	} else if mapped, ok := mapNativeError(raw, s); ok {
+	} else if mapped, ok := mapNativeError(raw, s, errorTarget(resp)); ok {
 		out = mapped
 		resp.Header.Set("Content-Type", "application/json")
 	} else {
@@ -176,6 +176,14 @@ func rewriteErrorBody(resp *http.Response, s shape) error {
 	resp.ContentLength = int64(len(out))
 	resp.Body = io.NopCloser(bytes.NewReader(out))
 	return nil
+}
+
+// errorTarget prefers the explicit user-facing target; aliases need the engine's routed target.
+func errorTarget(resp *http.Response) string {
+	if info := infoFrom(resp.Request.Context()); info != nil && !info.isAlias && strings.Contains(info.model, "/") {
+		return info.model
+	}
+	return resp.Header.Get(headerServedBy)
 }
 
 // nativeError is the front door's error envelope (is_bifrost_error), read for remapping.
@@ -239,11 +247,12 @@ func (n nativeError) typeName() string {
 // mapNativeError turns the front door's error envelope into the error shape s, scrubbed: OpenAI's
 // {"error":{"message","type","code","param"}}, Anthropic's {"type":"error","error":{"type","message"}} or
 // TypeSafe's {"detail":{"error_type","message"}}.
-func mapNativeError(raw []byte, s shape) ([]byte, bool) {
+func mapNativeError(raw []byte, s shape, target string) ([]byte, bool) {
 	n, ok := findNativeError(raw)
 	if !ok {
 		return nil, false
 	}
+	n.message = TranslateModelError(n.message, target)
 	var v any
 	switch s {
 	case shapeAnthropic:
@@ -290,7 +299,7 @@ func rewriteSSELine(line []byte, s shape) []byte {
 		mapped bool
 	)
 	if isErr {
-		out, mapped = mapNativeError(body, s)
+		out, mapped = mapNativeError(body, s, "")
 	}
 	switch {
 	case mapped:

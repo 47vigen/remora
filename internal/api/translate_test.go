@@ -169,3 +169,16 @@ func TestToFilter(t *testing.T) {
 		t.Error("from after to accepted")
 	}
 }
+
+func TestTranslateUnknownProviderModelErrorInLogDetail(t *testing.T) {
+	env := newTestEnv(t)
+	env.logs.add(bifrost.Log{
+		ID: "blocked", Provider: bifrost.OAuthProvider, Model: "codex/missing", Status: "error",
+		ErrorDetails: errDetails("Model 'codex/missing' is not allowed for virtual key 'remora:key:fixture'"),
+	})
+	detail, raw := getLogDetail(t, env, "blocked")
+	const want = "Model `codex/missing` is not offered by provider `codex`"
+	if deref(detail.Error) != want || strings.Contains(raw, "virtual key") || strings.Contains(raw, "remora:key:") {
+		t.Fatal("log detail did not translate the model error")
+	}
+}

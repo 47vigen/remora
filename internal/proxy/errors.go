@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/47vigen/remora/internal/alias"
 )
@@ -53,6 +55,20 @@ func errModelNotAllowed(model string) apiError {
 		status: http.StatusForbidden, typ: typePermission, code: "model_not_allowed",
 		message: "This API key may not use model " + strconv.Quote(model) + ".",
 	}
+}
+
+var blockedProviderModel = regexp.MustCompile(`(?s)^Model '.+' is not allowed for virtual key 'remora:key:[^']+'$`)
+
+// TranslateModelError replaces the front door's model-list denial using a user-facing provider/model target.
+func TranslateModelError(message, target string) string {
+	if !blockedProviderModel.MatchString(message) {
+		return message
+	}
+	provider, model, ok := strings.Cut(target, "/")
+	if !ok || provider == "" || model == "" {
+		return "The requested model is not offered by its provider"
+	}
+	return "Model `" + target + "` is not offered by provider `" + provider + "`"
 }
 
 // errAliasKind refuses an alias on an endpoint of another kind (an embeddings alias on chat completions).

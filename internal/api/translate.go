@@ -13,6 +13,7 @@ import (
 	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/api/gen"
 	"github.com/47vigen/remora/internal/engine/bifrost"
+	"github.com/47vigen/remora/internal/proxy"
 )
 
 // LogSource reads the front door's request log; *bifrost.Client satisfies it.
@@ -121,7 +122,7 @@ func (s *Server) toEntry(ctx context.Context, l bifrost.Log, rootAlias string) g
 		e.Tokens = gen.TokenUsage{Prompt: int(u.PromptTokens), Completion: int(u.CompletionTokens), Total: int(u.TotalTokens)}
 	}
 	if msg := errorMessage(l.ErrorDetails); msg != "" {
-		e.Error = new(Scrub(msg))
+		e.Error = new(Scrub(proxy.TranslateModelError(msg, t.Provider+"/"+t.Model)))
 	}
 	return e
 }
