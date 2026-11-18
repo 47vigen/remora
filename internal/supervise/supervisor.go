@@ -18,7 +18,8 @@ import (
 // Default Options values.
 const (
 	defaultHealthTimeout  = 120 * time.Second // Bifrost's first boot runs its migrations
-	defaultHealthInterval = 250 * time.Millisecond
+	defaultHealthInterval = 10 * time.Second
+	startupHealthInterval = 250 * time.Millisecond
 	defaultStopTimeout    = 15 * time.Second
 	defaultMinBackoff     = time.Second
 	defaultMaxBackoff     = 30 * time.Second
@@ -42,7 +43,7 @@ type Engine struct {
 // Options tunes the supervisor. Zero fields take the defaults noted on each field.
 type Options struct {
 	HealthTimeout  time.Duration // 120s: Bifrost's first boot runs its migrations
-	HealthInterval time.Duration // 250ms
+	HealthInterval time.Duration // 10s between running health checks; startup interval is capped at 250ms
 	StopTimeout    time.Duration // 15s, then SIGKILL
 	BackoffMin     time.Duration // 1s
 	BackoffMax     time.Duration // 30s
@@ -117,7 +118,7 @@ func New(logger *slog.Logger, versions map[string]EngineVersion, opts Options) *
 
 // Start verifies every engine against versions.json, then launches them in order, each after the previous one is
 // healthy. It returns once all are healthy. On failure, or when ctx is canceled, it stops every child it started.
-// After Start succeeds, an engine that exits is restarted with exponential backoff until Stop.
+// After Start succeeds, an engine that exits or stops passing health checks is restarted with exponential backoff until Stop.
 func (s *Supervisor) Start(ctx context.Context, engines ...Engine) error {
 	for _, e := range engines {
 		if err := s.verify(e); err != nil {
@@ -293,10 +294,10 @@ func (s *Supervisor) waitHealthy(ctx context.Context, p *proc) error {
 
 	hctx, cancel := context.WithTimeout(ctx, s.opts.HealthTimeout)
 	defer cancel()
-	ticker := time.NewTicker(s.opts.HealthInterval)
+	ticker := time.NewTicker(min(s.opts.HealthInterval, startupHealthInterval))
 	defer ticker.Stop()
 	for {
-		if s.probe(hctx, p.eng.HealthURL) {
+		if s.probe(hctx, p.eng.HealthURL, probeTimeout) {
 			return nil
 		}
 		select {
@@ -314,8 +315,8 @@ func (s *Supervisor) waitHealthy(ctx context.Context, p *proc) error {
 }
 
 // probe reports whether one GET of url answers 2xx.
-func (s *Supervisor) probe(ctx context.Context, url string) bool {
-	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+func (s *Supervisor) probe(ctx context.Context, url string, timeout time.Duration) bool {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -325,9 +326,9 @@ func (s *Supervisor) probe(ctx context.Context, url string) bool {
 	if err != nil {
 		return false
 	}
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
+	_, err = io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
 	_ = resp.Body.Close()
-	return resp.StatusCode >= 200 && resp.StatusCode < 300
+	return err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300
 }
 
 // abort stops the children of a failed Start in reverse order and forgets them.
@@ -380,8 +381,31 @@ func (s *Supervisor) terminate(ctx context.Context, p *proc) error {
 	return result
 }
 
-// monitor restarts p's child each time it exits, until ctx ends. The backoff grows with each restart and resets
-// once the engine has stayed up for StableAfter.
+// waitUnhealthy returns true after three failed probes in a row, or false if the child exits or shutdown begins.
+func (s *Supervisor) waitUnhealthy(ctx context.Context, done <-chan struct{}, url string) bool {
+	interval := s.opts.HealthInterval
+	// Start the first probe immediately so three timeouts fit in three intervals.
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+	for failures := 0; ; {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-done:
+			return false
+		case <-timer.C:
+			timer.Reset(interval)
+			if s.probe(ctx, url, min(interval, probeTimeout)) {
+				failures = 0
+			} else if failures++; failures == 3 {
+				return true
+			}
+		}
+	}
+}
+
+// monitor restarts p's child when it exits or fails its health checks, until ctx ends. The backoff grows with each
+// restart and resets once the engine has stayed up for StableAfter.
 func (s *Supervisor) monitor(ctx context.Context, p *proc) {
 	attempt := 0
 	healthySince := time.Now()
@@ -389,6 +413,12 @@ func (s *Supervisor) monitor(ctx context.Context, p *proc) {
 		s.mu.Lock()
 		done := p.done
 		s.mu.Unlock()
+		if !healthySince.IsZero() && s.waitUnhealthy(ctx, done, p.eng.HealthURL) && ctx.Err() == nil {
+			p.log.Warn("engine failed three consecutive health checks")
+			if err := s.terminate(ctx, p); err != nil {
+				p.log.Error("stop unhealthy engine", "err", err)
+			}
+		}
 		select {
 		case <-ctx.Done():
 			return
