@@ -38,7 +38,7 @@ const (
 	EnvPprofAddr                  = "REMORA_PPROF_ADDR"
 	EnvLogContent                 = "REMORA_LOG_CONTENT"
 	EnvQuotaInterval              = "REMORA_QUOTA_INTERVAL"
-	EnvQuotaBaseURL               = "REMORA_QUOTA_BASE_URL"
+	EnvQuotaBaseURL               = "REMORA_TEST_QUOTA_BASE_URL"
 )
 
 // Defaults applied when a variable is unset or empty.
@@ -110,7 +110,7 @@ type Config struct {
 	LogContent bool   // REMORA_LOG_CONTENT, default false: keep request and response bodies in the request log
 
 	QuotaInterval time.Duration // REMORA_QUOTA_INTERVAL, default 15m, at least 5m, 0 = background checks off
-	QuotaBaseURL  string        // REMORA_QUOTA_BASE_URL, "" = the providers; tests point quota checks at a fake
+	QuotaBaseURL  string        // REMORA_TEST_QUOTA_BASE_URL, "" = the providers; tests point quota checks at a fake
 	// MemoryLimit is the container's memory limit in bytes, 0 = none. serve fills it from the cgroup; it is not read
 	// from the environment.
 	MemoryLimit int64

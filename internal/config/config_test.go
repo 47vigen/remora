@@ -230,12 +230,19 @@ func TestLoadQuotaInterval(t *testing.T) {
 
 func TestLoadQuotaBaseURL(t *testing.T) {
 	for _, v := range []string{"", "http://fakes:9090/u/quota"} {
-		c, err := Load(envFrom(map[string]string{"REMORA_QUOTA_BASE_URL": v}))
+		c, err := Load(envFrom(map[string]string{"REMORA_TEST_QUOTA_BASE_URL": v}))
 		if err != nil || c.QuotaBaseURL != v {
-			t.Errorf("REMORA_QUOTA_BASE_URL=%q: %q, %v", v, c.QuotaBaseURL, err)
+			t.Errorf("REMORA_TEST_QUOTA_BASE_URL=%q: %q, %v", v, c.QuotaBaseURL, err)
 		}
 	}
-	if _, err := Load(envFrom(map[string]string{"REMORA_QUOTA_BASE_URL": "ftp://x"})); err == nil || !strings.Contains(err.Error(), "REMORA_QUOTA_BASE_URL") {
+	if _, err := Load(envFrom(map[string]string{"REMORA_TEST_QUOTA_BASE_URL": "ftp://x"})); err == nil || !strings.Contains(err.Error(), "REMORA_TEST_QUOTA_BASE_URL") {
 		t.Errorf("ftp base: err = %v", err)
+	}
+}
+
+func TestLoadLegacyQuotaBaseURLIgnored(t *testing.T) {
+	c, err := Load(envFrom(map[string]string{"REMORA_QUOTA_BASE_URL": "http://example.test"}))
+	if err != nil || c.QuotaBaseURL != "" {
+		t.Fatalf("legacy quota URL: %q, %v", c.QuotaBaseURL, err)
 	}
 }

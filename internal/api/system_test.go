@@ -148,7 +148,7 @@ func TestVersionAnswersThroughServer(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Remora != version.Version || len(got.Engines) != 2 || got.Engines[0].Name != "bifrost" {
+	if got.Remora != version.Version || len(got.Engines) != 0 {
 		t.Errorf("version = %+v", got)
 	}
 }
@@ -184,5 +184,40 @@ func TestHealthzReportsAccountsOut(t *testing.T) {
 	rec = healthz(fakePool{err: errors.New("engine down")})
 	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != `{"status":"ok"}` {
 		t.Fatalf("pool error: code %d body %s", rec.Code, rec.Body)
+	}
+}
+
+func TestVersionAuthentication(t *testing.T) {
+	env := newTestEnv(t)
+	for _, tc := range []struct {
+		name    string
+		client  *http.Client
+		engines bool
+	}{
+		{"anonymous", http.DefaultClient, false}, {"authenticated", env.client, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, body := env.do(t, tc.client, http.MethodGet, "/api/system/version", "")
+			var got map[string]json.RawMessage
+			if code != http.StatusOK {
+				t.Fatalf("status = %d", code)
+			}
+			if err := json.Unmarshal(body, &got); err != nil {
+				t.Fatal(err)
+			}
+			if string(got["remora"]) != `"v0.0.0-test"` {
+				t.Errorf("remora = %s", got["remora"])
+			}
+			engines, present := got["engines"]
+			if present != tc.engines {
+				t.Errorf("engines present = %v", present)
+			}
+			if tc.engines {
+				var entries []EngineVersion
+				if err := json.Unmarshal(engines, &entries); err != nil || len(entries) != 2 {
+					t.Errorf("engines = %s, err = %v", engines, err)
+				}
+			}
+		})
 	}
 }

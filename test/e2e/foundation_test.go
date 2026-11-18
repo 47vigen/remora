@@ -143,12 +143,19 @@ func TestHealthz(t *testing.T) {
 
 func TestSystemVersionListsEngines(t *testing.T) {
 	want := wantEngines(t)
-	v := fetchVersion(t)
-	if v.Remora == "" {
+	anon := fetchVersion(t)
+	if anon.Remora == "" {
 		t.Error("remora version is empty")
 	}
-	if !reflect.DeepEqual(v.Engines, want) {
-		t.Errorf("engines = %+v, want %+v", v.Engines, want)
+	if len(anon.Engines) != 0 {
+		t.Errorf("anonymous caller sees engines %+v, want none", anon.Engines)
+	}
+	var v versionResponse
+	if err := json.Unmarshal(loginClient(t).must(http.MethodGet, "/api/system/version", "", http.StatusOK), &v); err != nil {
+		t.Fatalf("decode version: %v", err)
+	}
+	if v.Remora != anon.Remora || !reflect.DeepEqual(v.Engines, want) {
+		t.Errorf("signed in: version = %+v, want remora %q and engines %+v", v, anon.Remora, want)
 	}
 }
 
@@ -241,7 +248,10 @@ func TestRestartKeepsState(t *testing.T) {
 	waitHealthy(t, 180*time.Second)
 
 	want := wantEngines(t)
-	v := fetchVersion(t)
+	var v versionResponse
+	if err := json.Unmarshal(loginClient(t).must(http.MethodGet, "/api/system/version", "", http.StatusOK), &v); err != nil {
+		t.Fatalf("decode version: %v", err)
+	}
 	if !reflect.DeepEqual(v.Engines, want) {
 		t.Errorf("after restart engines = %+v, want %+v", v.Engines, want)
 	}

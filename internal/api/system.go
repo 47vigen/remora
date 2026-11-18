@@ -99,12 +99,28 @@ func (s *Server) GetHealth(ctx context.Context, _ gen.GetHealthRequestObject) (g
 	return resp, nil
 }
 
-// GetVersion reports remora's version and each engine's, in start order.
-func (s *Server) GetVersion(_ context.Context, _ gen.GetVersionRequestObject) (gen.GetVersionResponseObject, error) {
+type publicVersion string
+
+func (v publicVersion) VisitGetVersionResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	return json.NewEncoder(w).Encode(struct {
+		Remora string `json:"remora"`
+	}{Remora: string(v)})
+}
+
+// GetVersion reports engine versions only to authenticated callers.
+func (s *Server) GetVersion(ctx context.Context, _ gen.GetVersionRequestObject) (gen.GetVersionResponseObject, error) {
 	if s.d.System == nil {
 		return nil, errNotImplemented
 	}
 	remora, engines := s.d.System.Version()
+	r := requestFrom(ctx)
+	if s.d.Auth == nil || r == nil {
+		return publicVersion(remora), nil
+	}
+	if _, err := s.d.Auth.Authenticate(r); err != nil {
+		return publicVersion(remora), nil
+	}
 	resp := gen.GetVersion200JSONResponse{Remora: remora, Engines: make([]gen.EngineVersion, 0, len(engines))}
 	for _, e := range engines {
 		resp.Engines = append(resp.Engines, gen.EngineVersion{Name: e.Name, Version: e.Version})
