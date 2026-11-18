@@ -156,26 +156,23 @@ the provider did not report that number. A manual refresh of one account runs at
 
 ## Dropped parameters
 
-Codex models served through a subscription do not accept `temperature`, `top_p` or `max_tokens`; those
-parameters are dropped, and remora says so: the `x-remora-dropped-params` response header lists every top-level
-request key the Codex backend did not receive as sent. It is absent when nothing was dropped or when any other
-provider served the request.
-
-remora announces every request rewrite it knows of; none is silent. When a Codex member (`x-remora-served-by`
-starts with `codex/`) serves a request, the header is a comma-separated, sorted list. It is set on streaming and
-non-streaming answers alike, but not on the Responses WebSocket route, where it would have to be sent per message.
+When a Codex member (`x-remora-served-by` starts with `codex/`) serves a request, the
+`x-remora-dropped-params` response header lists known dropped or overridden top-level parameters, sorted and
+comma-separated. A token limit translated to `max_output_tokens` is not considered dropped. The header is absent
+when nothing is reported or another provider served the request. It works for streaming and non-streaming answers,
+but not on the Responses WebSocket route.
 
 - **`/v1/chat/completions`**: every key except `model`, `messages`, `stream`, `stream_options`,
-  `reasoning_effort`, `response_format`, `text`, `tool_choice`, `tools`, `service_tier` and
-  `parallel_tool_calls`. So `temperature`, `top_p`, `top_k`, `max_tokens`, `max_completion_tokens`, `stop`, `user`,
-  `n`, `seed` and the rest are all reported. Also `service_tier` unless it is `priority`, `fast` or `ultrafast`
-  (any case), and `parallel_tool_calls` unless it is `true` or `false`; Codex runs tool calls in parallel unless
-  the request says `false`.
-- **`/v1/responses`**: `max_output_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `truncation`,
-  `prompt_cache_options`, `prompt_cache_retention`, `user` and `context_management`; `service_tier` unless it is
-  `priority`, `fast` or `ultrafast` (any case); `parallel_tool_calls` unless it is `true` or `false`; and `store` unless it
-  is `false`.
-- **`/v1/messages`**: `temperature`, `top_p` and `max_tokens`.
+  `reasoning_effort`, `response_format`, `text`, `tool_choice`, `tools`, `service_tier`, `parallel_tool_calls`, and
+  the first numeric limit in this order: `max_completion_tokens`, `max_tokens`, `max_output_tokens`. Also
+  `service_tier` unless it is `priority`, `fast` or `ultrafast` (any case), and `parallel_tool_calls` unless it
+  is `true` or `false`.
+- **`/v1/responses`**: `temperature`, `top_p`, `truncation`, `prompt_cache_options`, `prompt_cache_retention`,
+  `user` and `context_management`; the same rules for `service_tier` and `parallel_tool_calls`; and `store` unless
+  it is `false`. A non-null `max_output_tokens` takes precedence over both legacy limits. If absent or null, the
+  first numeric limit among `max_completion_tokens` and `max_tokens` is used. Unused legacy limits and a null
+  `max_output_tokens` replaced by a fallback are reported.
+- **`/v1/messages`**: `temperature`, `top_p` and any `max_tokens` that is not a positive integer.
 - Any other endpoint: nothing.
 
 The list is checked against the engine on every engine update by contract tests. What remora does and does not do,

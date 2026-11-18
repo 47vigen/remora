@@ -14,25 +14,20 @@ const headerDroppedParams = "X-Remora-Dropped-Params"
 // codexServedPrefix is the served-by prefix of a Codex member.
 const codexServedPrefix = "codex/"
 
-// codexChatKept are the top-level chat-completions keys the OAuth engine's Codex translator carries into the
-// request it builds; it builds that request from these keys only (C/internal/translator/codex/openai/
-// chat-completions/codex_openai_request.go at v8.0.28).
+// codexChatKept are the top-level Chat Completions keys the Codex translator carries besides the chosen token limit.
 var codexChatKept = map[string]bool{
 	"model": true, "messages": true, "stream": true, "stream_options": true, "reasoning_effort": true,
 	"response_format": true, "text": true, "tool_choice": true, "tools": true, "service_tier": true,
 	"parallel_tool_calls": true,
 }
 
-// codexResponsesDropped are the top-level Responses keys the Codex translator deletes outright
-// (C/internal/translator/codex/openai/responses/codex_openai-responses_request.go at v8.0.28).
+// codexResponsesDropped are the top-level Responses keys the Codex translator always deletes.
 var codexResponsesDropped = []string{
-	"max_output_tokens", "max_completion_tokens", "temperature", "top_p", "truncation", "prompt_cache_options",
-	"prompt_cache_retention", "user", "context_management",
+	"temperature", "top_p", "truncation", "prompt_cache_options", "prompt_cache_retention", "user", "context_management",
 }
 
-// codexMessagesDropped are the Anthropic Messages keys that do not reach Codex: the front door turns the request
-// into a Responses request, where they arrive as temperature, top_p and max_output_tokens and are deleted.
-var codexMessagesDropped = []string{"temperature", "top_p", "max_tokens"}
+// codexLimitKeys is the Chat Completions precedence order; Responses differs only for explicit max_output_tokens.
+var codexLimitKeys = [...]string{"max_completion_tokens", "max_tokens", "max_output_tokens"}
 
 // CodexDroppedParams returns the top-level keys of a client's body at path that the OAuth engine's Codex
 // translator drops or overrides, sorted and deduplicated. It returns nil when there are none, when path is not a
@@ -49,8 +44,9 @@ func CodexDroppedParams(path string, body []byte) []string {
 	var out []string
 	switch path {
 	case "/v1/chat/completions":
+		limit := codexNumericLimit(obj)
 		for k := range obj {
-			if !codexChatKept[k] {
+			if !codexChatKept[k] && (limit == "" || k != limit) {
 				out = append(out, k)
 			}
 		}
@@ -58,17 +54,41 @@ func CodexDroppedParams(path string, body []byte) []string {
 		out = appendIf(out, obj, "parallel_tool_calls", notBool)
 	case "/v1/responses":
 		out = appendPresent(out, obj, codexResponsesDropped)
+		limit := codexNumericLimit(obj)
+		if v := obj["max_output_tokens"]; v != nil && (notJSON("null")(v) || limit == "") {
+			limit = "max_output_tokens"
+		}
+		for _, k := range codexLimitKeys {
+			if k != limit && obj[k] != nil {
+				out = append(out, k)
+			}
+		}
 		out = appendIf(out, obj, "service_tier", func(v json.RawMessage) bool { return !codexKnownTier(v) })
 		out = appendIf(out, obj, "parallel_tool_calls", notBool)
 		out = appendIf(out, obj, "store", notJSON("false"))
 	case "/v1/messages":
-		out = appendPresent(out, obj, codexMessagesDropped)
+		out = appendPresent(out, obj, []string{"temperature", "top_p"})
+		// The front door maps positive max_tokens to Responses' max_output_tokens.
+		out = appendIf(out, obj, "max_tokens", func(v json.RawMessage) bool {
+			var n int
+			return json.Unmarshal(v, &n) != nil || n <= 0
+		})
 	}
 	if len(out) == 0 {
 		return nil
 	}
 	sort.Strings(out)
 	return out
+}
+
+// codexNumericLimit returns the first JSON number in translator order, excluding quoted numbers and null.
+func codexNumericLimit(obj map[string]json.RawMessage) string {
+	for _, k := range codexLimitKeys {
+		if v := obj[k]; len(v) > 0 && (v[0] == '-' || v[0] >= '0' && v[0] <= '9') {
+			return k
+		}
+	}
+	return ""
 }
 
 // appendPresent appends every key of keys that obj has.

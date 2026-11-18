@@ -546,6 +546,7 @@ func TestContractCodexChatDrops(t *testing.T) {
 		"temperature":         0.5,
 		"top_p":               0.9,
 		"max_tokens":          100,
+		"max_output_tokens":   200,
 		"parallel_tool_calls": false,
 		"stop":                []any{"x"},
 	}
@@ -554,10 +555,13 @@ func TestContractCodexChatDrops(t *testing.T) {
 		t.Fatalf("chat completion: %d %s", status, resp)
 	}
 	rec := up.last(t)
-	for _, k := range []string{"temperature", "top_p", "max_tokens", "max_output_tokens", "stop"} {
+	for _, k := range []string{"temperature", "top_p", "max_tokens", "stop"} {
 		if _, ok := rec[k]; ok {
 			t.Errorf("upstream body has %q: %v", k, rec[k])
 		}
+	}
+	if rec["max_output_tokens"] != float64(100) {
+		t.Errorf("upstream max_output_tokens = %v, want 100 from max_tokens", rec["max_output_tokens"])
 	}
 	if rec["parallel_tool_calls"] != false {
 		t.Errorf("upstream parallel_tool_calls = %v, want the explicit false kept", rec["parallel_tool_calls"])
@@ -567,7 +571,7 @@ func TestContractCodexChatDrops(t *testing.T) {
 	}
 	// What x-remora-dropped-params reports for this body (plan 03, Task 7).
 	reported := proxy.CodexDroppedParams("/v1/chat/completions", mustJSON(t, body))
-	want := []string{"max_tokens", "stop", "temperature", "top_p"}
+	want := []string{"max_output_tokens", "stop", "temperature", "top_p"}
 	if !slices.Equal(reported, want) {
 		t.Errorf("CodexDroppedParams = %q, want %q", reported, want)
 	}
@@ -583,6 +587,7 @@ func TestContractCodexResponsesDrops(t *testing.T) {
 		"temperature":         0.5,
 		"top_p":               0.9,
 		"max_output_tokens":   100,
+		"max_tokens":          200,
 		"user":                "u",
 		"truncation":          "auto",
 		"store":               true,
@@ -593,10 +598,13 @@ func TestContractCodexResponsesDrops(t *testing.T) {
 		t.Fatalf("responses: %d %s", status, resp)
 	}
 	rec := up.last(t)
-	for _, k := range []string{"temperature", "top_p", "max_output_tokens", "user", "truncation"} {
+	for _, k := range []string{"temperature", "top_p", "max_tokens", "user", "truncation"} {
 		if _, ok := rec[k]; ok {
 			t.Errorf("upstream body has %q: %v", k, rec[k])
 		}
+	}
+	if rec["max_output_tokens"] != float64(100) {
+		t.Errorf("upstream max_output_tokens = %v, want the explicit 100 kept", rec["max_output_tokens"])
 	}
 	if rec["store"] != false {
 		t.Errorf("upstream store = %v, want false", rec["store"])
@@ -605,7 +613,7 @@ func TestContractCodexResponsesDrops(t *testing.T) {
 		t.Errorf("upstream parallel_tool_calls = %v, want the explicit false kept", rec["parallel_tool_calls"])
 	}
 	reported := proxy.CodexDroppedParams("/v1/responses", mustJSON(t, body))
-	want := []string{"max_output_tokens", "store", "temperature", "top_p", "truncation", "user"}
+	want := []string{"max_tokens", "store", "temperature", "top_p", "truncation", "user"}
 	if !slices.Equal(reported, want) {
 		t.Errorf("CodexDroppedParams = %q, want %q", reported, want)
 	}
