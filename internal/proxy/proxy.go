@@ -222,7 +222,10 @@ func bearer(h string) string {
 // forward checks the request's model and hands it to the reverse proxy.
 func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt route, sh shape, key store.ClientKey) {
 	ctx := r.Context()
+	controller := http.NewResponseController(w)
+	_ = controller.SetReadDeadline(time.Now().Add(2 * time.Minute))
 	model, raw, sp, err := extractModel(r)
+	_ = controller.SetReadDeadline(time.Time{})
 	switch {
 	case errors.Is(err, ErrBodyTooLarge):
 		errTooLarge.write(w, sh)

@@ -74,12 +74,11 @@ func extractModel(r *http.Request) (model string, raw []byte, sp bodySpans, err 
 	return model, raw, sp, nil
 }
 
-// readBody reads at most MaxBodyBytes+1 bytes into one buffer sized from the declared length, so a large body is
-// not copied through a doubling series of buffers.
+// readBody reads at most MaxBodyBytes+1 bytes, limiting preallocation based on the declared length.
 func readBody(body io.Reader, declared int64) ([]byte, error) {
 	var buf bytes.Buffer
 	if declared > 0 {
-		buf.Grow(int(declared) + bytes.MinRead)
+		buf.Grow(int(min(declared, 1<<20)))
 	}
 	_, err := buf.ReadFrom(io.LimitReader(body, MaxBodyBytes+1))
 	return buf.Bytes(), err
