@@ -120,6 +120,26 @@ func TestStatsSummary(t *testing.T) {
 	}
 }
 
+func TestStatsSeriesSumEqualsSummary(t *testing.T) {
+	env := newTestEnv(t)
+	ts := time.Now().UTC().Truncate(time.Hour)
+	env.logs.stats = func(bifrost.LogFilter) bifrost.LogStats {
+		return bifrost.LogStats{Completed: new(int64(7)), SuccessRate: 100}
+	}
+	env.logs.histogram = []bifrost.HistogramBucket{
+		{Timestamp: ts.Add(-time.Hour), Count: 2, Success: 2},
+		{Timestamp: ts, Count: 5, Success: 5},
+	}
+	s, _ := getStats(t, env, "/api/stats")
+	var sum float64
+	for _, point := range s.Series {
+		sum += point["requests"].(float64)
+	}
+	if len(s.Series) != 2 || sum != s.Summary["requests"] {
+		t.Errorf("series requests = %v over %d buckets, summary = %v", sum, len(s.Series), s.Summary["requests"])
+	}
+}
+
 // A caller that holds the summary and the series already asks for the groups alone.
 func TestStatsGroupsOnly(t *testing.T) {
 	env := newTestEnv(t)

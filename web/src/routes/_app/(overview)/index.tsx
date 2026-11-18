@@ -37,6 +37,12 @@ type Range = (typeof RANGES)[number];
 const RANGE_MS: Record<Range, number> = { "1h": 3_600_000, "24h": 86_400_000, "7d": 604_800_000 };
 const RANGE_HINT: Record<Range, string> = { "1h": "last hour", "24h": "last 24 hours", "7d": "last 7 days" };
 
+export function statsFrom(range: Range, now: number): string | undefined {
+  if (range === "24h") return undefined;
+  const bucket = range === "1h" ? 60_000 : 86_400_000;
+  return new Date(Math.floor((now - RANGE_MS[range]) / bucket) * bucket).toISOString();
+}
+
 export const Route = createFileRoute("/_app/(overview)/")({
   validateSearch: (raw: Record<string, unknown>): { range?: Range } => ({
     range: parseEnum(raw.range, RANGES),
@@ -74,7 +80,7 @@ function OverviewPage() {
   const range: Range = search.range ?? "24h";
   const now = useNow();
   // The default window is the server's own (the last 24 hours ending now), so its refetch moves with the clock.
-  const from = range === "24h" ? undefined : new Date(now - RANGE_MS[range]).toISOString();
+  const from = statsFrom(range, now);
 
   const stats = useQuery({
     ...getStatsOptions({ query: { group_by: "provider", from } }),
