@@ -1,16 +1,16 @@
 import { Alert, buttonVariants, cn, Link, Table } from "@heroui/react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { getQuotaOptions, refreshQuotaMutation } from "../../../client/@tanstack/react-query.gen";
 import { DataList } from "../../../components/data-list/DataList";
 import { PageHeader } from "../../../components/page-header/PageHeader";
 import { errorMessage } from "../../../lib/api";
-import { type ListSearch, parseListSearch } from "../../../lib/list-search";
+import { type ListSearch, PAGE_SIZES, parseListSearch } from "../../../lib/list-search";
 import { invalidateOps } from "../../../lib/query";
 import { ProviderQuota, type RefreshTarget } from "./-components/ProviderQuota";
-import { quotaRows, refreshSettled } from "./-lib/quota";
+import { refreshSettled } from "./-lib/quota";
 
 type QuotaSearch = ListSearch & { provider?: string };
 
@@ -36,17 +36,19 @@ function QuotaPage() {
 
   const [pending, setPending] = useState<{ queued: string[]; since: Date } | null>(null);
   const [skipped, setSkipped] = useState(0);
+  useEffect(() => {
+    if (pending === null) return;
+    const timer = setTimeout(() => setPending(null), REFRESH_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [pending]);
+  const waiting = (items: Parameters<typeof refreshSettled>[0]) =>
+    pending !== null && !refreshSettled(items, pending.queued, pending.since);
   const quota = useQuery({
-    ...getQuotaOptions(),
-    refetchInterval: (query) => {
-      const waiting =
-        pending !== null &&
-        Date.now() - pending.since.getTime() < REFRESH_WAIT_MS &&
-        !refreshSettled(query.state.data ?? [], pending.queued, pending.since);
-      return waiting ? FAST_POLL_MS : SLOW_POLL_MS;
-    },
+    ...getQuotaOptions({ query: { limit: pageSize, offset: (page - 1) * pageSize, q: q || undefined, provider } }),
+    refetchInterval: (query) => (waiting(query.state.data?.items ?? []) ? FAST_POLL_MS : SLOW_POLL_MS),
   });
-  const providers = quota.data ?? [];
+  const providers = quota.data?.items ?? [];
+  const providerOptions = useQuery({ ...getQuotaOptions({ query: { limit: 1 } }), enabled: provider !== undefined });
   const now = new Date(quota.dataUpdatedAt);
 
   const refresh = useMutation({ ...refreshQuotaMutation() });
@@ -63,13 +65,8 @@ function QuotaPage() {
       },
     );
   };
-  const busy = pending !== null && !refreshSettled(providers, pending.queued, pending.since);
-
-  const rows = quotaRows(providers, q, provider);
-  const shown = rows.slice((page - 1) * pageSize, page * pageSize);
-  const groups = providers
-    .map((p) => ({ provider: p, rows: shown.filter((r) => r.provider === p.provider).map((r) => r.item) }))
-    .filter((g) => g.rows.length > 0);
+  const busy = waiting(providers);
+  const groups = providers.filter((p) => p.accounts.length > 0);
 
   return (
     <div className="flex flex-col gap-6">
@@ -84,7 +81,7 @@ function QuotaPage() {
             <DataList.Filter
               label="Provider"
               value={provider}
-              options={providers.map((p) => ({ id: p.provider, label: p.provider }))}
+              options={(providerOptions.data?.items ?? providers).map((p) => ({ id: p.provider, label: p.provider }))}
               onChange={(v) => update({ provider: v })}
             />
           </DataList.Filters>
@@ -143,9 +140,9 @@ function QuotaPage() {
             <div className="flex flex-col gap-4">
               {groups.map((g) => (
                 <ProviderQuota
-                  key={g.provider.provider}
-                  provider={g.provider}
-                  rows={g.rows}
+                  key={g.provider}
+                  provider={g}
+                  rows={g.accounts}
                   now={now}
                   pending={busy || refresh.isPending}
                   onRefresh={onRefresh}
@@ -157,9 +154,9 @@ function QuotaPage() {
         <DataList.Pagination
           page={page}
           pageSize={pageSize}
-          total={rows.length}
+          total={quota.data?.total ?? 0}
           onPageChange={(n) => void navigate({ search: (prev) => ({ ...prev, page: n }) })}
-          onPageSizeChange={(n) => update({ pageSize: n as ListSearch["pageSize"] })}
+          onPageSizeChange={(n) => update({ pageSize: PAGE_SIZES.find((size) => size === n) ?? PAGE_SIZES[0] })}
         />
       </DataList.Root>
     </div>

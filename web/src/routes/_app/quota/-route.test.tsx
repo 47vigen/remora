@@ -54,7 +54,7 @@ const providers = [
 test("one section per provider; Refresh all posts the provider and reports skipped accounts", async () => {
   const posted: unknown[] = [];
   renderRoute("/quota", async (req, url) => {
-    if (url.pathname === "/api/quota" && req.method === "GET") return Response.json(providers);
+    if (url.pathname === "/api/quota" && req.method === "GET") return Response.json({ items: providers, total: 2 });
     if (url.pathname === "/api/quota/refresh" && req.method === "POST") {
       posted.push(await req.json());
       return Response.json({ queued: [], skipped: ["1"] }, { status: 202 });
@@ -65,4 +65,19 @@ test("one section per provider; Refresh all posts the provider and reports skipp
   await userEvent.click(within(ag).getByRole("button", { name: "Refresh all" }));
   expect(await screen.findByText("1 account(s) were checked less than a minute ago.")).toBeInTheDocument();
   expect(posted).toEqual([{ provider: "antigravity" }]);
+});
+
+test("quota sends the page, search and provider filter to the server", async () => {
+  const { requests } = renderRoute("/quota?page=2&q=Pro&provider=antigravity", (_req, url) => {
+    if (url.pathname === "/api/quota") return Response.json({ items: [providers[0]], total: 26 });
+  });
+  expect(await screen.findByText("26–26 of 26")).toBeInTheDocument();
+  expect(screen.getByText("a@example.test")).toBeInTheDocument();
+  const quota = requests.map((r) => new URL(r.url)).find((u) => u.pathname === "/api/quota");
+  expect(Object.fromEntries(quota!.searchParams)).toEqual({
+    limit: "25",
+    offset: "25",
+    q: "Pro",
+    provider: "antigravity",
+  });
 });

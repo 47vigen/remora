@@ -222,14 +222,14 @@ func inspect(ctx context.Context, c gen.ClientWithResponsesInterface, in Inspect
 		}
 		return ok200(c.ListCoolingWithResponse(ctx, &gen.ListCoolingParams{Limit: &limit, Offset: offset, Q: q}))
 	case "quota":
-		quota, err := ok200(c.GetQuotaWithResponse(ctx))
+		quota, err := ok200(c.GetQuotaWithResponse(ctx, &gen.GetQuotaParams{Limit: &limit, Offset: offset, Q: q, Provider: opt(in.ID)}))
 		if err != nil {
 			return nil, err
 		}
 		if in.ID == "" {
-			return map[string]any{"items": *quota}, nil // structuredContent must be an object
+			return quota, nil
 		}
-		for _, p := range *quota {
+		for _, p := range quota.Items {
 			if p.Provider == in.ID {
 				return p, nil
 			}

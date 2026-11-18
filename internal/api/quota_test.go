@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -39,10 +40,11 @@ func TestGetQuota(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("GET /api/quota = %d %s", code, body)
 	}
-	var got []map[string]any
-	if err := json.Unmarshal(body, &got); err != nil {
+	var page struct{ Items []map[string]any }
+	if err := json.Unmarshal(body, &page); err != nil {
 		t.Fatal(err)
 	}
+	got := page.Items
 	ag := got[0]
 	if ag["available"] != 1.0 || ag["exhausted"] != 2.0 || ag["cooling"] != 3.0 || ag["sign_in"] != 4.0 || ag["next_reset"] != "2099-01-01T00:00:00Z" {
 		t.Errorf("antigravity = %v", ag)
@@ -60,6 +62,61 @@ func TestGetQuota(t *testing.T) {
 	}
 	if _, has := got[1]["accounts"].([]any)[0].(map[string]any)["quota"]; has {
 		t.Errorf("unsupported account has a quota: %v", got[1])
+	}
+}
+
+func TestGetQuotaPages(t *testing.T) {
+	env := newTestEnv(t)
+	account := func(id int64, label, plan string) quota.AccountView {
+		return quota.AccountView{
+			Account: accounts.Account{Account: store.Account{ID: id, Label: label}},
+			Quota:   &store.AccountQuota{Plan: plan},
+		}
+	}
+	env.quota.overview = []quota.ProviderView{
+		{Provider: "one", Available: 3, Accounts: []quota.AccountView{account(1, "a", "Team"), account(2, "Teammate", "Free"), account(3, "c", "Free")}},
+		{Provider: "two", Available: 1, Accounts: []quota.AccountView{account(4, "d", "Team")}},
+	}
+	for _, tc := range []struct {
+		query string
+		total int
+		ids   []string
+	}{
+		{"?limit=2&offset=2", 4, []string{"3", "4"}},
+		{"?limit=1&offset=1&q=TEAM", 3, []string{"2"}},
+		{"?q=team&provider=two", 1, []string{"4"}},
+		{"?offset=10", 4, nil},
+		{"?q=missing", 0, nil},
+	} {
+		t.Run(tc.query, func(t *testing.T) {
+			code, body := env.do(t, env.client, http.MethodGet, "/api/quota"+tc.query, "")
+			if code != http.StatusOK {
+				t.Fatalf("GET quota = %d %s", code, body)
+			}
+			var got struct {
+				Total int
+				Items []struct {
+					Provider  string
+					Available int
+					Accounts  []struct{ Account struct{ ID string } }
+				}
+			}
+			if err := json.Unmarshal(body, &got); err != nil {
+				t.Fatal(err)
+			}
+			var ids []string
+			for _, p := range got.Items {
+				if p.Provider == "one" && p.Available != 3 {
+					t.Errorf("provider summary changed: %+v", p)
+				}
+				for _, a := range p.Accounts {
+					ids = append(ids, a.Account.ID)
+				}
+			}
+			if got.Total != tc.total || !slices.Equal(ids, tc.ids) {
+				t.Errorf("total %d, ids %v; want %d, %v", got.Total, ids, tc.total, tc.ids)
+			}
+		})
 	}
 }
 

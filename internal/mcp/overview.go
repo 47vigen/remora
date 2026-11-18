@@ -83,11 +83,11 @@ func overview(ctx context.Context, c gen.ClientWithResponsesInterface) (Overview
 		return o, err
 	}
 	o.Cooling = cooling.Total
-	quota, err := ok200(c.GetQuotaWithResponse(ctx))
+	quota, err := ok200(c.GetQuotaWithResponse(ctx, &gen.GetQuotaParams{Limit: &one}))
 	if err != nil {
 		return o, err
 	}
-	o.Quota = *quota
+	o.Quota = quota.Items
 	for i := range o.Quota {
 		o.Quota[i].Accounts = nil
 	}

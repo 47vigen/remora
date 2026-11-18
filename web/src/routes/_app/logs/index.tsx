@@ -4,6 +4,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 
 import {
+  getKeyOptions,
   getLogOptions,
   listAccountsOptions,
   listAliasesOptions,
@@ -13,8 +14,9 @@ import {
 } from "../../../client/@tanstack/react-query.gen";
 import { DataList } from "../../../components/data-list/DataList";
 import { PageHeader } from "../../../components/page-header/PageHeader";
-import type { ListSearch } from "../../../lib/list-search";
+import { type ListSearch, PAGE_SIZES } from "../../../lib/list-search";
 import { invalidateOps } from "../../../lib/query";
+import { useDebouncedSearch } from "../../../lib/use-debounced-search";
 import { useNow } from "../../../lib/use-now";
 import { LogDetail } from "./-components/LogDetail";
 import { LogFilters } from "./-components/LogFilters";
@@ -63,19 +65,21 @@ function LogsPage() {
   const now = useNow(CLOCK_MS);
 
   const [keyQuery, setKeyQuery] = useState("");
-  const keys = useQuery(listKeysOptions({ query: { limit: MAX_LIMIT } }));
-  const keySearch = useQuery({
-    ...listKeysOptions({ query: { limit: MAX_LIMIT, q: keyQuery } }),
-    enabled: keyQuery !== "",
+  const keyQ = useDebouncedSearch(keyQuery);
+  const keys = useQuery(listKeysOptions({ query: { limit: PAGE_SIZES[0], q: keyQ || undefined } }));
+  const keyItems = keyQ === keyQuery.trim() ? (keys.data?.items ?? []) : [];
+  const selected = useQuery({
+    ...getKeyOptions({ path: { id: search.keyId ?? "" } }),
+    enabled: search.keyId !== undefined && !keyItems.some((k) => k.id === search.keyId),
   });
   const aliases = useQuery(listAliasesOptions({ query: { limit: MAX_LIMIT } }));
   const providers = useQuery(listProvidersOptions({ query: { limit: MAX_LIMIT } }));
   const accounts = useQuery(listAccountsOptions({ query: { limit: MAX_LIMIT } }));
 
-  const keyOptions = ((keyQuery !== "" ? keySearch.data : keys.data)?.items ?? []).map((k) => ({
-    id: k.id,
-    label: k.name,
-  }));
+  const keyOptions = keyItems.map((k) => ({ id: k.id, label: k.name }));
+  if (selected.data && !keyOptions.some((k) => k.id === search.keyId)) {
+    keyOptions.unshift({ id: selected.data.id, label: selected.data.name });
+  }
   const providerNames = useMemo(
     () => [
       ...new Set([

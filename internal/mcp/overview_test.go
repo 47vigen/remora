@@ -15,7 +15,7 @@ func TestOverview(t *testing.T) {
 	f.on("GET /api/accounts", http.StatusOK, `{"items":[],"total":20}`)
 	f.on("GET /api/accounts/pool", http.StatusOK, `[{"provider":"codex","enabled":3,"out":[{"id":"a1","reason":"cooling"}]},{"provider":"grok","enabled":1,"out":[]}]`)
 	f.on("GET /api/cooling", http.StatusOK, `{"items":[],"total":1}`)
-	f.on("GET /api/quota", http.StatusOK, `[{"provider":"codex","supported":true,"available":2,"cooling":1,"exhausted":0,"sign_in":0,"accounts":[{"account":{}}]}]`)
+	f.on("GET /api/quota", http.StatusOK, `{"items":[{"provider":"codex","supported":true,"available":2,"cooling":1,"exhausted":0,"sign_in":0,"accounts":[{"account":{}}]}],"total":3}`)
 
 	res, out := call(t, f.session(t), "remora_overview", map[string]any{})
 	if res.IsError {

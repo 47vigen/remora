@@ -235,30 +235,6 @@ func (e LogEntryStatus) Valid() bool {
 	}
 }
 
-// Defines values for ProviderStatus.
-const (
-	ProviderStatusDegraded ProviderStatus = "degraded"
-	ProviderStatusDown     ProviderStatus = "down"
-	ProviderStatusOk       ProviderStatus = "ok"
-	ProviderStatusUnknown  ProviderStatus = "unknown"
-)
-
-// Valid indicates whether the value is a known member of the ProviderStatus enum.
-func (e ProviderStatus) Valid() bool {
-	switch e {
-	case ProviderStatusDegraded:
-		return true
-	case ProviderStatusDown:
-		return true
-	case ProviderStatusOk:
-		return true
-	case ProviderStatusUnknown:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for ProviderKind.
 const (
 	Builtin            ProviderKind = "builtin"
@@ -277,6 +253,30 @@ func (e ProviderKind) Valid() bool {
 	case Soniox:
 		return true
 	case TypesafeCompatible:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProviderStatus.
+const (
+	ProviderStatusDegraded ProviderStatus = "degraded"
+	ProviderStatusDown     ProviderStatus = "down"
+	ProviderStatusOk       ProviderStatus = "ok"
+	ProviderStatusUnknown  ProviderStatus = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the ProviderStatus enum.
+func (e ProviderStatus) Valid() bool {
+	switch e {
+	case ProviderStatusDegraded:
+		return true
+	case ProviderStatusDown:
+		return true
+	case ProviderStatusOk:
+		return true
+	case ProviderStatusUnknown:
 		return true
 	default:
 		return false
@@ -860,10 +860,6 @@ type Provider struct {
 	Type *string `json:"type,omitempty"`
 }
 
-// ProviderStatus `down` when the last test failed or every model of the provider is cooling, `degraded` when some are
-// cooling, `unknown` before the first test.
-type ProviderStatus string
-
 // ProviderKey defines model for ProviderKey.
 type ProviderKey struct {
 	Name string `json:"name"`
@@ -881,6 +877,9 @@ type ProviderList struct {
 	Total int        `json:"total"`
 }
 
+// ProviderStatus defines model for ProviderStatus.
+type ProviderStatus string
+
 // ProviderTestResult defines model for ProviderTestResult.
 type ProviderTestResult struct {
 	LatencyMs int    `json:"latency_ms"`
@@ -892,6 +891,14 @@ type ProviderTestResult struct {
 type QuotaAccount struct {
 	Account Account        `json:"account"`
 	Quota   *QuotaSnapshot `json:"quota,omitempty"`
+}
+
+// QuotaList defines model for QuotaList.
+type QuotaList struct {
+	Items []QuotaProvider `json:"items"`
+
+	// Total Matching accounts before paging.
+	Total int `json:"total"`
 }
 
 // QuotaProvider defines model for QuotaProvider.
@@ -1227,6 +1234,25 @@ type ListProvidersParams struct {
 
 	// Type The front door's provider type of a `builtin` provider, e.g. `openrouter`.
 	Type *string `form:"type,omitempty" json:"type,omitempty"`
+
+	// Kinds Match any of these provider kinds.
+	Kinds  *[]ProviderKind `form:"kinds,omitempty" json:"kinds,omitempty"`
+	Status *ProviderStatus `form:"status,omitempty" json:"status,omitempty"`
+}
+
+// GetQuotaParams defines parameters for GetQuota.
+type GetQuotaParams struct {
+	// Limit The page size.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset The number of items to skip.
+	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+
+	// Q Free-text search over name-like fields.
+	Q *Query `form:"q,omitempty" json:"q,omitempty"`
+
+	// Provider A provider name.
+	Provider *ProviderFilter `form:"provider,omitempty" json:"provider,omitempty"`
 }
 
 // ListApiTokensParams defines parameters for ListApiTokens.
@@ -1752,12 +1778,12 @@ type ClientInterface interface {
 	// Corresponds with POST /api/providers/{name}/test (the `TestProvider` operationId).
 	TestProvider(ctx context.Context, name ProviderName, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// GetQuota Every subscription account's quota, merged with its status and cooldowns, grouped by provider.
+	// GetQuota List subscription account quotas, grouped by provider.
 	//
-	// Only providers with accounts are listed. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
+	// Paging and case-insensitive search by account label, id or plan apply to accounts, not provider summaries. Provider summaries retain their full counts even when they have no accounts on the page. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
 	//
 	// Corresponds with GET /api/quota (the `GetQuota` operationId).
-	GetQuota(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+	GetQuota(ctx context.Context, params *GetQuotaParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// RefreshQuotaWithBody Queue quota checks of one account or of every enabled account of one provider.
 	//
@@ -2762,13 +2788,13 @@ func (c *Client) TestProvider(ctx context.Context, name ProviderName, reqEditors
 	return c.Client.Do(req)
 }
 
-// GetQuota Every subscription account's quota, merged with its status and cooldowns, grouped by provider.
+// GetQuota List subscription account quotas, grouped by provider.
 //
-// Only providers with accounts are listed. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
+// Paging and case-insensitive search by account label, id or plan apply to accounts, not provider summaries. Provider summaries retain their full counts even when they have no accounts on the page. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
 //
 // Corresponds with GET /api/quota (the `GetQuota` operationId).
-func (c *Client) GetQuota(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetQuotaRequest(c.Server)
+func (c *Client) GetQuota(ctx context.Context, params *GetQuotaParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetQuotaRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -4778,6 +4804,30 @@ func NewListProvidersRequest(server string, params *ListProvidersParams) (*http.
 
 		}
 
+		if params.Kinds != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "kinds", *params.Kinds, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Status != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "status", *params.Status, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
 		if encoded := queryValues.Encode(); encoded != "" {
 			rawQueryFragments = append(rawQueryFragments, encoded)
 		}
@@ -5016,7 +5066,7 @@ func NewTestProviderRequest(server string, name ProviderName) (*http.Request, er
 }
 
 // NewGetQuotaRequest constructs an http.Request for the GetQuota method
-func NewGetQuotaRequest(server string) (*http.Request, error) {
+func NewGetQuotaRequest(server string, params *GetQuotaParams) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -5032,6 +5082,69 @@ func NewGetQuotaRequest(server string) (*http.Request, error) {
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Offset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "offset", *params.Offset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Q != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "q", *params.Q, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Provider != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "provider", *params.Provider, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
@@ -5883,14 +5996,14 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /api/providers/{name}/test (the `TestProvider` operationId).
 	TestProviderWithResponse(ctx context.Context, name ProviderName, reqEditors ...RequestEditorFn) (*TestProviderResponse, error)
 
-	// GetQuotaWithResponse Every subscription account's quota, merged with its status and cooldowns, grouped by provider.
+	// GetQuotaWithResponse List subscription account quotas, grouped by provider.
 	//
-	// Only providers with accounts are listed. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
+	// Paging and case-insensitive search by account label, id or plan apply to accounts, not provider summaries. Provider summaries retain their full counts even when they have no accounts on the page. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with GET /api/quota (the `GetQuota` operationId).
-	GetQuotaWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetQuotaResponse, error)
+	GetQuotaWithResponse(ctx context.Context, params *GetQuotaParams, reqEditors ...RequestEditorFn) (*GetQuotaResponse, error)
 
 	// RefreshQuotaWithBodyWithResponse Queue quota checks of one account or of every enabled account of one provider.
 	//
@@ -8011,13 +8124,13 @@ type GetQuotaResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *[]QuotaProvider
+	JSON200 *QuotaList
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *Error
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetQuotaResponse) GetJSON200() *[]QuotaProvider {
+func (r GetQuotaResponse) GetJSON200() *QuotaList {
 	return r.JSON200
 }
 
@@ -9137,15 +9250,15 @@ func (c *ClientWithResponses) TestProviderWithResponse(ctx context.Context, name
 	return ParseTestProviderResponse(rsp)
 }
 
-// GetQuotaWithResponse Every subscription account's quota, merged with its status and cooldowns, grouped by provider.
+// GetQuotaWithResponse List subscription account quotas, grouped by provider.
 //
-// Only providers with accounts are listed. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
+// Paging and case-insensitive search by account label, id or plan apply to accounts, not provider summaries. Provider summaries retain their full counts even when they have no accounts on the page. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
 //
 // Returns a wrapper object for the known response body format(s).
 //
 // Corresponds with GET /api/quota (the `GetQuota` operationId).
-func (c *ClientWithResponses) GetQuotaWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetQuotaResponse, error) {
-	rsp, err := c.GetQuota(ctx, reqEditors...)
+func (c *ClientWithResponses) GetQuotaWithResponse(ctx context.Context, params *GetQuotaParams, reqEditors ...RequestEditorFn) (*GetQuotaResponse, error) {
+	rsp, err := c.GetQuota(ctx, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -10739,7 +10852,7 @@ func ParseGetQuotaResponse(rsp *http.Response) (*GetQuotaResponse, error) {
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest []QuotaProvider
+		var dest QuotaList
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -11111,9 +11224,9 @@ type ServerInterface interface {
 	// TestProvider Send a small request to the provider and report the result.
 	// (POST /api/providers/{name}/test)
 	TestProvider(w http.ResponseWriter, r *http.Request, name ProviderName)
-	// GetQuota Every subscription account's quota, merged with its status and cooldowns, grouped by provider.
+	// GetQuota List subscription account quotas, grouped by provider.
 	// (GET /api/quota)
-	GetQuota(w http.ResponseWriter, r *http.Request)
+	GetQuota(w http.ResponseWriter, r *http.Request, params GetQuotaParams)
 	// RefreshQuota Queue quota checks of one account or of every enabled account of one provider.
 	// (POST /api/quota/refresh)
 	RefreshQuota(w http.ResponseWriter, r *http.Request)
@@ -12364,6 +12477,32 @@ func (siw *ServerInterfaceWrapper) ListProviders(w http.ResponseWriter, r *http.
 		return
 	}
 
+	// ------------- Optional query parameter "kinds" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "kinds", r.URL.Query(), &params.Kinds, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "kinds"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kinds", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListProviders(w, r, params)
 	}))
@@ -12522,8 +12661,66 @@ func (siw *ServerInterfaceWrapper) TestProvider(w http.ResponseWriter, r *http.R
 // GetQuota operation middleware
 func (siw *ServerInterfaceWrapper) GetQuota(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetQuotaParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "q" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "q", r.URL.Query(), &params.Q, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "q"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "q", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "provider" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "provider", r.URL.Query(), &params.Provider, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "provider"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "provider", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetQuota(w, r)
+		siw.Handler.GetQuota(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -14648,13 +14845,14 @@ func (response TestProviderdefaultJSONResponse) VisitTestProviderResponse(w http
 }
 
 type GetQuotaRequestObject struct {
+	Params GetQuotaParams
 }
 
 type GetQuotaResponseObject interface {
 	VisitGetQuotaResponse(w http.ResponseWriter) error
 }
 
-type GetQuota200JSONResponse []QuotaProvider
+type GetQuota200JSONResponse QuotaList
 
 func (response GetQuota200JSONResponse) VisitGetQuotaResponse(w http.ResponseWriter) error {
 
@@ -15076,7 +15274,7 @@ type StrictServerInterface interface {
 	// TestProvider Send a small request to the provider and report the result.
 	// (POST /api/providers/{name}/test)
 	TestProvider(ctx context.Context, request TestProviderRequestObject) (TestProviderResponseObject, error)
-	// GetQuota Every subscription account's quota, merged with its status and cooldowns, grouped by provider.
+	// GetQuota List subscription account quotas, grouped by provider.
 	// (GET /api/quota)
 	GetQuota(ctx context.Context, request GetQuotaRequestObject) (GetQuotaResponseObject, error)
 	// RefreshQuota Queue quota checks of one account or of every enabled account of one provider.
@@ -16338,8 +16536,10 @@ func (sh *strictHandler) TestProvider(w http.ResponseWriter, r *http.Request, na
 }
 
 // GetQuota operation middleware
-func (sh *strictHandler) GetQuota(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) GetQuota(w http.ResponseWriter, r *http.Request, params GetQuotaParams) {
 	var request GetQuotaRequestObject
+
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetQuota(ctx, request.(GetQuotaRequestObject))

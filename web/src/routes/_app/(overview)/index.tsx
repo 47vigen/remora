@@ -12,12 +12,12 @@ import {
   listProvidersOptions,
   testProviderMutation,
 } from "../../../client/@tanstack/react-query.gen";
-import { listProviders } from "../../../client/sdk.gen";
-import type { Stats } from "../../../client/types.gen";
+import { getQuota, listProviders } from "../../../client/sdk.gen";
+import type { QuotaProvider, Stats } from "../../../client/types.gen";
 import { PageHeader } from "../../../components/page-header/PageHeader";
 import { errorMessage } from "../../../lib/api";
 import { buildCSV, downloadFile } from "../../../lib/download";
-import { parseEnum } from "../../../lib/list-search";
+import { PAGE_SIZES, parseEnum } from "../../../lib/list-search";
 import { invalidateOps } from "../../../lib/query";
 import { Attention, COOLING_LIMIT } from "./-components/Attention";
 import { Breakdown } from "./-components/Breakdown";
@@ -112,7 +112,26 @@ function OverviewPage() {
   });
   const cooling = useQuery(listCoolingOptions({ query: { limit: COOLING_LIMIT } }));
   const pool = useQuery({ ...getAccountPoolOptions(), refetchInterval: POOL_REFRESH_MS });
-  const quota = useQuery({ ...getQuotaOptions(), refetchInterval: STATS_REFRESH_MS });
+  const quota = useQuery({
+    queryKey: getQuotaOptions().queryKey,
+    refetchInterval: STATS_REFRESH_MS,
+    queryFn: async ({ signal }) => {
+      const providers = new Map<string, QuotaProvider>();
+      for (let offset = 0; ;) {
+        const { data } = await getQuota({ query: { limit: PAGE_SIZES[2], offset }, signal, throwOnError: true });
+        let count = 0;
+        for (const group of data.items) {
+          const prev = providers.get(group.provider);
+          if (prev) prev.accounts.push(...group.accounts);
+          else providers.set(group.provider, group);
+          count += group.accounts.length;
+        }
+        offset += count;
+        if (count === 0 || offset >= data.total) break;
+      }
+      return [...providers.values()];
+    },
+  });
 
   const summary = stats.data ? summarize(stats.data.summary) : undefined;
   const series = stats.data?.series ?? [];

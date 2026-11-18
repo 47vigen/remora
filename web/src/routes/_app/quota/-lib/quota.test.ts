@@ -1,5 +1,5 @@
 import type { QuotaProvider } from "../../../../client/types.gen";
-import { level, percentLabel, quotaRows, refreshSettled, windowLabel } from "./quota";
+import { level, percentLabel, refreshSettled, windowLabel } from "./quota";
 
 const account = (id: string, email: string) => ({
   id,
@@ -68,13 +68,7 @@ test("windowLabel", () => {
   expect(w("", "1440")).toBe("1440 min");
 });
 
-test("quotaRows filters by plan and provider", () => {
-  expect(quotaRows(providers, "pro").map((r) => r.item.account.id)).toEqual(["1"]);
-  expect(quotaRows(providers, "", "codex").map((r) => r.provider)).toEqual(["codex"]);
-  expect(quotaRows(providers).length).toBe(2);
-});
-
-test("refreshSettled waits for every queued account", () => {
+test("refreshSettled waits for queued accounts visible on the page", () => {
   expect(refreshSettled(providers, ["1", "2"], new Date("2026-10-16T11:00:00Z"))).toBe(false);
-  expect(refreshSettled(providers, ["2"], new Date("2026-10-16T11:00:00Z"))).toBe(true);
+  expect(refreshSettled(providers, ["2", "off-page"], new Date("2026-10-16T11:00:00Z"))).toBe(true);
 });

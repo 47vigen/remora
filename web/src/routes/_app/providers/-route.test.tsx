@@ -87,3 +87,53 @@ test("the status filter and provider chips use the same health labels", async ()
     expect(await screen.findByRole("option", { name })).toBeInTheDocument();
   }
 });
+
+function pagedProviders(count: number) {
+  return (_req: Request, url: URL) => {
+    if (url.pathname === "/api/accounts") return Response.json({ items: [], total: 0 });
+    if (url.pathname !== "/api/providers") return;
+    const offset = Number(url.searchParams.get("offset") ?? 0);
+    const limit = Number(url.searchParams.get("limit") ?? 50);
+    const items = Array.from({ length: count }, (_, i) => ({ ...local, name: `upstream-${i + 1}` }));
+    return Response.json({ items: items.slice(offset, offset + limit), total: count });
+  };
+}
+
+test("pagination counts configured providers, not subscription connection cards", async () => {
+  renderRoute("/providers", pagedProviders(3));
+  expect(await screen.findByText("1–3 of 3")).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "Subscriptions to connect" })).toBeInTheDocument();
+});
+
+test("the providers list requests the page beyond the old cap", async () => {
+  const { requests } = renderRoute("/providers?page=9", pagedProviders(203));
+  expect(await screen.findByRole("article", { name: "upstream-203" })).toBeInTheDocument();
+  expect(screen.getByText("201–203 of 203")).toBeInTheDocument();
+  const page = requests.map((r) => new URL(r.url)).find((u) => u.pathname === "/api/providers");
+  expect(Object.fromEntries(page!.searchParams)).toMatchObject({ limit: "25", offset: "200" });
+});
+
+test("the command menu debounces server search and finds the 250th key", async () => {
+  const searches: string[] = [];
+  renderRoute("/providers", (req, url) => {
+    if (url.pathname === "/api/keys") {
+      const q = url.searchParams.get("q");
+      if (q) searches.push(q);
+      const items = q === "Client 250" ? [{ id: "key-250", name: "Client 250", prefix: "sk" }] : [];
+      return Response.json({ items, total: items.length });
+    }
+    return (
+      pagedProviders(0)(req, url) ??
+      (url.pathname === "/api/aliases" ? Response.json({ items: [], total: 0 }) : undefined)
+    );
+  });
+  await screen.findByRole("heading", { name: "Providers" });
+  await userEvent.keyboard("{Meta>}k{/Meta}");
+  const dialog = await screen.findByRole("dialog", { name: "Search" });
+  await userEvent.type(within(dialog).getByPlaceholderText("Jump to a page, provider, alias or key"), "Client 250");
+  expect(await within(dialog).findByRole("option", { name: /Client 250/ })).toHaveAttribute(
+    "href",
+    "/keys?key=key-250",
+  );
+  expect(searches).toEqual(["Client 250"]);
+});

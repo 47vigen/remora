@@ -1,3 +1,4 @@
+export const SEARCH_DEBOUNCE_MS = 300;
 export const PAGE_SIZES = [25, 50, 100] as const;
 
 export type PageSize = (typeof PAGE_SIZES)[number];

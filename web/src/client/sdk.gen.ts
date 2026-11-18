@@ -224,9 +224,9 @@ export const setAccountStrategy = <ThrowOnError extends boolean = false>(options
 });
 
 /**
- * Every subscription account's quota, merged with its status and cooldowns, grouped by provider.
+ * List subscription account quotas, grouped by provider.
  *
- * Only providers with accounts are listed. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
+ * Paging and case-insensitive search by account label, id or plan apply to accounts, not provider summaries. Provider summaries retain their full counts even when they have no accounts on the page. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
  */
 export const getQuota = <ThrowOnError extends boolean = false>(options?: Options<GetQuotaData, ThrowOnError>): RequestResult<GetQuotaResponses, GetQuotaErrors, ThrowOnError> => (options?.client ?? client).get<GetQuotaResponses, GetQuotaErrors, ThrowOnError>({
     security: [{

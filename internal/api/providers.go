@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"sync"
 
 	"github.com/47vigen/remora/internal/alias"
@@ -193,7 +194,10 @@ func (s *Server) ListProviders(ctx context.Context, req gen.ListProvidersRequest
 	pr := req.Params
 	var out []gen.Provider
 	for _, p := range all {
-		if pr.Kind != nil && string(*pr.Kind) != p.Kind || pr.Type != nil && *pr.Type != p.Type || !matches(pr.Q, p.Name) {
+		if pr.Kind != nil && string(*pr.Kind) != p.Kind ||
+			pr.Kinds != nil && !slices.Contains(*pr.Kinds, gen.ProviderKind(p.Kind)) ||
+			pr.Type != nil && *pr.Type != p.Type ||
+			pr.Status != nil && *pr.Status != h.status(p.Name) || !matches(pr.Q, p.Name) {
 			continue
 		}
 		out = append(out, toGenProvider(p, h))

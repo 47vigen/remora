@@ -2,9 +2,7 @@ import { Alert, cn, Label, ListBox, Pagination as HeroPagination, SearchField, S
 import { type ReactNode, useEffect, useEffectEvent, useState } from "react";
 
 import { errorMessage } from "../../lib/api";
-import { PAGE_SIZES, pageCount } from "../../lib/list-search";
-
-const SEARCH_DEBOUNCE_MS = 300;
+import { PAGE_SIZES, pageCount, SEARCH_DEBOUNCE_MS } from "../../lib/list-search";
 
 function Root({ children }: { children: ReactNode }) {
   return <section className="flex flex-col gap-4">{children}</section>;

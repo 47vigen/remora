@@ -1,11 +1,12 @@
 import { Plus } from "@gravity-ui/icons";
 import { Alert, Button, toast } from "@heroui/react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, stripSearchParams, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
 import {
   deleteProviderMutation,
+  getProviderOptions,
   listAccountsOptions,
   listProvidersOptions,
   testProviderMutation,
@@ -16,12 +17,12 @@ import { DataList } from "../../../components/data-list/DataList";
 import { PageHeader } from "../../../components/page-header/PageHeader";
 import { STATUS_LABELS } from "../../../components/status-chip/StatusChip";
 import { errorMessage } from "../../../lib/api";
-import { type ListSearch, parseEnum, parseListSearch } from "../../../lib/list-search";
+import { type ListSearch, PAGE_SIZES, parseEnum, parseListSearch } from "../../../lib/list-search";
 import { invalidateOps } from "../../../lib/query";
 import { ProviderCards } from "./-components/ProviderCards";
 import { ProviderEditorDrawer } from "./-components/ProviderEditorDrawer";
 import { DISPLAY_GROUPS, type DisplayGroup, GROUP_LABELS, PROVIDER_STATUSES } from "./-lib/provider-form";
-import { FETCH_LIMIT, providerListRows } from "./-lib/providers-list";
+import { providerKinds, subscriptionRows } from "./-lib/providers-list";
 
 type ProvidersSearch = ListSearch & { group?: DisplayGroup; status?: Provider["status"]; edit?: string };
 
@@ -43,9 +44,24 @@ function ProvidersPage() {
   const [deleting, setDeleting] = useState<Provider>();
   const [testing, setTesting] = useState<string>();
 
-  const providers = useQuery(listProvidersOptions({ query: { limit: FETCH_LIMIT, q: search.q || undefined } }));
-  const accounts = useQuery(listAccountsOptions({ query: { limit: FETCH_LIMIT } }));
-  const rows = providerListRows(providers.data?.items ?? [], accounts.data?.items ?? [], search);
+  const providers = useQuery({
+    ...listProvidersOptions({
+      query: {
+        limit: search.pageSize,
+        offset: (search.page - 1) * search.pageSize,
+        q: search.q || undefined,
+        kinds: providerKinds(search.group),
+        status: search.status,
+      },
+    }),
+    enabled: search.group !== "subscription",
+  });
+  const subscriptions = subscriptionRows(search);
+  const accounts = useQueries({
+    queries: subscriptions.map((provider) => listAccountsOptions({ query: { provider, limit: 1 } })),
+  });
+  const rows = subscriptions.map((provider, i) => ({ provider, accounts: accounts[i]?.data?.total ?? 0 }));
+  const items = search.group === "subscription" ? [] : (providers.data?.items ?? []);
 
   const setSearch = (patch: Partial<ProvidersSearch>) =>
     void navigate({ search: (prev) => ({ ...prev, page: 1, ...patch }) });
@@ -72,8 +88,13 @@ function ProvidersPage() {
     },
   });
 
-  const editing =
-    search.edit && search.edit !== "new" ? providers.data?.items.find((p) => p.name === search.edit) : undefined;
+  const editName = search.edit && search.edit !== "new" ? search.edit : undefined;
+  const listed = items.find((p) => p.name === editName);
+  const detail = useQuery({
+    ...getProviderOptions({ path: { name: editName ?? "" } }),
+    enabled: editName !== undefined && listed === undefined,
+  });
+  const editing = listed ?? detail.data;
   const editorOpen = search.edit === "new" || editing !== undefined;
   const filtered = Boolean(search.q || search.group || search.status);
   const addButton = (
@@ -109,20 +130,10 @@ function ProvidersPage() {
             />
           </DataList.Filters>
         </DataList.Toolbar>
-        {providers.data && providers.data.total > FETCH_LIMIT ? (
-          <Alert status="warning">
-            <Alert.Indicator />
-            <Alert.Content>
-              <Alert.Description>
-                Showing the first {FETCH_LIMIT} of {providers.data.total} providers. Search to narrow the list.
-              </Alert.Description>
-            </Alert.Content>
-          </Alert>
-        ) : null}
         <DataList.State
-          isLoading={providers.isLoading}
-          error={providers.error ?? accounts.error}
-          isEmpty={rows.total === 0}
+          isLoading={providers.isLoading || accounts.some((a) => a.isLoading)}
+          error={providers.error ?? accounts.find((a) => a.error)?.error}
+          isEmpty={items.length === 0 && rows.length === 0}
           emptyText={
             filtered
               ? "No provider matches. Clear the search or the filters."
@@ -131,8 +142,8 @@ function ProvidersPage() {
           emptyAction={filtered ? undefined : addButton}
         >
           <ProviderCards
-            items={rows.items}
-            subscriptions={rows.subscriptions}
+            items={items}
+            subscriptions={rows}
             testing={testing}
             onTest={(p) => test.mutate({ path: { name: p.name } })}
             onEdit={(p) => void navigate({ search: (prev) => ({ ...prev, edit: p.name }) })}
@@ -145,9 +156,9 @@ function ProvidersPage() {
         <DataList.Pagination
           page={search.page}
           pageSize={search.pageSize}
-          total={rows.total}
+          total={search.group === "subscription" ? 0 : (providers.data?.total ?? 0)}
           onPageChange={(page) => void navigate({ search: (prev) => ({ ...prev, page }) })}
-          onPageSizeChange={(n) => setSearch({ pageSize: n === 50 || n === 100 ? n : 25 })}
+          onPageSizeChange={(n) => setSearch({ pageSize: PAGE_SIZES.find((size) => size === n) ?? PAGE_SIZES[0] })}
         />
       </DataList>
 

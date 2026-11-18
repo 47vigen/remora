@@ -181,12 +181,15 @@ func TestListProvidersFilters(t *testing.T) {
 	for _, tc := range []struct {
 		query string
 		want  []string
+		total int
 	}{
-		{"", []string{"local", "openrouter", "speech"}},
-		{"?kind=openai-compatible", []string{"local"}},
-		{"?type=openrouter", []string{"openrouter"}},
-		{"?q=ROUT", []string{"openrouter"}}, // case-insensitive
-		{"?limit=1&offset=1", []string{"openrouter"}},
+		{"", []string{"local", "openrouter", "speech"}, 3},
+		{"?kind=openai-compatible", []string{"local"}, 1},
+		{"?type=openrouter", []string{"openrouter"}, 1},
+		{"?q=ROUT", []string{"openrouter"}, 1}, // case-insensitive
+		{"?limit=1&offset=1", []string{"openrouter"}, 3},
+		{"?kinds=builtin&kinds=openai-compatible&status=unknown&limit=1&offset=1", []string{"openrouter"}, 2},
+		{"?status=down", nil, 0},
 	} {
 		code, body := env.do(t, env.client, http.MethodGet, "/api/providers"+tc.query, "")
 		if code != http.StatusOK {
@@ -204,12 +207,8 @@ func TestListProvidersFilters(t *testing.T) {
 		if strings.Join(names, ",") != strings.Join(tc.want, ",") {
 			t.Errorf("list %s = %v, want %v", tc.query, names, tc.want)
 		}
-		wantTotal := len(tc.want)
-		if strings.HasPrefix(tc.query, "?limit") {
-			wantTotal = 3
-		}
-		if list.Total != wantTotal {
-			t.Errorf("list %s total = %d, want %d", tc.query, list.Total, wantTotal)
+		if list.Total != tc.total {
+			t.Errorf("list %s total = %d, want %d", tc.query, list.Total, tc.total)
 		}
 	}
 }

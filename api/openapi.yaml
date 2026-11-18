@@ -154,6 +154,17 @@ paths:
           description: The front door's provider type of a `builtin` provider, e.g. `openrouter`.
           schema:
             type: string
+        - name: kinds
+          in: query
+          description: Match any of these provider kinds.
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/ProviderKind"
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/ProviderStatus"
       responses:
         "200":
           description: A page of providers.
@@ -380,19 +391,24 @@ paths:
       tags: [accounts]
       operationId: getQuota
       x-remora-scope: read
-      summary: Every subscription account's quota, merged with its status and cooldowns, grouped by provider.
+      summary: List subscription account quotas, grouped by provider.
       description: >-
-        Only providers with accounts are listed. A provider whose quota remora cannot read has `supported` false and
-        its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
+        Paging and case-insensitive search by account label, id or plan apply to accounts, not provider summaries.
+        Provider summaries retain their full counts even when they have no accounts on the page. A provider whose
+        quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number
+        the provider did not report has `remaining` null.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/Query"
+        - $ref: "#/components/parameters/ProviderFilter"
       responses:
         "200":
-          description: One entry per provider, sorted by name.
+          description: A page of quota accounts in provider order, plus the matching account count.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/QuotaProvider"
+                $ref: "#/components/schemas/QuotaList"
         default:
           $ref: "#/components/responses/Error"
 
@@ -1321,6 +1337,9 @@ components:
     ProviderKind:
       type: string
       enum: [builtin, openai-compatible, typesafe-compatible, soniox]
+    ProviderStatus:
+      type: string
+      enum: [ok, degraded, down, unknown]
     ProviderKey:
       type: object
       required: [name]
@@ -1350,9 +1369,9 @@ components:
           type: integer
           readOnly: true
         status:
-          type: string
+          allOf:
+            - $ref: "#/components/schemas/ProviderStatus"
           readOnly: true
-          enum: [ok, degraded, down, unknown]
           description: |
             `down` when the last test failed or every model of the provider is cooling, `degraded` when some are
             cooling, `unknown` before the first test.
@@ -1501,6 +1520,17 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/QuotaAccount"
+    QuotaList:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuotaProvider"
+        total:
+          type: integer
+          description: Matching accounts before paging.
     QuotaRefresh:
       type: object
       description: Exactly one of account_id and provider.

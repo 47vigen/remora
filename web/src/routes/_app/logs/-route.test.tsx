@@ -126,6 +126,27 @@ test("a log shows the name of a key past the first 200 keys", async () => {
   expect(within(await findRow("or/x")).getByText("Client 201")).toBeInTheDocument();
 });
 
+test("the key filter debounces server search and selects a key past 200", async () => {
+  const searches: string[] = [];
+  const { requests } = renderRoute("/logs", (req, url) => {
+    if (url.pathname !== "/api/keys") return api(req, url);
+    const q = url.searchParams.get("q");
+    if (q) searches.push(q);
+    const items = q === "Client 250" ? [{ id: "key-250", name: "Client 250", prefix: "sk" }] : [];
+    return Response.json({ items, total: items.length });
+  });
+  await userEvent.type(await screen.findByPlaceholderText("Key"), "Client 250");
+  await userEvent.click(await screen.findByRole("option", { name: "Client 250" }));
+  await waitFor(() => {
+    expect(
+      requests
+        .map((r) => new URL(r.url))
+        .some((u) => u.pathname === "/api/logs" && u.searchParams.get("key") === "key-250"),
+    ).toBe(true);
+  });
+  expect(searches).toEqual(["Client 250"]);
+});
+
 test("live mode prepends matching entries and hides paging", async () => {
   renderRoute("/logs?live=true&alias=fast", api);
   await findRow("or/x");

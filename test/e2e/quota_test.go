@@ -62,9 +62,11 @@ func importQuotaAccount(t *testing.T, a *admin, provider, fixture string) string
 // snapshotOf returns the quota of account id from GET /api/quota, nil when it has none.
 func snapshotOf(t *testing.T, a *admin, id string) *quotaSnapshot {
 	t.Helper()
-	var providers []quotaProvider
-	decodeJSON(t, a.must(http.MethodGet, "/api/quota", "", http.StatusOK), &providers)
-	for _, p := range providers {
+	var page struct {
+		Items []quotaProvider `json:"items"`
+	}
+	decodeJSON(t, a.must(http.MethodGet, "/api/quota?q="+id, "", http.StatusOK), &page)
+	for _, p := range page.Items {
 		for _, acc := range p.Accounts {
 			if acc.Account.ID == id {
 				return acc.Quota

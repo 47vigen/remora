@@ -444,9 +444,9 @@ export const setAccountStrategyMutation = (options?: Partial<Options<SetAccountS
 export const getQuotaQueryKey = (options?: Options<GetQuotaData>) => createQueryKey('getQuota', options);
 
 /**
- * Every subscription account's quota, merged with its status and cooldowns, grouped by provider.
+ * List subscription account quotas, grouped by provider.
  *
- * Only providers with accounts are listed. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
+ * Paging and case-insensitive search by account label, id or plan apply to accounts, not provider summaries. Provider summaries retain their full counts even when they have no accounts on the page. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
  */
 export const getQuotaOptions = (options?: Options<GetQuotaData>) => queryOptions<GetQuotaResponse, GetQuotaError, GetQuotaResponse, ReturnType<typeof getQuotaQueryKey>>({
     queryFn: async ({ queryKey, signal }) => {
@@ -460,6 +460,38 @@ export const getQuotaOptions = (options?: Options<GetQuotaData>) => queryOptions
     },
     queryKey: getQuotaQueryKey(options)
 });
+
+export const getQuotaInfiniteQueryKey = (options?: Options<GetQuotaData>): QueryKey<Options<GetQuotaData>> => createQueryKey('getQuota', options, true);
+
+/**
+ * List subscription account quotas, grouped by provider.
+ *
+ * Paging and case-insensitive search by account label, id or plan apply to accounts, not provider summaries. Provider summaries retain their full counts even when they have no accounts on the page. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
+ */
+export const getQuotaInfiniteOptions = (options?: Options<GetQuotaData>) => {
+    const opts = infiniteQueryOptions<GetQuotaResponse, GetQuotaError, InfiniteData<GetQuotaResponse>, QueryKey<Options<GetQuotaData>>, number | Pick<QueryKey<Options<GetQuotaData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<GetQuotaData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await getQuota({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: getQuotaInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 /**
  * Queue quota checks of one account or of every enabled account of one provider.
