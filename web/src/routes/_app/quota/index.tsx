@@ -1,4 +1,4 @@
-import { Alert, buttonVariants, cn, Link } from "@heroui/react";
+import { Alert, buttonVariants, cn, Link, Table } from "@heroui/react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
@@ -113,7 +113,7 @@ function QuotaPage() {
           emptyText={
             q || provider
               ? "No accounts match these filters."
-              : "No subscription accounts yet. Sign in to Antigravity, Codex or Claude on its provider page."
+              : "No subscription accounts yet. Sign in on the provider page."
           }
           emptyAction={
             q || provider ? undefined : (
@@ -126,18 +126,33 @@ function QuotaPage() {
             )
           }
         >
-          <div className="flex flex-col gap-4">
-            {groups.map((g) => (
-              <ProviderQuota
-                key={g.provider.provider}
-                provider={g.provider}
-                rows={g.rows}
-                now={now}
-                pending={busy || refresh.isPending}
-                onRefresh={onRefresh}
-              />
-            ))}
-          </div>
+          {groups.length === 0 ? (
+            <Table>
+              <Table.ScrollContainer>
+                <Table.Content aria-label="Subscription accounts">
+                  <Table.Header>
+                    <Table.Column isRowHeader>Account</Table.Column>
+                    <Table.Column>Status</Table.Column>
+                    <Table.Column>Updated</Table.Column>
+                  </Table.Header>
+                  <Table.Body />
+                </Table.Content>
+              </Table.ScrollContainer>
+            </Table>
+          ) : (
+            <div className="flex flex-col gap-4">
+              {groups.map((g) => (
+                <ProviderQuota
+                  key={g.provider.provider}
+                  provider={g.provider}
+                  rows={g.rows}
+                  now={now}
+                  pending={busy || refresh.isPending}
+                  onRefresh={onRefresh}
+                />
+              ))}
+            </div>
+          )}
         </DataList.State>
         <DataList.Pagination
           page={page}

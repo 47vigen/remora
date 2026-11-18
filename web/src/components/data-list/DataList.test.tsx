@@ -1,3 +1,4 @@
+import { Table } from "@heroui/react";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -49,7 +50,7 @@ test("State shows the loading, error, empty and content states", () => {
 
   rerender(
     <DataList.State isLoading={false} isEmpty emptyText="No keys yet.">
-      <p>rows</p>
+      {null}
     </DataList.State>,
   );
   expect(screen.getByText("No keys yet.")).toBeInTheDocument();
@@ -61,6 +62,28 @@ test("State shows the loading, error, empty and content states", () => {
     </DataList.State>,
   );
   expect(screen.getByText("rows")).toBeInTheDocument();
+});
+
+test("an empty list keeps the real header, hides three faded zero rows, and keeps the action reachable", async () => {
+  render(
+    <DataList.State isLoading={false} isEmpty emptyText="No keys yet." emptyAction={<button>Create key</button>}>
+      <Table>
+        <Table.Content aria-label="Keys">
+          <Table.Header>
+            <Table.Column isRowHeader>Name</Table.Column>
+            <Table.Column>Requests</Table.Column>
+          </Table.Header>
+          <Table.Body />
+        </Table.Content>
+      </Table>
+    </DataList.State>,
+  );
+  expect(screen.getByRole("columnheader", { name: "Requests" })).toBeVisible();
+  const rows = screen.getAllByText("0");
+  expect(rows).toHaveLength(3);
+  for (const row of rows) expect(row.closest('[aria-hidden="true"]')).toHaveClass("opacity-40");
+  await userEvent.tab({ shift: true });
+  expect(screen.getByRole("button", { name: "Create key" })).toHaveFocus();
 });
 
 test("Pagination reports page and page-size changes", async () => {

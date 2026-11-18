@@ -109,6 +109,7 @@ function State({
   emptyText: string;
   /** What to do about the empty list, such as a create button; shown under the text. */
   emptyAction?: ReactNode;
+  /** The list itself; its header stays visible even when there are no items. */
   children: ReactNode;
 }) {
   if (isLoading)
@@ -140,9 +141,22 @@ function State({
     );
   if (isEmpty)
     return (
-      <div className="border-border flex flex-col items-center gap-3 rounded-sm border border-dashed px-6 py-14 text-center">
-        <p className="text-muted text-sm">{emptyText}</p>
-        {emptyAction}
+      <div className="flex flex-col gap-3">
+        <div className="bg-surface border-border overflow-hidden rounded-sm border">
+          {children}
+          <div aria-hidden="true" className="text-muted divide-border divide-y font-mono text-xs opacity-40">
+            {[0, 1, 2].map((row) => (
+              <div key={row} className="flex items-center justify-between px-4 py-3">
+                <span>—</span>
+                <span>0</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-muted text-sm">{emptyText}</p>
+          {emptyAction}
+        </div>
       </div>
     );
   return <>{children}</>;
