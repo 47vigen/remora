@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	apispec "github.com/47vigen/remora/api"
 	"github.com/47vigen/remora/internal/api/gen"
 	"github.com/47vigen/remora/internal/auth"
 	"github.com/47vigen/remora/internal/config"
@@ -74,16 +75,28 @@ var publicPaths = map[string]bool{
 
 func isPublic(r *http.Request) bool { return publicPaths[r.Method+" "+r.URL.Path] }
 
-// Handler serves /api/*: the generated routes behind the CSRF guard and admin authentication. Mount it at "/api/".
+// Handler serves /api/* behind the CSRF, authentication and scope checks. Mount it at "/api/".
 func (s *Server) Handler() http.Handler {
+	scopes, err := loadOperationScopes([]byte(apispec.OpenAPI))
+	if err != nil {
+		panic(err) // A bad embedded contract is a build error; do not start serving.
+	}
+	var middleware []gen.StrictMiddlewareFunc
+	if s.d.Auth != nil {
+		middleware = append(middleware, scopes.middleware)
+	}
 	mux := http.NewServeMux()
-	strict := gen.NewStrictHandlerWithOptions(s, nil, gen.StrictHTTPServerOptions{
+	strict := gen.NewStrictHandlerWithOptions(s, middleware, gen.StrictHTTPServerOptions{
 		RequestErrorHandlerFunc:  s.requestErrorHandler,
 		ResponseErrorHandlerFunc: s.writeError,
 	})
 	gen.HandlerWithOptions(strict, gen.StdHTTPServerOptions{BaseRouter: mux, ErrorHandlerFunc: s.requestErrorHandler})
-	// The live log WebSocket is not generated; it is more specific than /api/logs/{id}, so it wins.
-	mux.HandleFunc("GET /api/logs/live", s.streamLogs)
+	// The live log WebSocket is hand-mounted and must authorize before upgrading.
+	mux.HandleFunc("GET /api/logs/live", func(w http.ResponseWriter, r *http.Request) {
+		if s.d.Auth == nil || scopes.authorize(w, r, "streamLogs") {
+			s.streamLogs(w, r)
+		}
+	})
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
 		auth.WriteError(w, http.StatusNotFound, typeNotFound, "not_found", "Unknown path or method.")
 	})

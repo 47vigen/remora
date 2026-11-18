@@ -28,7 +28,10 @@ func (s *Server) ChangePassword(ctx context.Context, req gen.ChangePasswordReque
 }
 
 func toGenToken(t store.APIToken) gen.ApiToken {
-	return gen.ApiToken{Id: t.ID, Name: t.Name, Prefix: t.Prefix, CreatedAt: t.CreatedAt, LastUsedAt: t.LastUsedAt}
+	return gen.ApiToken{
+		Id: t.ID, Name: t.Name, Prefix: t.Prefix, CreatedAt: t.CreatedAt, LastUsedAt: t.LastUsedAt,
+		Scope: new(gen.ApiTokenScope(t.Scope)), ExpiresAt: t.ExpiresAt,
+	}
 }
 
 // ListApiTokens lists the API tokens, searched by name or prefix, one page at a time. Values are never shown.
@@ -58,13 +61,17 @@ func (s *Server) CreateApiToken(ctx context.Context, req gen.CreateApiTokenReque
 	if req.Body == nil || req.Body.Name == "" {
 		return nil, badRequest("a token needs a name")
 	}
-	t, value, err := s.d.Auth.CreateToken(ctx, req.Body.Name)
+	if req.Body.Scope != nil && !req.Body.Scope.Valid() {
+		return nil, badRequest("scope must be read, operate, or admin")
+	}
+	t, value, err := s.d.Auth.CreateScopedToken(ctx, req.Body.Name, string(deref(req.Body.Scope)), req.Body.ExpiresAt)
 	if err != nil {
 		return nil, err
 	}
 	g := toGenToken(t)
 	return gen.CreateApiToken201JSONResponse{
-		Id: g.Id, Name: g.Name, Prefix: g.Prefix, CreatedAt: g.CreatedAt, LastUsedAt: g.LastUsedAt, Value: value,
+		Id: g.Id, Name: g.Name, Prefix: g.Prefix, CreatedAt: g.CreatedAt, LastUsedAt: g.LastUsedAt,
+		Scope: g.Scope, ExpiresAt: g.ExpiresAt, Value: value,
 	}, nil
 }
 
