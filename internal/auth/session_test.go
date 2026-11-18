@@ -8,6 +8,8 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/47vigen/remora/internal/store"
 )
 
 func TestChangedPasswordSurvivesEnv(t *testing.T) {
@@ -75,6 +77,32 @@ func TestSessionExpires(t *testing.T) {
 	c.add(SessionTTL + time.Second)
 	if _, err := s.Authenticate(cookieReq(tok)); !errors.Is(err, ErrUnauthenticated) {
 		t.Errorf("expired session err = %v, want ErrUnauthenticated", err)
+	}
+}
+
+func TestSessionPurgeOnSuccessfulLogin(t *testing.T) {
+	ctx := context.Background()
+	s, st, c := newService(t)
+	expired := login(t, s, testPassword)
+	c.add(SessionTTL)
+	activeHash := []byte("active-session-hash")
+	if err := st.CreateSession(ctx, activeHash, c.now().Add(time.Nanosecond)); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if _, _, err := s.Login(ctx, "192.0.2.1", "wrong-password-1"); !errors.Is(err, ErrBadPassword) {
+		t.Fatalf("failed login: %v", err)
+	}
+	if _, err := st.SessionExpiry(ctx, hashToken(expired)); err != nil {
+		t.Fatalf("failed login removed expired session: %v", err)
+	}
+	fresh := login(t, s, testPassword)
+	if _, err := st.SessionExpiry(ctx, hashToken(expired)); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("expired session after login: %v, want ErrNotFound", err)
+	}
+	for _, hash := range [][]byte{activeHash, hashToken(fresh)} {
+		if _, err := st.SessionExpiry(ctx, hash); err != nil {
+			t.Errorf("active session after login: %v", err)
+		}
 	}
 }
 

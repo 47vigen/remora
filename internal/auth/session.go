@@ -69,6 +69,9 @@ func (s *Service) Login(ctx context.Context, remoteIP, password string) (token s
 	}
 	s.limiter.succeed(remoteIP)
 
+	if err := s.st.DeleteExpiredSessions(ctx, now); err != nil {
+		return "", time.Time{}, fmt.Errorf("auth: login: %w", err)
+	}
 	buf := make([]byte, sessionBytes)
 	_, _ = rand.Read(buf) // crypto/rand.Read never fails (it aborts the program instead)
 	token = base64.RawURLEncoding.EncodeToString(buf)

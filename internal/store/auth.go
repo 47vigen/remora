@@ -49,6 +49,14 @@ func (s *Store) DeleteSession(ctx context.Context, hash []byte) error {
 	return nil
 }
 
+// DeleteExpiredSessions deletes sessions that have expired at or before now.
+func (s *Store) DeleteExpiredSessions(ctx context.Context, now time.Time) error {
+	if _, err := s.db.ExecContext(ctx, "DELETE FROM sessions WHERE expires_at <= ?", now.UnixNano()); err != nil {
+		return fmt.Errorf("store: delete expired sessions: %w", err)
+	}
+	return nil
+}
+
 // DeleteSessionsExcept deletes every session but the one with hash keep (nil keeps none).
 func (s *Store) DeleteSessionsExcept(ctx context.Context, keep []byte) error {
 	if _, err := s.db.ExecContext(ctx, "DELETE FROM sessions WHERE hash IS NOT ?", keep); err != nil {
