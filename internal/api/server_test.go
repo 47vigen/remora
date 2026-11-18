@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -50,6 +51,8 @@ func newTestEnvTail(t *testing.T, tail *bifrost.Tail, buffer, backlog int) *test
 		t.Fatalf("store.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
+	authSvc := auth.NewService(st, nil)
+	t.Cleanup(authSvc.StartTokenTouches(ctx, slog.New(slog.DiscardHandler))) // runs before st.Close, as in serve
 	if _, err := auth.EnsureAdmin(ctx, st, testAdminPassword); err != nil {
 		t.Fatalf("EnsureAdmin: %v", err)
 	}
@@ -68,7 +71,7 @@ func newTestEnvTail(t *testing.T, tail *bifrost.Tail, buffer, backlog int) *test
 		Logs:      env.logs,
 		Quota:     env.quota,
 		Tail:      tail,
-		Auth:      auth.NewService(st, nil),
+		Auth:      authSvc,
 
 		liveBuffer:  buffer,
 		liveBacklog: backlog,
