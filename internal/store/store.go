@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
-	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -34,6 +34,10 @@ type Store struct {
 
 // Open opens (or creates) the database at path and applies the embedded migrations that are missing.
 func Open(ctx context.Context, path string) (*Store, error) {
+	return openWithMigrations(ctx, path, migrationFS)
+}
+
+func openWithMigrations(ctx context.Context, path string, files fs.FS) (*Store, error) {
 	db, err := sql.Open("sqlite", dsn(path))
 	if err != nil {
 		return nil, fmt.Errorf("store: open %s: %w", path, err)
@@ -44,7 +48,7 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	db.SetMaxIdleConns(maxConns)
 	db.SetConnMaxIdleTime(0)
 	s := &Store{db: db}
-	if err := s.migrate(ctx); err != nil {
+	if err := s.migrate(ctx, files); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("store: open %s: %w", path, err)
 	}
@@ -72,74 +76,165 @@ func dsn(p string) string {
 	return "file:" + p + "?_pragma=busy_timeout(" + strconv.Itoa(busyTimeoutMS) + ")&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_txlock=immediate"
 }
 
-// migrations returns the embedded migration file names, sorted.
-func migrations() ([]string, error) {
-	entries, err := fs.ReadDir(migrationFS, "migrations")
+const numberedApplicationID = 0x524d5241 // RMRA
+
+// Legacy releases stored positions in this list, not the prefixes. Never extend or reorder it.
+var legacyMigrations = [...]string{
+	"0001_init.sql",
+	"0002_inference_core.sql",
+	"0003_accounts.sql",
+	"0005_auth.sql",
+	"0006_alias_strategy.sql",
+	"0007_account_quota.sql",
+	"0008_alias_strategy_names.sql",
+	"0009_account_routing.sql",
+}
+
+type migration struct {
+	name    string
+	version int
+}
+
+func migrations(files fs.FS) ([]migration, error) {
+	entries, err := fs.ReadDir(files, "migrations")
 	if err != nil {
 		return nil, fmt.Errorf("read migrations: %w", err)
 	}
-	names := make([]string, 0, len(entries))
-	for _, e := range entries {
-		names = append(names, e.Name())
-	}
-	sort.Strings(names)
-	return names, nil
-}
-
-// migrate applies the missing migrations. user_version counts the applied files.
-func (s *Store) migrate(ctx context.Context) error {
-	names, err := migrations()
-	if err != nil {
-		return err
-	}
-	current, err := userVersion(ctx, s.db)
-	if err != nil {
-		return err
-	}
-	if current > len(names) {
-		return fmt.Errorf("%w: schema version %d, this remora knows %d", ErrSchemaTooNew, current, len(names))
-	}
-	for i := current; i < len(names); i++ {
-		if err := s.apply(ctx, i+1, names[i]); err != nil {
-			return err
+	list := make([]migration, 0, len(entries))
+	var previous uint64
+	for _, entry := range entries {
+		name := entry.Name()
+		prefix, _, ok := strings.Cut(name, "_")
+		v, err := strconv.ParseUint(prefix, 10, 31) // SQLite user_version is a signed 32-bit integer.
+		if entry.IsDir() || !ok || err != nil || v <= previous {
+			return nil, fmt.Errorf("migration %s: expected a positive, strictly increasing numeric prefix", name)
 		}
+		list = append(list, migration{name: name, version: int(v)})
+		previous = v
 	}
-	return nil
+	return list, nil
 }
 
-// apply runs one migration file and sets user_version to version in one transaction. It re-reads
-// user_version inside the transaction so that two processes opening the same file never apply a file twice.
-func (s *Store) apply(ctx context.Context, version int, name string) (err error) {
-	body, err := migrationFS.ReadFile(path.Join("migrations", name))
+func (s *Store) migrate(ctx context.Context, files fs.FS) error {
+	list, err := migrations(files)
 	if err != nil {
-		return fmt.Errorf("read migration %s: %w", name, err)
+		return err
 	}
+	// BEGIN IMMEDIATE serializes history validation and schema changes across concurrent opens.
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("migration %s: begin: %w", name, err)
+		return fmt.Errorf("begin migrations: %w", err)
 	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
-		}
-	}()
+	defer func() { _ = tx.Rollback() }()
 
 	current, err := userVersion(ctx, tx)
 	if err != nil {
 		return err
 	}
-	if current >= version {
-		return tx.Commit()
+	var id int
+	if err := tx.QueryRowContext(ctx, "PRAGMA application_id").Scan(&id); err != nil {
+		return fmt.Errorf("read application_id: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, string(body)); err != nil {
-		return fmt.Errorf("migration %s: %w", name, err)
+	latest := 0
+	if len(list) != 0 {
+		latest = list[len(list)-1].version
 	}
-	// PRAGMA takes no bound parameters; version is an int we computed.
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", version)); err != nil {
-		return fmt.Errorf("migration %s: set user_version: %w", name, err)
+	if id != numberedApplicationID {
+		latest = min(len(legacyMigrations), len(list))
+	}
+	if current > latest {
+		return fmt.Errorf("%w: schema version %d, this remora knows %d", ErrSchemaTooNew, current, latest)
+	}
+	if current < 0 {
+		return fmt.Errorf("invalid schema version %d", current)
+	}
+
+	applied := 0
+	if id != numberedApplicationID {
+		applied = current
+		if err := convertLegacyMigrations(ctx, tx, list[:applied]); err != nil {
+			return err
+		}
+	} else {
+		for applied < len(list) && list[applied].version <= current {
+			applied++
+		}
+		if current != 0 && (applied == 0 || list[applied-1].version != current) {
+			return fmt.Errorf("no migration for schema version %d", current)
+		}
+		if err := checkMigrationHistory(ctx, tx, list[:applied]); err != nil {
+			return err
+		}
+	}
+	for _, m := range list[applied:] {
+		body, err := fs.ReadFile(files, path.Join("migrations", m.name))
+		if err != nil {
+			return fmt.Errorf("read migration %s: %w", m.name, err)
+		}
+		if _, err := tx.ExecContext(ctx, string(body)); err != nil {
+			return fmt.Errorf("migration %s: %w", m.name, err)
+		}
+		if err := recordMigration(ctx, tx, m); err != nil {
+			return err
+		}
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("migration %s: commit: %w", name, err)
+		return fmt.Errorf("commit migrations: %w", err)
+	}
+	return nil
+}
+
+func convertLegacyMigrations(ctx context.Context, tx *sql.Tx, applied []migration) error {
+	if _, err := tx.ExecContext(ctx, "CREATE TABLE schema_migrations (name TEXT PRIMARY KEY NOT NULL)"); err != nil {
+		return fmt.Errorf("create migration history: %w", err)
+	}
+	for i, m := range applied {
+		if m.name != legacyMigrations[i] {
+			return fmt.Errorf("legacy migration history: expected %s, found %s", legacyMigrations[i], m.name)
+		}
+		if err := recordMigration(ctx, tx, m); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA application_id = %d", numberedApplicationID)); err != nil {
+		return fmt.Errorf("set application_id: %w", err)
+	}
+	return nil
+}
+
+// user_version alone cannot tell whether a migration was inserted into an already-applied gap.
+func checkMigrationHistory(ctx context.Context, tx *sql.Tx, applied []migration) error {
+	rows, err := tx.QueryContext(ctx, "SELECT name FROM schema_migrations ORDER BY name")
+	if err != nil {
+		return fmt.Errorf("read migration history: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var i int
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return fmt.Errorf("read migration history: %w", err)
+		}
+		if i >= len(applied) || applied[i].name != name {
+			return fmt.Errorf("migration history differs at %s", name)
+		}
+		i++
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("read migration history: %w", err)
+	}
+	if i != len(applied) {
+		return fmt.Errorf("migration history is missing %s", applied[i].name)
+	}
+	return nil
+}
+
+func recordMigration(ctx context.Context, tx *sql.Tx, m migration) error {
+	if _, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations (name) VALUES (?)", m.name); err != nil {
+		return fmt.Errorf("record migration %s: %w", m.name, err)
+	}
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", m.version)); err != nil {
+		return fmt.Errorf("migration %s: set user_version: %w", m.name, err)
 	}
 	return nil
 }

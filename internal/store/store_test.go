@@ -5,10 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io/fs"
 	"path/filepath"
-	"slices"
 	"sync"
 	"testing"
+	"testing/fstest"
 
 	"github.com/47vigen/remora/internal/alias"
 )
@@ -27,22 +28,11 @@ func openTemp(t *testing.T) *Store {
 	return s
 }
 
-func TestOpenAppliesMigrations(t *testing.T) {
+func TestMigrationsApplyWithGap(t *testing.T) {
 	ctx := context.Background()
 	s := openTemp(t)
 
-	files, err := migrationFS.ReadDir("migrations")
-	if err != nil {
-		t.Fatalf("read migrations: %v", err)
-	}
-	var version int
-	if err := s.DB().QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
-		t.Fatalf("user_version: %v", err)
-	}
-	// user_version counts the applied files, so a gap in the file numbers (0005 before 0004) is harmless.
-	if version != len(files) || version != 8 {
-		t.Errorf("user_version = %d, want %d (files) == 8", version, len(files))
-	}
+	checkNumberedSchema(t, s, latestMigration(t))
 
 	for _, table := range []string{
 		"settings", "engine_state", "providers", "provider_keys", "client_keys", "aliases", "alias_members", "engine_sync",
@@ -75,30 +65,125 @@ func TestOpenAppliesMigrations(t *testing.T) {
 	}
 }
 
-func TestMigrationRenamesStrategies(t *testing.T) {
-	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "remora.db")
+func latestMigration(t *testing.T) int {
+	t.Helper()
+	files, err := fs.ReadDir(migrationFS, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var latest int
+	if _, err := fmt.Sscanf(files[len(files)-1].Name(), "%d_", &latest); err != nil {
+		t.Fatal(err)
+	}
+	return latest
+}
+
+func checkNumberedSchema(t *testing.T, s *Store, want int) {
+	t.Helper()
+	ctx := t.Context()
+	if v, err := userVersion(ctx, s.DB()); err != nil || v != want {
+		t.Errorf("user_version = (%d, %v), want %d", v, err, want)
+	}
+	var id int
+	if err := s.DB().QueryRowContext(ctx, "PRAGMA application_id").Scan(&id); err != nil || id != 0x524d5241 {
+		t.Errorf("application_id = (%#x, %v), want 0x524d5241", id, err)
+	}
+}
+
+func legacyDB(t *testing.T, path string, count int) *sql.DB {
+	t.Helper()
+	ctx := t.Context()
 	db, err := sql.Open("sqlite", dsn(path))
 	if err != nil {
-		t.Fatalf("open: %v", err)
+		t.Fatal(err)
 	}
-	names, err := migrations()
+	t.Cleanup(func() { _ = db.Close() })
+	files, err := fs.ReadDir(migrationFS, "migrations")
 	if err != nil {
-		t.Fatalf("migrations: %v", err)
+		t.Fatal(err)
 	}
-	old := slices.Index(names, "0006_alias_strategy.sql") + 1
-	for i, name := range names[:old] {
-		body, err := migrationFS.ReadFile("migrations/" + name)
+	for _, file := range files[:count] {
+		body, err := migrationFS.ReadFile("migrations/" + file.Name())
 		if err != nil {
-			t.Fatalf("read %s: %v", name, err)
+			t.Fatal(err)
 		}
 		if _, err := db.ExecContext(ctx, string(body)); err != nil {
-			t.Fatalf("apply %s: %v", name, err)
-		}
-		if _, err := db.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", i+1)); err != nil {
-			t.Fatalf("user_version: %v", err)
+			t.Fatalf("apply %s: %v", file.Name(), err)
 		}
 	}
+	if _, err := db.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", count)); err != nil {
+		t.Fatal(err)
+	}
+	return db
+}
+
+func TestMigrationsConvertLegacy(t *testing.T) {
+	for _, count := range []int{8, 3} {
+		t.Run(fmt.Sprintf("count_%d", count), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "remora.db")
+			if err := legacyDB(t, path, count).Close(); err != nil {
+				t.Fatal(err)
+			}
+			// Every existing migration creates or alters schema; replaying one fails Open.
+			for range 2 {
+				s, err := Open(t.Context(), path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				checkNumberedSchema(t, s, latestMigration(t))
+				if err := s.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func TestMigrationsRejectInvalidPrefixes(t *testing.T) {
+	for _, name := range []string{"0001_duplicate.sql", "bad_prefix.sql", "0000_zero.sql", "10_out_of_order.sql"} {
+		t.Run(name, func(t *testing.T) {
+			files := fstest.MapFS{
+				"migrations/0001_init.sql":  {Data: []byte("CREATE TABLE first (id INTEGER)")},
+				"migrations/0011_later.sql": {Data: []byte("CREATE TABLE later (id INTEGER)")},
+				"migrations/" + name:        {Data: []byte("CREATE TABLE second (id INTEGER)")},
+			}
+			s, err := openWithMigrations(t.Context(), filepath.Join(t.TempDir(), "remora.db"), files)
+			if err == nil {
+				_ = s.Close()
+				t.Fatal("Open accepted invalid migration numbers")
+			}
+		})
+	}
+}
+
+func TestMigrationsRejectInsertedBelowVersion(t *testing.T) {
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "remora.db")
+	files := fstest.MapFS{
+		"migrations/0001_init.sql": {Data: []byte("CREATE TABLE first (id INTEGER)")},
+		"migrations/0003_next.sql": {Data: []byte("CREATE TABLE third (id INTEGER)")},
+	}
+	s, err := openWithMigrations(ctx, path, files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkNumberedSchema(t, s, 3)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	files["migrations/0002_inserted.sql"] = &fstest.MapFile{Data: []byte("CREATE TABLE second (id INTEGER)")}
+	s, err = openWithMigrations(ctx, path, files)
+	if err == nil {
+		_ = s.Close()
+		t.Fatal("Open accepted a migration inserted below the stored version")
+	}
+}
+
+func TestMigrationsRenameStrategies(t *testing.T) {
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "remora.db")
+	// The fifth legacy file was 0006_alias_strategy.sql.
+	db := legacyDB(t, path, 5)
 	if _, err := db.ExecContext(ctx, `INSERT INTO aliases (name, kind, strategy) VALUES ('a', 'chat', 'round-robin'), ('b', 'chat', '')`); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
@@ -115,9 +200,7 @@ func TestMigrationRenamesStrategies(t *testing.T) {
 	if err != nil || all["a"].Strategy != alias.StrategyRandom || all["b"].Strategy != alias.StrategyPriority {
 		t.Errorf("Aliases = (%+v, %v), want a random, b priority", all, err)
 	}
-	if v, err := userVersion(ctx, s.DB()); err != nil || v != len(names) {
-		t.Errorf("user_version = (%d, %v), want %d", v, err, len(names))
-	}
+	checkNumberedSchema(t, s, latestMigration(t))
 }
 
 func TestOpenIsIdempotent(t *testing.T) {
@@ -145,26 +228,43 @@ func TestOpenIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestOpenRejectsNewerSchema(t *testing.T) {
-	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "remora.db")
-	s, err := Open(ctx, path)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	if _, err := s.DB().ExecContext(ctx, "PRAGMA user_version = 99"); err != nil {
-		t.Fatalf("set user_version: %v", err)
-	}
-	if err := s.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-
-	s, err = Open(ctx, path)
-	if !errors.Is(err, ErrSchemaTooNew) {
-		if s != nil {
-			_ = s.Close()
-		}
-		t.Fatalf("Open = %v, want ErrSchemaTooNew", err)
+func TestMigrationsRejectNewerSchema(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		version int
+		legacy  bool
+	}{
+		{"numbered", 99, false},
+		{"legacy", 9, true}, // 9 is a known prefix, but not a known legacy count.
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			path := filepath.Join(t.TempDir(), "remora.db")
+			var db *sql.DB
+			if tc.legacy {
+				db = legacyDB(t, path, 8)
+			} else {
+				s, err := Open(ctx, path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				db = s.DB()
+			}
+			t.Cleanup(func() { _ = db.Close() })
+			if _, err := db.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", tc.version)); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			s, err := Open(ctx, path)
+			if !errors.Is(err, ErrSchemaTooNew) {
+				if s != nil {
+					_ = s.Close()
+				}
+				t.Fatalf("Open = %v, want ErrSchemaTooNew", err)
+			}
+		})
 	}
 }
 
