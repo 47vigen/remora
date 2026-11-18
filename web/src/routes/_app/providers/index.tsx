@@ -14,6 +14,7 @@ import type { Provider } from "../../../client/types.gen";
 import { ConfirmDelete } from "../../../components/confirm-delete/ConfirmDelete";
 import { DataList } from "../../../components/data-list/DataList";
 import { PageHeader } from "../../../components/page-header/PageHeader";
+import { STATUS_LABELS } from "../../../components/status-chip/StatusChip";
 import { errorMessage } from "../../../lib/api";
 import { type ListSearch, parseEnum, parseListSearch } from "../../../lib/list-search";
 import { invalidateOps } from "../../../lib/query";
@@ -34,13 +35,6 @@ export const Route = createFileRoute("/_app/providers/")({
   search: { middlewares: [stripSearchParams({ page: 1, pageSize: 25, q: "" })] },
   component: ProvidersPage,
 });
-
-const STATUS_LABELS: Record<Provider["status"], string> = {
-  ok: "Healthy",
-  degraded: "Degraded",
-  down: "Down",
-  unknown: "Not tested",
-};
 
 function ProvidersPage() {
   const search = Route.useSearch();

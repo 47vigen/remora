@@ -1,4 +1,4 @@
-import type { Provider, StatsSummary } from "../../../../client/types.gen";
+import type { Provider, StatsGroup, StatsSummary } from "../../../../client/types.gen";
 import { healthCounts, summarize } from "./overview";
 
 const base: StatsSummary = {
@@ -49,5 +49,45 @@ test("healthCounts", () => {
     degraded: 0,
     down: 1,
     unknown: 0,
+    fromTraffic: 0,
   });
+});
+
+const provider = (name: string, status: Provider["status"] = "unknown"): Provider => ({
+  name,
+  status,
+  kind: "openai-compatible",
+  key_count: 0,
+});
+
+const traffic = (name: string, requests: number, errors: number): StatsGroup => ({
+  name,
+  summary: { ...base, requests, errors, error_rate: requests > 0 ? errors / requests : 0 },
+});
+
+test("providers with low-error traffic count as healthy even without probes", () => {
+  expect(
+    healthCounts(
+      [provider("alpha"), provider("beta"), provider("gamma")],
+      [traffic("alpha", 25, 1), traffic("beta", 1, 0), traffic("gamma", 8, 0)],
+    ),
+  ).toEqual({ ok: 3, degraded: 0, down: 0, unknown: 0, fromTraffic: 3 });
+});
+
+test("traffic without evidence of health leaves untested providers unknown", () => {
+  expect(
+    healthCounts(
+      [provider("idle"), provider("missing"), provider("threshold"), provider("failing")],
+      [traffic("unlisted", 2, 0), traffic("idle", 0, 0), traffic("threshold", 20, 1), traffic("failing", 3, 1)],
+    ),
+  ).toEqual({ ok: 0, degraded: 0, down: 0, unknown: 4, fromTraffic: 0 });
+});
+
+test("traffic does not override a known provider status", () => {
+  expect(
+    healthCounts(
+      [provider("down", "down"), provider("degraded", "degraded"), provider("ok", "ok")],
+      [traffic("down", 4, 0), traffic("degraded", 4, 0), traffic("ok", 4, 4)],
+    ),
+  ).toEqual({ ok: 1, degraded: 1, down: 1, unknown: 0, fromTraffic: 0 });
 });

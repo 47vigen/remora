@@ -233,7 +233,7 @@ function OverviewPage() {
         {providers.data ? (
           <Attention
             className="lg:col-span-4"
-            health={healthCounts(providers.data.items)}
+            health={healthCounts(providers.data.items, stats.isPlaceholderData ? undefined : stats.data?.groups)}
             pool={pool.data ?? []}
             quota={quota.data ?? []}
             quotaError={quota.error && !quota.data ? errorMessage(quota.error) : undefined}

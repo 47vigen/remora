@@ -72,3 +72,18 @@ test("a subscription provider sets its strategy and says when priorities do not 
   expect(new URL(put.url).pathname).toBe("/api/accounts/strategies/codex");
   expect(await put.json()).toEqual({ strategy: "fill-first" });
 });
+
+test("the status filter and provider chips use the same health labels", async () => {
+  renderRoute("/providers", (_req, url) => {
+    if (url.pathname === "/api/providers") {
+      return Response.json({ items: [local, { ...local, name: "untested", status: "unknown" }], total: 2 });
+    }
+    if (url.pathname === "/api/accounts") return Response.json({ items: [], total: 0 });
+  });
+  expect(within(await screen.findByRole("article", { name: "local" })).getByText("Healthy")).toBeInTheDocument();
+  expect(within(screen.getByRole("article", { name: "untested" })).getByText("Not tested")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /Status/ }));
+  for (const name of ["Healthy", "Degraded", "Down", "Not tested"]) {
+    expect(await screen.findByRole("option", { name })).toBeInTheDocument();
+  }
+});
