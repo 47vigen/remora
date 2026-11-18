@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/47vigen/remora/internal/alias"
@@ -214,6 +215,90 @@ func TestSync_Idempotent(t *testing.T) {
 	if got := h.eng.Mutations(); len(got) != 0 {
 		t.Errorf("second Sync made calls %q", ops(got))
 	}
+}
+
+const driftedBaseURL = "http://drifted.test"
+
+func driftProvider(t *testing.T, h *harness) {
+	t.Helper()
+	p, ok := h.eng.Provider("up-a")
+	if !ok {
+		t.Fatal("up-a missing before engine edit")
+	}
+	p.BaseURL = driftedBaseURL
+	if err := h.eng.UpdateProvider(t.Context(), p); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func wantBaseURL(t *testing.T, h *harness, want string) {
+	t.Helper()
+	if p, _ := h.eng.Provider("up-a"); p.BaseURL != want {
+		t.Fatalf("engine base URL = %q, want %q", p.BaseURL, want)
+	}
+}
+
+func TestForceAllAfterRestart(t *testing.T) {
+	h := newHarness(t)
+	h.base(t)
+	restarts := 0
+	h.rec.RestartCount = func() int { return restarts }
+	h.sync(t)
+	driftProvider(t, h)
+
+	h.sync(t)
+	wantBaseURL(t, h, driftedBaseURL)
+
+	restarts++
+	h.eng.FailOnce("UpdateProvider")
+	if err := h.rec.Sync(t.Context()); err == nil {
+		t.Fatal("restart sync with a failing engine: want an error")
+	}
+	wantBaseURL(t, h, driftedBaseURL)
+
+	h.sync(t)
+	wantBaseURL(t, h, "http://up-a.test")
+
+	driftProvider(t, h)
+	h.sync(t)
+	wantBaseURL(t, h, driftedBaseURL)
+}
+
+func TestForceAllFirstPass(t *testing.T) {
+	h := newHarness(t)
+	c1 := h.base(t)
+	h.sync(t)
+	driftProvider(t, h)
+	h.eng.Mutations()
+
+	// A new process sees the same engine objects and stored MACs.
+	h.rec = &Reconciler{Store: h.st, Engine: h.eng}
+	h.sync(t)
+	wantBaseURL(t, h, "http://up-a.test")
+	want := []string{
+		"UpdateProvider up-a", "UpdateProvider up-b", "UpdateKey up-a-key", "UpdateKey up-b-key",
+		"UpdateVirtualKey " + VirtualKeyName(c1), "UpdateRoutingRule remora:alias:fast",
+	}
+	if got := ops(h.eng.Mutations()); !slices.Equal(got, want) {
+		t.Errorf("first pass calls = %q, want %q", got, want)
+	}
+}
+
+func TestForceAllHourly(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newHarness(t)
+		h.base(t)
+		h.sync(t)
+		driftProvider(t, h)
+
+		time.Sleep(59 * time.Minute)
+		h.sync(t)
+		wantBaseURL(t, h, driftedBaseURL)
+
+		time.Sleep(time.Minute)
+		h.sync(t)
+		wantBaseURL(t, h, "http://up-a.test")
+	})
 }
 
 func TestSync_StoreWins(t *testing.T) {
