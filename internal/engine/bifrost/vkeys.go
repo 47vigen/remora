@@ -3,10 +3,14 @@ package bifrost
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 )
+
+// ErrInvalidVirtualKey marks a rejected virtual-key create or update.
+var ErrInvalidVirtualKey = errors.New("invalid virtual key")
 
 // managedDescription marks the engine objects remora owns.
 const managedDescription = "managed by remora"
@@ -85,7 +89,7 @@ func (c *Client) CreateVirtualKey(ctx context.Context, v VirtualKey) (VirtualKey
 		VirtualKey *virtualKeyAnswer `json:"virtual_key"`
 	}
 	if err := c.do(ctx, http.MethodPost, "/api/governance/virtual-keys", virtualKeyWire(v), &out); err != nil {
-		return VirtualKey{}, err
+		return VirtualKey{}, classifyVirtualKeyError(err)
 	}
 	if out.VirtualKey == nil || out.VirtualKey.ID == "" || out.VirtualKey.Value == "" {
 		return VirtualKey{}, fmt.Errorf("bifrost: create virtual key: answer has no id or value")
@@ -98,7 +102,15 @@ func (c *Client) UpdateVirtualKey(ctx context.Context, v VirtualKey) error {
 	if err := requireID("virtual key id", v.ID); err != nil {
 		return err
 	}
-	return c.do(ctx, http.MethodPut, virtualKeyPath(v.ID), virtualKeyWire(v), nil)
+	return classifyVirtualKeyError(c.do(ctx, http.MethodPut, virtualKeyPath(v.ID), virtualKeyWire(v), nil))
+}
+
+func classifyVirtualKeyError(err error) error {
+	var answer *APIError
+	if errors.As(err, &answer) && (answer.Status == http.StatusBadRequest || answer.Status == http.StatusConflict) {
+		return fmt.Errorf("%w: %w", ErrInvalidVirtualKey, err)
+	}
+	return err
 }
 
 // DeleteVirtualKey removes a virtual key.

@@ -261,6 +261,7 @@ func TestErrorMapping(t *testing.T) {
 		{fmt.Errorf("reconcile: change: %w", fmt.Errorf("%w: a -> b -> a", alias.ErrCycle)), http.StatusBadRequest, "invalid_request", "cycle"},
 		{fmt.Errorf("%w: %q", alias.ErrUnknownMember, "x"), http.StatusBadRequest, "invalid_request", "unknown member"},
 		{auth.ErrWeakPassword, http.StatusBadRequest, "invalid_request", ""},
+		{fmt.Errorf("reconcile: change: %w: %w", bifrost.ErrInvalidVirtualKey, errors.New("private engine detail")), http.StatusBadRequest, "invalid_request", "The client key was rejected."},
 		{badRequest("name is required"), http.StatusBadRequest, "invalid_request", "name is required"},
 		{auth.ErrBadPassword, http.StatusUnauthorized, "unauthorized", ""},
 		{auth.ErrTooManyAttempts, http.StatusTooManyRequests, "too_many_attempts", ""},
@@ -282,7 +283,7 @@ func TestErrorMapping(t *testing.T) {
 			if !strings.Contains(string(body), tc.contains) {
 				t.Errorf("body %s does not mention %q", body, tc.contains)
 			}
-			for _, leak := range []string{"bifrost", "127.0.0.1", "reconcile:", "store:"} {
+			for _, leak := range []string{"bifrost", "127.0.0.1", "reconcile:", "store:", "private engine detail"} {
 				if strings.Contains(string(body), leak) {
 					t.Errorf("body %s leaks %q", body, leak)
 				}
