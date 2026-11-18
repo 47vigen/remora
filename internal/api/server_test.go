@@ -72,6 +72,7 @@ func newTestEnvTail(t *testing.T, tail *bifrost.Tail, buffer, backlog int) *test
 		Logs:      env.logs,
 		Quota:     env.quota,
 		Tail:      tail,
+		Audit:     st,
 		Auth:      authSvc,
 
 		liveBuffer:  buffer,

@@ -11,6 +11,7 @@ import (
 	"github.com/47vigen/remora/internal/auth"
 	"github.com/47vigen/remora/internal/config"
 	"github.com/47vigen/remora/internal/engine/bifrost"
+	"github.com/47vigen/remora/internal/store"
 )
 
 // Deps are the services the management API runs on. A nil port answers 501 not_implemented for the operations
@@ -26,6 +27,7 @@ type Deps struct {
 	Logs      LogSource     // the front door's request log
 	Quota     Quotas        // subscription accounts' quota, through NewQuota
 	Tail      *bifrost.Tail // the one poller following it, fanned out to live log viewers
+	Audit     *store.Store
 	Auth      *auth.Service
 	Log       *slog.Logger
 
@@ -82,6 +84,11 @@ func (s *Server) Handler() http.Handler {
 		panic(err) // A bad embedded contract is a build error; do not start serving.
 	}
 	var middleware []gen.StrictMiddlewareFunc
+	var httpMiddleware []gen.MiddlewareFunc
+	if s.d.Audit != nil {
+		middleware = append(middleware, s.auditOperations(scopes))
+		httpMiddleware = append(httpMiddleware, auditResponses)
+	}
 	if s.d.Auth != nil {
 		middleware = append(middleware, scopes.middleware)
 	}
@@ -90,7 +97,7 @@ func (s *Server) Handler() http.Handler {
 		RequestErrorHandlerFunc:  s.requestErrorHandler,
 		ResponseErrorHandlerFunc: s.writeError,
 	})
-	gen.HandlerWithOptions(strict, gen.StdHTTPServerOptions{BaseRouter: mux, ErrorHandlerFunc: s.requestErrorHandler})
+	gen.HandlerWithOptions(strict, gen.StdHTTPServerOptions{BaseRouter: mux, Middlewares: httpMiddleware, ErrorHandlerFunc: s.requestErrorHandler})
 	// The live log WebSocket is hand-mounted and must authorize before upgrading.
 	mux.HandleFunc("GET /api/logs/live", func(w http.ResponseWriter, r *http.Request) {
 		if s.d.Auth == nil || scopes.authorize(w, r, "streamLogs") {

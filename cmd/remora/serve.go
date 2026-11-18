@@ -216,6 +216,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		Logs:      fd,
 		Quota:     api.NewQuota(accts, qs),
 		Tail:      liveTail,
+		Audit:     st,
 		Auth:      authSvc,
 		Log:       logger,
 	})

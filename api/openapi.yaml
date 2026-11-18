@@ -5,7 +5,7 @@ info:
   description: |
     The management surface of remora, served under `/api/*` on the same listener as `/v1/*`.
 
-    Every list is paged with `limit` and `offset`, searchable with `q`, and returns `{items, total}`. Every error
+    Every list is paged with `limit` and `offset` and returns `{items, total}`. Every error
     has the shape `{error: {message, type, code}}`, the same as `/v1`. The UI authenticates with the session
     cookie set by `login`; scripts send an API token (created in Settings) as a bearer token. Client keys work only
     on `/v1/*` and are rejected here.
@@ -26,6 +26,8 @@ tags:
     description: Model aliases, their compiled chains and cooling members.
   - name: keys
     description: Client keys for `/v1/*`.
+  - name: audit
+    description: Audit trail of management actions.
   - name: logs
     description: Request logs, their fallback paths and the live stream.
   - name: stats
@@ -794,6 +796,30 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Stats"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/audit:
+    get:
+      tags: [audit]
+      operationId: listAudit
+      x-remora-scope: read
+      summary: List audited management actions, newest recorded first.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - name: operation
+          in: query
+          description: Filter by exact OpenAPI operationId (e.g. `updateAccount`).
+          schema:
+            type: string
+      responses:
+        "200":
+          description: A page of audit entries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditList"
         default:
           $ref: "#/components/responses/Error"
 
@@ -1968,6 +1994,42 @@ components:
         expires_at:
           type: string
           format: date-time
+    AuditEntry:
+      type: object
+      required: [id, at, principal, operation_id, diff]
+      properties:
+        id:
+          type: integer
+          format: int64
+        at:
+          type: string
+          format: date-time
+        principal:
+          type: string
+          enum: [session, token]
+        token_id:
+          type: string
+          description: Present for a token principal.
+        token_name:
+          type: string
+          description: The token name at the time of the action.
+        operation_id:
+          type: string
+          description: The OpenAPI operationId of the action.
+        diff:
+          type: object
+          additionalProperties: true
+          description: Target and submitted changes where applicable. Secrets are masked as `[set]`.
+    AuditList:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEntry"
+        total:
+          type: integer
     ApiTokenList:
       type: object
       required: [items, total]

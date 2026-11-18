@@ -108,6 +108,8 @@ func TestEveryResourceOperationExists(t *testing.T) {
 		"listCooling",
 		// keys
 		"listKeys", "createKey", "getKey", "updateKey", "deleteKey", "getKeyUsage",
+		// audit
+		"listAudit",
 		// logs
 		"listLogs", "getLog", "streamLogs",
 		// stats
@@ -117,8 +119,8 @@ func TestEveryResourceOperationExists(t *testing.T) {
 		// config
 		"exportConfig", "planConfig", "applyConfig",
 	}
-	if len(want) != 50 {
-		t.Fatalf("expected list has %d ids, want 50", len(want))
+	if len(want) != 51 {
+		t.Fatalf("expected list has %d ids, want 51", len(want))
 	}
 	var got []string
 	for _, item := range doc.Paths.Map() {
