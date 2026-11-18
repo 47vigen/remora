@@ -91,16 +91,18 @@ test("toLogSummary maps an entry and marks fallbacks", () => {
     attempt: 2,
     time: "2026-10-14T10:00:00Z",
     key: "k1",
+    key_name: "ci",
     alias: "fast",
     provider: "or",
     model: "x",
     status: "success",
+    status_code: 200,
     latency_ms: 120,
     tokens: { prompt: 10, completion: 5, total: 15 },
     cost_usd: 0.001,
     stream: true,
   };
-  expect(toLogSummary(e, new Map([["k1", "ci"]]))).toEqual({
+  expect(toLogSummary(e)).toEqual({
     id: "l2",
     ts: "2026-10-14T10:00:00Z",
     status: "success",
@@ -109,6 +111,7 @@ test("toLogSummary maps an entry and marks fallbacks", () => {
     alias: "fast",
     keyId: "k1",
     keyName: "ci",
+    statusCode: 200,
     latencyMs: 120,
     tokens: { prompt: 10, completion: 5, total: 15 },
     costUsd: 0.001,

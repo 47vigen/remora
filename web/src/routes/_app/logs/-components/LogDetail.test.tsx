@@ -91,7 +91,7 @@ test("a streamed response is shown raw with a note", async () => {
 });
 
 test("the overview names the key, falling back to its id", () => {
-  const { rerender } = render(<LogDetail log={log} keyName="ci" isLoading={false} onClose={() => {}} />);
+  const { rerender } = render(<LogDetail log={{ ...log, key_name: "ci" }} isLoading={false} onClose={() => {}} />);
   expect(within(screen.getByRole("dialog")).getByText("ci")).toBeInTheDocument();
   rerender(<LogDetail log={log} isLoading={false} onClose={() => {}} />);
   expect(within(screen.getByRole("dialog")).getByText("k1")).toBeInTheDocument();

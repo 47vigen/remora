@@ -762,7 +762,10 @@ type LogDetail struct {
 	Id           string     `json:"id"`
 
 	// Key The client key id.
-	Key       *string `json:"key,omitempty"`
+	Key *string `json:"key,omitempty"`
+
+	// KeyName The client key name, when the key can be resolved.
+	KeyName   *string `json:"key_name,omitempty"`
 	LatencyMs *int    `json:"latency_ms,omitempty"`
 	Model     string  `json:"model"`
 
@@ -772,9 +775,12 @@ type LogDetail struct {
 	Request  *map[string]interface{} `json:"request,omitempty"`
 	Response *map[string]interface{} `json:"response,omitempty"`
 	Status   LogDetailStatus         `json:"status"`
-	Stream   bool                    `json:"stream"`
-	Time     time.Time               `json:"time"`
-	Tokens   TokenUsage              `json:"tokens"`
+
+	// StatusCode The recorded HTTP status code, when available.
+	StatusCode *int       `json:"status_code,omitempty"`
+	Stream     bool       `json:"stream"`
+	Time       time.Time  `json:"time"`
+	Tokens     TokenUsage `json:"tokens"`
 }
 
 // LogDetailStatus defines model for LogDetail.Status.
@@ -789,7 +795,10 @@ type LogEntry struct {
 	Id      string   `json:"id"`
 
 	// Key The client key id.
-	Key       *string `json:"key,omitempty"`
+	Key *string `json:"key,omitempty"`
+
+	// KeyName The client key name, when the key can be resolved.
+	KeyName   *string `json:"key_name,omitempty"`
 	LatencyMs *int    `json:"latency_ms,omitempty"`
 	Model     string  `json:"model"`
 
@@ -797,9 +806,12 @@ type LogEntry struct {
 	ParentId *string        `json:"parent_id,omitempty"`
 	Provider string         `json:"provider"`
 	Status   LogEntryStatus `json:"status"`
-	Stream   bool           `json:"stream"`
-	Time     time.Time      `json:"time"`
-	Tokens   TokenUsage     `json:"tokens"`
+
+	// StatusCode The recorded HTTP status code, when available.
+	StatusCode *int       `json:"status_code,omitempty"`
+	Stream     bool       `json:"stream"`
+	Time       time.Time  `json:"time"`
+	Tokens     TokenUsage `json:"tokens"`
 }
 
 // LogEntryStatus defines model for LogEntry.Status.

@@ -56,6 +56,7 @@ func (s *tailSource) SearchLogs(_ context.Context, f bifrost.LogFilter) (bifrost
 	var out []bifrost.Log
 	for _, l := range s.rows {
 		if f.Start == nil || !l.Timestamp.Before(*f.Start) {
+			l.ErrorDetails = nil
 			out = append(out, l)
 		}
 	}
@@ -171,14 +172,16 @@ func TestStreamLogsSessionAuth(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = byToken.CloseNow() })
 
-	env.src.add(bifrost.Log{
+	row := bifrost.Log{
 		ID: "r", Provider: bifrost.OAuthProvider, Model: "codex/gpt-x", Status: "error", VirtualKeyID: ptr("vk1"),
-		RoutingRuleID: ptr("r1"), ErrorDetails: errDetails("bifrost: slow down"),
-	})
+		RoutingRuleID: ptr("r1"), ErrorDetails: json.RawMessage(`{"status_code":429,"error":{"message":"bifrost: slow down"}}`),
+	}
+	env.logs.add(row)
+	env.src.add(row)
 	for _, c := range []*websocket.Conn{byCookie, byToken} {
 		e := readEntry(t, c)
 		if e.Id != "r" || deref(e.Key) != "k1" || deref(e.Alias) != "fast" || e.Provider != "codex" || e.Model != "gpt-x" ||
-			e.Status != "error" {
+			e.Status != "error" || deref(e.StatusCode) != 429 || deref(e.KeyName) != "name-k1" {
 			t.Errorf("entry = %+v", e)
 		}
 		b, _ := json.Marshal(e)

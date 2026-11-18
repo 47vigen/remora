@@ -72,7 +72,6 @@ function LogsPage() {
   const providers = useQuery(listProvidersOptions({ query: { limit: MAX_LIMIT } }));
   const accounts = useQuery(listAccountsOptions({ query: { limit: MAX_LIMIT } }));
 
-  const keyNames = useMemo(() => new Map((keys.data?.items ?? []).map((k) => [k.id, k.name])), [keys.data]);
   const keyOptions = ((keyQuery !== "" ? keySearch.data : keys.data)?.items ?? []).map((k) => ({
     id: k.id,
     label: k.name,
@@ -102,7 +101,7 @@ function LogsPage() {
     },
   });
   const list = useQuery(listOptions);
-  const pageRows = useMemo(() => (list.data?.items ?? []).map((e) => toLogSummary(e, keyNames)), [list.data, keyNames]);
+  const pageRows = useMemo(() => (list.data?.items ?? []).map(toLogSummary), [list.data]);
 
   // Live mode starts from page 1 and prepends what arrives, within the same filters. The rows carry the filters they
   // belong to, so a read that finishes after the filters changed cannot add its page to the new rows.
@@ -121,16 +120,14 @@ function LogsPage() {
   const { isConnected } = useLiveLogs(
     live === true,
     (batch) => {
-      const fresh = batch
-        .map((l) => (l.keyId !== undefined ? { ...l, keyName: keyNames.get(l.keyId) } : l))
-        .filter((l) => matchesLogFilters(l, search));
+      const fresh = batch.filter((l) => matchesLogFilters(l, search));
       if (fresh.length > 0) edit(filterKey, (rows) => prependLive(rows, fresh, liveCap));
     },
     async () => {
       const key = filterKey;
       try {
         const data = await queryClient.fetchQuery({ ...listOptions, staleTime: 0 });
-        const page = data.items.map((e) => toLogSummary(e, keyNames));
+        const page = data.items.map(toLogSummary);
         setLive((s) => mergeCatchUp(s, key, page, liveCap));
       } catch {
         // Filters changed under the read, or it failed: the stream carries on and the next connection reads again.
@@ -208,7 +205,6 @@ function LogsPage() {
       {search.log !== undefined ? (
         <LogDetail
           log={detail.data}
-          keyName={detail.data?.key !== undefined ? keyNames.get(detail.data.key) : undefined}
           isLoading={detail.isPending}
           onClose={() => void navigate({ search: (prev) => ({ ...prev, log: undefined }) })}
         />

@@ -1796,6 +1796,9 @@ components:
         key:
           type: string
           description: The client key id.
+        key_name:
+          type: string
+          description: The client key name, when the key can be resolved.
         alias:
           type: string
         provider:
@@ -1805,6 +1808,9 @@ components:
         status:
           type: string
           enum: [success, error, processing, cancelled]
+        status_code:
+          type: integer
+          description: The recorded HTTP status code, when available.
         latency_ms:
           type: integer
         tokens:

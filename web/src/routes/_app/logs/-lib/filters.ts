@@ -23,6 +23,7 @@ export type LogSummary = {
   id: string;
   ts: string;
   status: LogEntry["status"];
+  statusCode?: number;
   provider: string;
   model: string;
   alias?: string;
@@ -111,16 +112,17 @@ export function mergeCatchUp(s: LiveState | null, key: string, page: LogSummary[
   return s !== null && s.key === key ? { key, rows: mergeLive(s.rows, page, cap) } : s;
 }
 
-export function toLogSummary(e: LogEntry, keyNames?: Map<string, string>): LogSummary {
+export function toLogSummary(e: LogEntry): LogSummary {
   return {
     id: e.id,
     ts: e.time,
     status: e.status,
+    statusCode: e.status_code,
     provider: e.provider,
     model: e.model,
     alias: e.alias,
     keyId: e.key,
-    keyName: e.key !== undefined ? keyNames?.get(e.key) : undefined,
+    keyName: e.key_name,
     latencyMs: e.latency_ms,
     tokens: e.tokens,
     costUsd: e.cost_usd,

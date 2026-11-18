@@ -38,6 +38,7 @@ const entry = (id: string, over: object = {}) => ({
   attempt: 1,
   time: new Date().toISOString(),
   key: "k1",
+  key_name: "ci",
   alias: "fast",
   provider: "or",
   model: "x",
@@ -91,6 +92,40 @@ test("a row opens the detail drawer through ?log=", async () => {
   expect(await screen.findByRole("tab", { name: "Fallback path" })).toBeInTheDocument();
 });
 
+test("the status chip and detail show the HTTP status code", async () => {
+  renderRoute("/logs", (req, url) => {
+    const failed = entry("l1", { status: "error", status_code: 429 });
+    if (url.pathname === "/api/logs") return Response.json({ items: [failed], total: 1 });
+    if (url.pathname === "/api/logs/l1")
+      return Response.json({ ...failed, request: {}, response: {}, fallback_path: [failed] });
+    return api(req, url);
+  });
+  const row = await findRow("or/x");
+  expect(within(row).getByText("429")).toBeInTheDocument();
+  await userEvent.click(row);
+  expect(await within(await screen.findByRole("dialog")).findByText("429")).toBeInTheDocument();
+});
+
+test("a log shows the name of a key past the first 200 keys", async () => {
+  renderRoute("/logs", (req, url) => {
+    if (url.pathname === "/api/keys") {
+      const items = Array.from({ length: 200 }, (_, i) => ({
+        id: `key-${i + 1}`,
+        name: `Client ${i + 1}`,
+        allow: [],
+        enabled: true,
+        prefix: "sk",
+        created_at: "",
+      }));
+      return Response.json({ items, total: 201 });
+    }
+    if (url.pathname === "/api/logs")
+      return Response.json({ items: [entry("l1", { key: "key-201", key_name: "Client 201" })], total: 1 });
+    return api(req, url);
+  });
+  expect(within(await findRow("or/x")).getByText("Client 201")).toBeInTheDocument();
+});
+
 test("live mode prepends matching entries and hides paging", async () => {
   renderRoute("/logs?live=true&alias=fast", api);
   await findRow("or/x");
@@ -102,9 +137,17 @@ test("live mode prepends matching entries and hides paging", async () => {
     ws.onopen?.();
   });
   expect(await screen.findByText("Connected")).toBeInTheDocument();
-  act(() => ws.onmessage?.({ data: JSON.stringify(entry("l9", { model: "new-model" })) }));
+  act(() =>
+    ws.onmessage?.({
+      data: JSON.stringify(
+        entry("l9", { model: "new-model", key: "key-201", key_name: "Client 201", status: "error", status_code: 429 }),
+      ),
+    }),
+  );
   act(() => ws.onmessage?.({ data: JSON.stringify(entry("l8", { alias: "slow", model: "skipped" })) }));
-  await findRow("or/new-model");
+  const row = await findRow("or/new-model");
+  expect(within(row).getByText("Client 201")).toBeInTheDocument();
+  expect(within(row).getByText("429")).toBeInTheDocument();
   expect(screen.getAllByRole("row")[1]).toHaveTextContent("or/new-model");
   expect(screen.queryByText("or/skipped")).toBeNull();
 });

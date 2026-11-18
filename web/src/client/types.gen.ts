@@ -373,10 +373,18 @@ export type LogEntry = {
      * The client key id.
      */
     key?: string;
+    /**
+     * The client key name, when the key can be resolved.
+     */
+    key_name?: string;
     alias?: string;
     provider: string;
     model: string;
     status: 'success' | 'error' | 'processing' | 'cancelled';
+    /**
+     * The recorded HTTP status code, when available.
+     */
+    status_code?: number;
     latency_ms?: number;
     tokens: TokenUsage;
     cost_usd?: number;

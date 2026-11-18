@@ -12,15 +12,17 @@ import (
 )
 
 type logEntryJSON struct {
-	ID       string  `json:"id"`
-	ParentID *string `json:"parent_id"`
-	Attempt  int     `json:"attempt"`
-	Key      *string `json:"key"`
-	Alias    *string `json:"alias"`
-	Provider string  `json:"provider"`
-	Model    string  `json:"model"`
-	Status   string  `json:"status"`
-	Error    *string `json:"error"`
+	ID         string  `json:"id"`
+	ParentID   *string `json:"parent_id"`
+	Attempt    int     `json:"attempt"`
+	Key        *string `json:"key"`
+	KeyName    *string `json:"key_name"`
+	StatusCode *int    `json:"status_code"`
+	Alias      *string `json:"alias"`
+	Provider   string  `json:"provider"`
+	Model      string  `json:"model"`
+	Status     string  `json:"status"`
+	Error      *string `json:"error"`
 }
 
 type logDetailJSON struct {
@@ -66,6 +68,47 @@ func TestListLogsUnknownAlias(t *testing.T) {
 	if code, body := env.do(t, env.client, http.MethodGet, "/api/logs?key=nope", ""); code != http.StatusOK ||
 		strings.TrimSpace(string(body)) != `{"items":[],"total":0}` {
 		t.Fatalf("unknown key = %d %s", code, body)
+	}
+}
+
+func TestListLogsStatusCodesAndKeyName(t *testing.T) {
+	env := newTestEnv(t)
+	env.names.keys = map[string]string{"k1": "vk1"}
+	now := time.Now().UTC()
+	env.logs.add(
+		bifrost.Log{
+			ID: "rate-limited", Timestamp: now, Status: "error", VirtualKeyID: ptr("vk1"),
+			ErrorDetails: json.RawMessage(`{"status_code":429,"error":{"message":"rate limited"}}`),
+		},
+		bifrost.Log{
+			ID: "rejected", Timestamp: now.Add(-time.Second), Status: "error",
+			ErrorDetails: json.RawMessage(`{"status_code":403,"error":{"message":"request rejected"}}`),
+		},
+		bifrost.Log{ID: "no-code", Timestamp: now.Add(-2 * time.Second), Status: "success"},
+	)
+	code, body := env.do(t, env.client, http.MethodGet, "/api/logs", "")
+	var page struct {
+		Items []logEntryJSON `json:"items"`
+	}
+	decode(t, body, &page)
+	if code != http.StatusOK || len(page.Items) != 3 {
+		t.Fatalf("list = %d %s", code, body)
+	}
+	for i, want := range []int{429, 403, 0} {
+		if got := page.Items[i].StatusCode; deref(got) != want || (want == 0 && got != nil) {
+			t.Errorf("%s status_code = %d (present: %t), want %d (omitted if zero)", page.Items[i].ID, deref(got), got != nil, want)
+		}
+	}
+	if deref(page.Items[0].KeyName) != "name-k1" || page.Items[1].KeyName != nil {
+		t.Errorf("key names missing or incorrect: %s", body)
+	}
+	limited, _ := getLogDetail(t, env, "rate-limited")
+	if deref(limited.KeyName) != "name-k1" {
+		t.Errorf("rate-limited detail key_name = %q, want name-k1", deref(limited.KeyName))
+	}
+	d, _ := getLogDetail(t, env, "rejected")
+	if deref(d.StatusCode) != 403 {
+		t.Errorf("rejected detail status_code = %d, want 403", deref(d.StatusCode))
 	}
 }
 

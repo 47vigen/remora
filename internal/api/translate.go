@@ -106,8 +106,8 @@ func (s *Server) toEntry(ctx context.Context, l bifrost.Log, rootAlias string) g
 		e.ParentId = new(*l.ParentRequestID)
 	}
 	if l.VirtualKeyID != nil && *l.VirtualKeyID != "" {
-		if id, _, ok := s.d.Names.KeyByVK(ctx, *l.VirtualKeyID); ok {
-			e.Key = &id
+		if id, name, ok := s.d.Names.KeyByVK(ctx, *l.VirtualKeyID); ok {
+			e.Key, e.KeyName = &id, &name
 		}
 	}
 	if a := s.ruleAlias(ctx, l.RoutingRuleID); a != "" {
@@ -120,6 +120,9 @@ func (s *Server) toEntry(ctx context.Context, l bifrost.Log, rootAlias string) g
 	}
 	if u := l.TokenUsage; u != nil {
 		e.Tokens = gen.TokenUsage{Prompt: int(u.PromptTokens), Completion: int(u.CompletionTokens), Total: int(u.TotalTokens)}
+	}
+	if code, _ := l.Failure(); code != 0 {
+		e.StatusCode = &code
 	}
 	if msg := errorMessage(l.ErrorDetails); msg != "" {
 		e.Error = new(Scrub(proxy.TranslateModelError(msg, t.Provider+"/"+t.Model)))
