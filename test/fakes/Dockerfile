@@ -1,5 +1,5 @@
 # Build context is the repo root: docker build -f test/fakes/Dockerfile .
-FROM golang:1.27-trixie AS build
+FROM golang:1.27.4-trixie AS build
 WORKDIR /src
 COPY go.mod go.sum* ./
 COPY test/fakes ./test/fakes

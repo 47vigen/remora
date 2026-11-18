@@ -16,7 +16,7 @@ RUN bun run build
 
 # ---------------------------------------------------------------------------
 # remora: cross-compiled on the build platform.
-FROM --platform=$BUILDPLATFORM golang:1.27-trixie AS remora
+FROM --platform=$BUILDPLATFORM golang:1.27.4-trixie AS remora
 ARG TARGETOS
 ARG TARGETARCH
 ARG REMORA_VERSION=dev
@@ -32,7 +32,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
 
 # ---------------------------------------------------------------------------
 # bifrost (front door): cgo, built on the target platform.
-FROM golang:1.27-trixie AS bifrost
+FROM golang:1.27.4-trixie AS bifrost
 ARG BIFROST_VERSION
 RUN test -n "$BIFROST_VERSION"
 WORKDIR /src/transports
@@ -53,7 +53,7 @@ RUN GOWORK=off CGO_ENABLED=1 go build -trimpath -tags sqlite_static \
 
 # ---------------------------------------------------------------------------
 # cliproxyapi (OAuth engine): cgo, built on the target platform.
-FROM golang:1.27-trixie AS cliproxyapi
+FROM golang:1.27.4-trixie AS cliproxyapi
 ARG CLIPROXYAPI_VERSION
 RUN test -n "$CLIPROXYAPI_VERSION"
 WORKDIR /src
@@ -66,7 +66,7 @@ RUN CGO_ENABLED=1 go build -buildvcs=false -trimpath \
 
 # ---------------------------------------------------------------------------
 # final: glibc runtime with tini as PID 1; nginx in front on 8080, remora behind it on loopback.
-FROM debian:13-slim
+FROM debian:13.7-slim
 ARG BIFROST_VERSION
 ARG CLIPROXYAPI_VERSION
 RUN test -n "$BIFROST_VERSION" && test -n "$CLIPROXYAPI_VERSION"
