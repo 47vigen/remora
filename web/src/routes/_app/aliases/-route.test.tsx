@@ -33,9 +33,13 @@ test("the list sends paging and filters and shows chain and cooling counts", asy
 });
 
 test("the editor loads the alias, previews the chain and saves the draft", async () => {
+  let stored = fast;
   const { requests, router } = renderRoute("/aliases/fast", async (req, url) => {
-    if (url.pathname === "/api/aliases/fast" && req.method === "GET") return Response.json(fast);
-    if (url.pathname === "/api/aliases/fast" && req.method === "PUT") return Response.json(await req.json());
+    if (url.pathname === "/api/aliases/fast" && req.method === "GET") return Response.json(stored);
+    if (url.pathname === "/api/aliases/fast" && req.method === "PUT") {
+      stored = await req.json();
+      return Response.json(stored);
+    }
     if (url.pathname === "/api/aliases") return Response.json(list);
     if (url.pathname === "/api/cooling") return Response.json(cooling);
     if (url.pathname === "/api/providers") return Response.json({ items: [], total: 0 });
@@ -52,6 +56,7 @@ test("the editor loads the alias, previews the chain and saves the draft", async
   expect(nodes[1]).toHaveTextContent("Unresolved");
   expect(requests.filter((r) => r.url.endsWith("/api/aliases/compile"))).toHaveLength(1);
   expect(screen.queryByText("Unsaved changes")).toBeNull();
+  expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   const members = screen.getByRole("listbox", { name: "Members" });
   expect(
     within(members)
@@ -62,12 +67,16 @@ test("the editor loads the alias, previews the chain and saves the draft", async
 
   await userEvent.click(screen.getByRole("button", { name: "Remove free" }));
   expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "Save" }));
+  const save = screen.getByRole("button", { name: "Save" });
+  expect(save).toBeEnabled();
+  await userEvent.click(save);
   await waitFor(() => expect(requests.some((r) => r.method === "PUT")).toBe(true));
   const put = requests.find((r) => r.method === "PUT")!;
   expect(describeRequest(put)).toBe("PUT /api/aliases/fast");
   expect(await put.json()).toEqual({ ...fast, members: ["or/x"], strategy: "priority" });
-  await waitFor(() => expect(router.state.location.pathname).toBe("/aliases/fast"));
+  await waitFor(() => expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument());
+  expect(save).toBeDisabled();
+  expect(router.state.location.pathname).toBe("/aliases/fast");
 });
 
 test("choosing a strategy saves it", async () => {
@@ -77,7 +86,9 @@ test("choosing a strategy saves it", async () => {
     if (url.pathname === "/api/aliases") return Response.json(list);
     if (url.pathname === "/api/cooling") return Response.json(cooling);
     if (url.pathname === "/api/aliases/compile") return Response.json({ targets: [] });
-    if (url.pathname.startsWith("/api/")) return Response.json({ items: [], total: 0 });
+    if (url.pathname === "/api/stats") return Response.json({ groups: [] });
+    if (["/api/providers", "/api/accounts", "/api/cooling"].includes(url.pathname))
+      return Response.json({ items: [], total: 0 });
   });
   expect(await screen.findByRole("heading", { name: "fast" })).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: /Strategy/ }));
@@ -90,10 +101,68 @@ test("choosing a strategy saves it", async () => {
 test("a new alias with no members is not sent", async () => {
   const { requests } = renderRoute("/aliases/new", (_req, url) => {
     if (url.pathname === "/api/aliases") return Response.json(list);
-    if (url.pathname.startsWith("/api/")) return Response.json({ items: [], total: 0 });
+    if (url.pathname === "/api/stats") return Response.json({ groups: [] });
+    if (["/api/providers", "/api/accounts", "/api/cooling"].includes(url.pathname))
+      return Response.json({ items: [], total: 0 });
   });
-  await userEvent.type(await screen.findByRole("textbox", { name: "Name" }), "slow");
+  expect(await screen.findByRole("button", { name: "Create alias" })).toBeEnabled();
+  await userEvent.type(screen.getByRole("textbox", { name: "Name" }), "slow");
   await userEvent.click(screen.getByRole("button", { name: "Create alias" }));
   expect(await screen.findByText("Add at least one member.")).toBeInTheDocument();
   expect(requests.some((r) => r.method === "POST")).toBe(false);
+});
+
+test("leaving a dirty editor can be canceled or confirmed", async () => {
+  const { router } = renderRoute("/aliases/fast", (_req, url) => {
+    if (url.pathname === "/api/aliases/fast") return Response.json(fast);
+    if (url.pathname === "/api/aliases") return Response.json(list);
+    if (["/api/aliases/compile", "/api/aliases/fast/chain"].includes(url.pathname))
+      return Response.json({ targets: [] });
+    if (url.pathname === "/api/stats") return Response.json({ groups: [] });
+    if (["/api/providers", "/api/accounts", "/api/cooling"].includes(url.pathname))
+      return Response.json({ items: [], total: 0 });
+  });
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "Remove free" }));
+  const back = () => screen.getAllByRole("link", { name: "Aliases" }).find((link) => !link.closest("nav"))!;
+  await user.click(back());
+  const dialog = await screen.findByRole("alertdialog", { name: "Discard unsaved changes?" });
+  expect(router.state.location.pathname).toBe("/aliases/fast");
+  await user.click(within(dialog).getByRole("button", { name: "Keep editing" }));
+  await waitFor(() => expect(dialog).not.toBeInTheDocument());
+  expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Remove free" })).not.toBeInTheDocument();
+  await user.click(back());
+  await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Discard changes" }));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/aliases"));
+});
+
+test("the member row shows last-hour model success beside cooling", async () => {
+  const started = Date.now();
+  const { requests } = renderRoute("/aliases/fast", (_req, url) => {
+    if (url.pathname === "/api/aliases/fast") return Response.json(fast);
+    if (url.pathname === "/api/cooling") return Response.json(cooling);
+    if (url.pathname === "/api/aliases/compile") return Response.json({ targets: [] });
+    if (url.pathname === "/api/stats")
+      return Response.json({
+        groups: [
+          { name: "other/x", summary: { requests: 10, error_rate: 0.4 } },
+          { name: "or/x", summary: { requests: 4, error_rate: 0.25 } },
+        ],
+      });
+    if (["/api/providers", "/api/accounts", "/api/aliases"].includes(url.pathname))
+      return Response.json({ items: [], total: 0 });
+  });
+  const members = within(await screen.findByRole("listbox", { name: "Members" }));
+  const [modelRow, aliasRow] = members.getAllByRole("option");
+  const model = within(modelRow!);
+  expect(await model.findByText("75% success")).toBeInTheDocument();
+  expect(model.getByText("cooling")).toBeInTheDocument();
+  expect(within(aliasRow!).getByText("No model stats")).toBeInTheDocument();
+  const query = new URL(requests.find((r) => new URL(r.url).pathname === "/api/stats")!.url).searchParams;
+  expect(query.get("group_by")).toBe("model");
+  expect(query.get("groups_only")).toBe("true");
+  const from = Date.parse(query.get("from")!);
+  expect(from).toBeGreaterThanOrEqual(started - 3_600_000);
+  expect(from).toBeLessThanOrEqual(Date.now() - 3_600_000);
 });

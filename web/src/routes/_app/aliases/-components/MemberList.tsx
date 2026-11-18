@@ -5,6 +5,8 @@ import { useDragAndDrop } from "react-aria-components";
 import { memberKind, thinkingOf } from "../-lib/alias-form";
 import { ProviderIcon } from "../../../../components/provider-icon/ProviderIcon";
 
+const successPercent = new Intl.NumberFormat(undefined, { style: "percent", maximumFractionDigits: 1 });
+
 /** Moves `moved` (in their current order) before or after `target`. */
 function reorder(members: string[], moved: Set<string>, target: string, position: "before" | "after"): string[] {
   const rest = members.filter((m) => !moved.has(m));
@@ -22,11 +24,13 @@ function reorder(members: string[], moved: Set<string>, target: string, position
 export function MemberList({
   members,
   cooling,
+  successRates,
   onReorder,
   onRemove,
 }: {
   members: string[];
   cooling: Set<string>;
+  successRates?: ReadonlyMap<string, number>;
   onReorder(next: string[]): void;
   onRemove(ref: string): void;
 }) {
@@ -60,6 +64,7 @@ export function MemberList({
       {({ id: ref }) => {
         const index = members.indexOf(ref);
         const { base, level } = thinkingOf(ref);
+        const rate = successRates?.get(base);
         return (
           <ListBox.Item id={ref} textValue={ref} className="flex items-center gap-2.5 rounded-none px-2 py-1.5">
             <Grip aria-hidden="true" className="text-muted size-4 shrink-0 cursor-grab" />
@@ -87,6 +92,15 @@ export function MemberList({
               <Chip size="sm" variant="soft" color="warning">
                 <Chip.Label className="text-[11px]">cooling</Chip.Label>
               </Chip>
+            ) : null}
+            {successRates ? (
+              <span className="text-muted shrink-0 text-xs tabular-nums" title="Model success rate over the last hour">
+                {/* Phone widths keep the member name readable with the bare figure. */}
+                <span className="sm:hidden">{rate === undefined ? "–" : successPercent.format(rate)}</span>
+                <span className="max-sm:hidden">
+                  {rate === undefined ? "No model stats" : `${successPercent.format(rate)} success`}
+                </span>
+              </span>
             ) : null}
             <span className="flex shrink-0 items-center">
               <Button
