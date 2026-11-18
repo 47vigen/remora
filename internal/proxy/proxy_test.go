@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/47vigen/remora/internal/alias"
+	"github.com/47vigen/remora/internal/cooling"
 	"github.com/47vigen/remora/internal/store"
 )
 
@@ -800,18 +801,25 @@ func TestProxy_UpstreamDown(t *testing.T) {
 	}
 }
 
-func TestProxy_NoResponseTimeout(t *testing.T) {
+func TestProxy_ResponseHeaderTimeout(t *testing.T) {
 	f := newFixture(t)
-	if f.px.transport.ResponseHeaderTimeout != 0 {
-		t.Fatalf("ResponseHeaderTimeout = %v, want 0", f.px.transport.ResponseHeaderTimeout)
+	if got := f.px.transport.ResponseHeaderTimeout; got <= 600*time.Second {
+		t.Fatalf("ResponseHeaderTimeout = %v, want the provider deadline plus a margin", got)
 	}
+	if got := f.px.transcriptionTransport.ResponseHeaderTimeout; got != 0 {
+		t.Fatalf("transcription ResponseHeaderTimeout = %v, want 0", got)
+	}
+	f.px.transport.ResponseHeaderTimeout = 100 * time.Millisecond
 	if f.srv.Config.WriteTimeout != 0 {
 		t.Fatalf("server WriteTimeout = %v, want 0", f.srv.Config.WriteTimeout)
 	}
 	f.upstream(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(3 * time.Second)
+		time.Sleep(250 * time.Millisecond)
 		okJSON(w, r)
 	})
+	if resp := f.do(t, http.MethodPost, "/v1/chat/completions", keyFull, "application/json", chatBody("fast"), nil); resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("chat did not time out awaiting headers: status %d", resp.StatusCode)
+	}
 	body, ct := multipartBody(t, []field{{name: "file", filename: "a.wav", value: []byte("RIFF")}, {name: "model", value: []byte("up-a/m1")}})
 	resp := f.do(t, http.MethodPost, "/v1/audio/transcriptions", keyFull, ct, body, nil)
 	if resp.StatusCode != http.StatusOK {
@@ -1072,5 +1080,49 @@ func TestStartedCountsServedBy(t *testing.T) {
 	serve("remora-oauth", "codex/m") // the renamed served-by value is what counts
 	if got := p.starts("codex/m"); got != 1 {
 		t.Errorf("starts(codex/m) = %d, want 1", got)
+	}
+}
+
+func TestProxy_ProbesOpenAliasMember(t *testing.T) {
+	f := newFixture(t)
+	target := alias.Target{Provider: "up-a", Model: "m1"}
+	var now atomic.Int64
+	now.Store(time.Now().UnixNano())
+	clock := func() time.Time { return time.Unix(0, now.Load()) }
+	f.px.Cooler = cooling.New(cooling.Config{}, nil, clock, nil)
+	for range 5 {
+		if err := f.px.Cooler.Observe(t.Context(), cooling.Event{Target: target, At: clock(), StatusCode: 503}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	send := func() string {
+		t.Helper()
+		resp := f.do(t, http.MethodPost, "/v1/chat/completions", keyLimited, "application/json", chatBody("fast"), nil)
+		if resp.StatusCode != http.StatusOK || resp.Header.Get("X-Remora-Alias") != "fast" {
+			t.Fatalf("probe response = %d %s, headers %v", resp.StatusCode, resp.Body, resp.Header)
+		}
+		var request struct{ Model string }
+		if err := json.Unmarshal(f.seen().body, &request); err != nil {
+			t.Fatal(err)
+		}
+		return request.Model
+	}
+	if got := send(); got != alias.EngineModel("fast") {
+		t.Fatalf("request routed to %q while breaker was open", got)
+	}
+	now.Add(int64(30 * time.Second))
+	if got := send(); got != "up-a/m1" {
+		t.Fatalf("probe routed to %q, want up-a/m1", got)
+	}
+	// The response can reach the client before the handler's deferred probe bookkeeping.
+	deadline := time.Now().Add(time.Second)
+	for f.px.Cooler.HasBreakers() && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if f.px.Cooler.HasBreakers() {
+		t.Fatal("successful probe did not restore the member")
+	}
+	if got := send(); got != alias.EngineModel("fast") {
+		t.Fatalf("request routed to %q after closing the breaker", got)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/47vigen/remora/internal/alias"
+	"github.com/47vigen/remora/internal/cooling"
 	"github.com/47vigen/remora/internal/store"
 )
 
@@ -27,6 +28,9 @@ const (
 // instead of dialing.
 const upstreamIdleConns = 1024
 
+// Leave the front door time to emit its error after the default 600s provider deadline.
+const upstreamHeaderTimeout = 610 * time.Second
+
 // ResponseHook sees every proxied response in ModifyResponse, after remora's own x-remora-* headers are set and
 // before the first byte is written, so it may rewrite those headers. r is the client's request; reqBody is the
 // exact body ExtractModel held (nil on the WebSocket route). Plan 03 uses it for served-by names of internal
@@ -37,11 +41,13 @@ type ResponseHook func(r *http.Request, reqBody []byte, resp *http.Response)
 // allowlist, swaps in the key's front-door virtual key and streams the front door's answer back unbuffered,
 // rewriting only headers and error envelopes so no engine detail reaches a client.
 type Proxy struct {
-	upstream  *url.URL
-	store     *store.Store
-	log       *slog.Logger
-	transport *http.Transport
-	rp        *httputil.ReverseProxy
+	upstream               *url.URL
+	store                  *store.Store
+	log                    *slog.Logger
+	transport              *http.Transport
+	rp                     *httputil.ReverseProxy
+	transcriptionTransport *http.Transport
+	transcription          *httputil.ReverseProxy
 
 	hooksMu sync.RWMutex
 	hooks   []ResponseHook
@@ -51,6 +57,10 @@ type Proxy struct {
 	Ready func() bool
 	// Picker, when set, picks the first member of a spreading alias's request (X-Remora-First).
 	Picker *Picker
+	// Cooler, when set, admits half-open probes for HTTP inference. MaxAliasDepth matches the reconciler.
+	// shortcut: WebSocket sessions use the compiled chain; add per-frame admission if they need to probe.
+	Cooler        *cooling.Cooler
+	MaxAliasDepth int
 }
 
 // New returns a Proxy in front of the front door at upstream (its inference routes), reading keys and aliases from
@@ -68,7 +78,7 @@ func New(upstream *url.URL, st *store.Store, log *slog.Logger) *Proxy {
 			IdleConnTimeout:       90 * time.Second,
 			ExpectContinueTimeout: time.Second,
 			DisableCompression:    true, // bodies pass byte for byte; the client's Accept-Encoding is not forwarded
-			ResponseHeaderTimeout: 0,    // no limit: the provider's own deadline applies
+			ResponseHeaderTimeout: upstreamHeaderTimeout,
 		},
 	}
 	p.rp = &httputil.ReverseProxy{
@@ -79,6 +89,12 @@ func New(upstream *url.URL, st *store.Store, log *slog.Logger) *Proxy {
 		ErrorHandler:   p.errorHandler,
 		ErrorLog:       slog.NewLogLogger(log.Handler(), slog.LevelWarn),
 	}
+	// Transcription can take much longer than the default provider deadline.
+	p.transcriptionTransport = p.transport.Clone()
+	p.transcriptionTransport.ResponseHeaderTimeout = 0
+	transcription := *p.rp
+	transcription.Transport = p.transcriptionTransport
+	p.transcription = &transcription
 	return p
 }
 
@@ -139,6 +155,10 @@ type reqInfo struct {
 	vk       string
 	body     []byte
 	spans    bodySpans // where the parts of body the proxy reads sit; zero for multipart
+
+	probe       alias.Target
+	probeStatus int
+	probeRetry  time.Duration
 }
 
 type reqInfoKey struct{}
@@ -258,12 +278,29 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt route, sh sha
 		return
 	}
 	info.isAlias = isAlias
-	body := raw
-	if isAlias && p.Picker != nil {
-		info.first = p.Picker.Pick(model)
+	probe, denied := p.admit(ctx, model, isAlias)
+	if denied != nil {
+		denied.write(w, sh)
+		return
 	}
+	info.probe = probe
+	if probe != (alias.Target{}) {
+		defer func() {
+			if err := p.Cooler.CompleteProbe(ctx, probe, info.probeStatus, info.probeRetry); err != nil && ctx.Err() == nil {
+				p.log.WarnContext(ctx, "proxy: finish cooling probe", "err", err)
+			}
+		}()
+	}
+	body := raw
 	if isAlias {
-		if body, err = withModel(raw, sp, r.Header.Get("Content-Type"), alias.EngineModel(model)); err != nil {
+		outModel := alias.EngineModel(model)
+		if probe != (alias.Target{}) {
+			// shortcut: a probe has no fallback; add a probe-only rule if failed probes must fall back.
+			outModel = probe.Provider + "/" + probe.Model
+		} else if p.Picker != nil {
+			info.first = p.Picker.Pick(model)
+		}
+		if body, err = withModel(raw, sp, r.Header.Get("Content-Type"), outModel); err != nil {
 			errModelRequired.write(w, sh)
 			return
 		}
@@ -273,7 +310,42 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt route, sh sha
 	out.Body = &dropReader{b: body}
 	out.ContentLength = int64(len(body))
 	out.TransferEncoding = nil
-	p.rp.ServeHTTP(w, out)
+	if rt.aliasKind == alias.KindTranscription {
+		p.transcription.ServeHTTP(w, out)
+	} else {
+		p.rp.ServeHTTP(w, out)
+	}
+}
+
+func (p *Proxy) admit(ctx context.Context, model string, isAlias bool) (alias.Target, *apiError) {
+	if p.Cooler == nil || !p.Cooler.HasBreakers() {
+		return alias.Target{}, nil
+	}
+	var chain []alias.Target
+	if isAlias {
+		all, err := p.store.Aliases(ctx)
+		if err != nil {
+			p.log.ErrorContext(ctx, "proxy: load chain for cooling probe", "err", err)
+			return alias.Target{}, &errInternal
+		}
+		chain, err = alias.Compile(all, model, p.MaxAliasDepth)
+		if err != nil {
+			// The last valid engine configuration is still serving requests while configuration is reconciled.
+			return alias.Target{}, nil
+		}
+	} else if provider, name, ok := strings.Cut(model, "/"); ok {
+		chain = []alias.Target{{Provider: provider, Model: name}}
+	} else {
+		return alias.Target{}, nil
+	}
+	if probe, ok := p.Cooler.Admit(chain); ok {
+		return probe, nil
+	}
+	e := apiError{
+		status: http.StatusServiceUnavailable, typ: typeAPI, code: "upstream_unavailable",
+		message: "The inference service is unavailable; try again shortly.", retryAfterSec: 5,
+	}
+	return alias.Target{}, &e
 }
 
 // dropReader serves b once and lets go of it at EOF or Close, so a long stream does not keep its request body alive.
@@ -363,6 +435,10 @@ func setUpstreamHeaders(h http.Header, vk string) {
 // scrubbed, SSE error events rewritten as they pass. The body itself is never buffered on success.
 func (p *Proxy) modifyResponse(resp *http.Response) error {
 	info := infoFrom(resp.Request.Context())
+	if info.probe != (alias.Target{}) {
+		info.probeStatus = resp.StatusCode
+		info.probeRetry = cooling.RetryAfter(resp.Header.Get("Retry-After"), time.Now())
+	}
 	setRemoraHeaders(resp.Header, info)
 	switch {
 	case isEventStream(resp.Header):
@@ -399,6 +475,9 @@ func (p *Proxy) errorHandler(w http.ResponseWriter, r *http.Request, err error) 
 	sh := shapeOpenAI
 	if info := infoFrom(r.Context()); info != nil {
 		sh = info.shape
+		if info.probe != (alias.Target{}) && r.Context().Err() == nil {
+			info.probeStatus = http.StatusBadGateway
+		}
 		info.body, info.spans = nil, bodySpans{}
 	}
 	if errors.Is(err, context.Canceled) && r.Context().Err() != nil {

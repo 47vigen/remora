@@ -161,6 +161,9 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		Threshold: cfg.Cooling.Count429, Window: cfg.Cooling.Window429, Default: cfg.Cooling.Default,
 		SubscriptionDefault: cfg.Cooling.SubscriptionDefault,
 	}, rec.Sync, nil, logger)
+	if err := cooler.Restore(ctx, st); err != nil {
+		return err
+	}
 	rec.Filter = cooler.Filter
 	// Every committed pass hands the spreading aliases' live chains to the proxy, so it never names a member
 	// without a rule.
@@ -228,6 +231,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	px := proxy.New(upstream, st, logger)
 	px.Ready = rec.Synced
 	px.Picker = picker
+	px.Cooler, px.MaxAliasDepth = cooler, rec.MaxDepth
 	// The OAuth engine's members are served as "remora-oauth/<name>/<model>"; clients see "<name>/<model>".
 	px.OnResponse(proxy.ServedByHook(cliproxyapi.UserRef))
 	mux.Handle("/v1/", px)
