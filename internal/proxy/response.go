@@ -3,10 +3,12 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"regexp"
@@ -41,6 +43,8 @@ const maxSSELine = 1 << 20
 var (
 	engineWords = regexp.MustCompile(`(?i)bifrost|cliproxyapi`)
 	engineKeys  = regexp.MustCompile(`sk-bf-[A-Za-z0-9_-]+`)
+	// A stored secret can be a substring of a shaped token; consume its marker too.
+	logKeys = regexp.MustCompile(`(?i:\bBearer)[ \t]+(?:[A-Za-z0-9._~+/-]|\[redacted\])+=*|\bsk-(?:[A-Za-z0-9_-]|\[redacted\])+`)
 )
 
 // scrub replaces engine names with "remora" and engine key values with "[redacted]". The replacements are plain
@@ -512,4 +516,38 @@ func stripJSONBody(resp *http.Response) error {
 func isJSON(h http.Header) bool {
 	mt, _, _ := mime.ParseMediaType(h.Get("Content-Type"))
 	return mt == "application/json"
+}
+
+// RedactEngineLogs scrubs engine output before the handler encodes it, so keys
+// containing JSON metacharacters are matched as text without changing the log format.
+func RedactEngineLogs(next slog.Handler, redact func(string) string) slog.Handler {
+	return engineLogRedactor{Handler: next, redact: redact}
+}
+
+type engineLogRedactor struct {
+	slog.Handler
+	redact func(string) string
+}
+
+func (h engineLogRedactor) Handle(ctx context.Context, r slog.Record) error {
+	if r.Message != "engine output" {
+		return h.Handler.Handle(ctx, r)
+	}
+	out := slog.NewRecord(r.Time, r.Level, r.Message, r.PC)
+	r.Attrs(func(a slog.Attr) bool {
+		if a.Key == "line" && a.Value.Kind() == slog.KindString {
+			a.Value = slog.StringValue(scrubString(logKeys.ReplaceAllString(h.redact(a.Value.String()), "[redacted]")))
+		}
+		out.AddAttrs(a)
+		return true
+	})
+	return h.Handler.Handle(ctx, out)
+}
+
+func (h engineLogRedactor) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return RedactEngineLogs(h.Handler.WithAttrs(attrs), h.redact)
+}
+
+func (h engineLogRedactor) WithGroup(name string) slog.Handler {
+	return RedactEngineLogs(h.Handler.WithGroup(name), h.redact)
 }

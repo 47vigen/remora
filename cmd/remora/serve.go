@@ -103,13 +103,12 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	if err := setSealer(st, cfg); err != nil {
 		return fmt.Errorf("master key: %w", err)
 	}
-	if err := st.Refresh(ctx); err != nil {
-		logger.Error("store: build the key and alias snapshot; reads use the database", "err", err)
-	}
-
 	creds, err := supervise.EnsureCredentials(ctx, st)
 	if err != nil {
 		return fmt.Errorf("ensure engine credentials: %w", err)
+	}
+	if err := st.Refresh(ctx); err != nil {
+		logger.Error("store: build the key and alias snapshot; reads use the database", "err", err)
 	}
 	stored, err := st.AccountStrategies(ctx)
 	if err != nil {
@@ -137,7 +136,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	}
 	defer stopSpeech(stopCtx)
 
-	sup := supervise.New(logger, versions, supervise.Options{})
+	sup := supervise.New(slog.New(proxy.RedactEngineLogs(logger.Handler(), st.RedactSecrets)), versions, supervise.Options{})
 	defer func() {
 		if serr := sup.Stop(stopCtx); serr != nil {
 			err = errors.Join(err, fmt.Errorf("stop engines: %w", serr))

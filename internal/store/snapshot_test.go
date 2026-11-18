@@ -161,3 +161,39 @@ func TestAliasesReturnsACopy(t *testing.T) {
 		t.Fatal("deleting from the returned map changed the store's")
 	}
 }
+
+func TestRedactSecretsAfterSnapshotRebuild(t *testing.T) {
+	const (
+		oldProvider = "fake-provider"
+		newProvider = "fake-rotated-provider"
+		oldVirtual  = "fake-provider-longer-virtual-tail"
+		newVirtual  = "fake-rotated-virtual"
+		engineValue = "fake-engine-credential"
+	)
+	ctx := t.Context()
+	s := openSealed(t)
+	k := putKey(t, s, ClientKey{Name: "test key"}, "fake-client-key")
+	if err := s.SetEngineValue(ctx, "fake-engine", "api_key", engineValue); err != nil {
+		t.Fatal(err)
+	}
+	update := func(provider, virtual string) {
+		t.Helper()
+		write(t, s, func(ctx context.Context, tx *Tx) error {
+			if err := tx.PutProvider(ctx, Provider{Name: "test", Kind: KindOpenAICompatible}); err != nil {
+				return err
+			}
+			if err := tx.PutProviderKey(ctx, ProviderKey{ID: "test", Provider: "test", Name: "test", Secret: provider}); err != nil {
+				return err
+			}
+			return tx.SetClientKeyVK(ctx, k.ID, "test-vk", virtual)
+		})
+	}
+	update(oldProvider, oldVirtual)
+	if s.RedactSecrets(oldProvider+" "+oldVirtual+" "+engineValue) != "[redacted] [redacted] [redacted]" {
+		t.Fatal("snapshot did not redact all stored credentials")
+	}
+	update(newProvider, newVirtual)
+	if s.RedactSecrets(newProvider+" "+newVirtual+" "+oldVirtual) != "[redacted] [redacted] "+oldVirtual {
+		t.Fatal("snapshot did not replace the matcher after rotation")
+	}
+}
