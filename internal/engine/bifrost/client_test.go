@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -547,5 +548,21 @@ func TestClient_SessionLoginOnceAndAgainOnExpiry(t *testing.T) {
 	}
 	if logins != 2 {
 		t.Errorf("%d logins after expiry, want 2", logins)
+	}
+}
+
+func TestProviderModels(t *testing.T) {
+	srv := httptest.NewServer(withLogin(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if r.Method != http.MethodGet || r.URL.Path != "/api/models" || q.Get("provider") != "acme" ||
+			q.Get("unfiltered") != "true" || q.Get("limit") != "0" || q.Get("include_deprecated") != "true" {
+			t.Errorf("unexpected catalog request: %s %s", r.Method, r.URL)
+		}
+		_, _ = io.WriteString(w, `{"models":[{"name":"small","provider":"acme"},{"name":"vendor/large","provider":"acme"},{"name":"other","provider":"another"}]}`)
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL, "admin", "secret", srv.Client())
+	if got, err := c.ProviderModels(context.Background(), "acme"); err != nil || !slices.Equal(got, []string{"small", "vendor/large"}) {
+		t.Errorf("ProviderModels = %v, %v", got, err)
 	}
 }

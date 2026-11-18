@@ -238,6 +238,22 @@ func (s *Server) GetProvider(ctx context.Context, req gen.GetProviderRequestObje
 	return gen.GetProvider200JSONResponse(toGenProvider(p, h)), nil
 }
 
+// GetProviderModels returns known models with the provider name used by clients.
+func (s *Server) GetProviderModels(ctx context.Context, req gen.GetProviderModelsRequestObject) (gen.GetProviderModelsResponseObject, error) {
+	if s.d.Providers == nil {
+		return nil, errNotImplemented
+	}
+	models, err := s.d.Providers.Models(ctx, req.Name)
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]string, 0, len(models))
+	for _, model := range models {
+		refs = append(refs, req.Name+"/"+model)
+	}
+	return gen.GetProviderModels200JSONResponse{Models: refs}, nil
+}
+
 // UpdateProvider replaces a provider. Keys sent without a value keep their stored secret; no keys keep them all.
 func (s *Server) UpdateProvider(ctx context.Context, req gen.UpdateProviderRequestObject) (gen.UpdateProviderResponseObject, error) {
 	if s.d.Providers == nil {

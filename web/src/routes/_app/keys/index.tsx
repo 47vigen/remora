@@ -12,9 +12,9 @@ import {
   Skeleton,
   TextField,
 } from "@heroui/react";
-import { type MutationFunctionContext, useMutation, useQuery } from "@tanstack/react-query";
+import { type MutationFunctionContext, useMutation, useQueries, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useState } from "react";
 
 import type { CreateKeyData, Key, Options } from "../../../client";
 import {
@@ -22,6 +22,7 @@ import {
   deleteKeyMutation,
   getKeyOptions,
   getKeyUsageOptions,
+  getProviderModelsOptions,
   getStatsOptions,
   listAccountsOptions,
   listAliasesOptions,
@@ -62,22 +63,30 @@ export const Route = createFileRoute("/_app/keys/")({
 });
 
 /** Allowlist suggestions (aliases and provider wildcards) and preview candidates (aliases and known models). */
-function useAllowlistOptions() {
+function useAllowlistOptions(editing: boolean) {
   const aliases = useQuery(listAliasesOptions({ query: { limit: MAX_LIMIT } }));
   const providers = useQuery(listProvidersOptions({ query: { limit: MAX_LIMIT } }));
   const accounts = useQuery(listAccountsOptions({ query: { limit: MAX_LIMIT } }));
-  return useMemo(() => {
-    const aliasNames = (aliases.data?.items ?? []).map((a) => a.name);
-    const providerNames = new Set([
-      ...(providers.data?.items ?? []).map((p) => p.name),
-      ...(accounts.data?.items ?? []).map((a) => a.provider),
-    ]);
-    const models = new Set((accounts.data?.items ?? []).flatMap((a) => a.models.map((m) => `${a.provider}/${m}`)));
-    return {
-      suggestions: [...aliasNames, ...[...providerNames].map((p) => `${p}/*`)],
-      candidates: [...aliasNames, ...models],
-    };
-  }, [aliases.data, providers.data, accounts.data]);
+  const providerModels = useQueries({
+    queries: editing
+      ? (providers.data?.items ?? []).map(({ name }) => getProviderModelsOptions({ path: { name } }))
+      : [],
+  });
+  const aliasNames = (aliases.data?.items ?? []).map((a) => a.name);
+  const providerNames = new Set([
+    ...(providers.data?.items ?? []).map((p) => p.name),
+    ...(accounts.data?.items ?? []).map((a) => a.provider),
+  ]);
+  return {
+    suggestions: [...aliasNames, ...[...providerNames].map((p) => `${p}/*`)],
+    candidates: [
+      ...new Set([
+        ...aliasNames,
+        ...providerModels.flatMap(({ data }) => data?.models ?? []),
+        ...(accounts.data?.items ?? []).flatMap((a) => a.models.map((m) => `${a.provider}/${m}`)),
+      ]),
+    ],
+  };
 }
 
 function KeysPage() {
@@ -91,7 +100,7 @@ function KeysPage() {
 
   const [now] = useState(() => new Date());
   const from = new Date(now.getTime() - DAY_MS).toISOString();
-  const options = useAllowlistOptions();
+  const options = useAllowlistOptions(Boolean(search.create || search.key));
 
   const list = useQuery(
     listKeysOptions({

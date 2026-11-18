@@ -25,8 +25,11 @@ type Provider = config.Provider
 // ProviderTest is config.ProviderTest.
 type ProviderTest = config.ProviderTest
 
-// Providers is config.Providers.
-type Providers = config.Providers
+// Providers adds the model catalog read to the shared configuration port.
+type Providers interface {
+	config.Providers
+	Models(ctx context.Context, name string) ([]string, error)
+}
 
 // Cooling is config.CoolingMember.
 type Cooling = config.CoolingMember

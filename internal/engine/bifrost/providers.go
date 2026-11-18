@@ -137,6 +137,30 @@ func (c *Client) ListProviders(ctx context.Context) ([]Provider, error) {
 	return providers, nil
 }
 
+// ProviderModels reads the provider's catalog without contacting the upstream.
+func (c *Client) ProviderModels(ctx context.Context, name string) ([]string, error) {
+	if err := requireID("provider name", name); err != nil {
+		return nil, err
+	}
+	q := url.Values{"provider": {name}, "unfiltered": {"true"}, "limit": {"0"}, "include_deprecated": {"true"}}
+	var out struct {
+		Models []struct {
+			Name     string `json:"name"`
+			Provider string `json:"provider"`
+		} `json:"models"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/api/models?"+q.Encode(), nil, &out); err != nil {
+		return nil, err
+	}
+	models := make([]string, 0, len(out.Models))
+	for _, m := range out.Models {
+		if m.Provider == name && m.Name != "" {
+			models = append(models, m.Name)
+		}
+	}
+	return models, nil
+}
+
 // CreateProvider adds a provider.
 func (c *Client) CreateProvider(ctx context.Context, p Provider) error {
 	body := providerWire(p)

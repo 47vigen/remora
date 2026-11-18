@@ -232,6 +232,31 @@ paths:
         default:
           $ref: "#/components/responses/Error"
 
+  /api/providers/{name}/models:
+    parameters:
+      - $ref: "#/components/parameters/ProviderName"
+    get:
+      tags: [providers]
+      operationId: getProviderModels
+      x-remora-scope: read
+      summary: Get a provider's known models as provider/model references.
+      responses:
+        "200":
+          description: The known models.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [models]
+                properties:
+                  models:
+                    type: array
+                    items: { type: string }
+        "404":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+
   /api/providers/{name}/test:
     parameters:
       - $ref: "#/components/parameters/ProviderName"

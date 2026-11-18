@@ -1742,6 +1742,11 @@ type ClientInterface interface {
 	// Corresponds with PUT /api/providers/{name} (the `UpdateProvider` operationId).
 	UpdateProvider(ctx context.Context, name ProviderName, body UpdateProviderJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetProviderModels Get a provider's known models as provider/model references.
+	//
+	// Corresponds with GET /api/providers/{name}/models (the `GetProviderModels` operationId).
+	GetProviderModels(ctx context.Context, name ProviderName, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// TestProvider Send a small request to the provider and report the result.
 	//
 	// Corresponds with POST /api/providers/{name}/test (the `TestProvider` operationId).
@@ -2717,6 +2722,21 @@ func (c *Client) UpdateProviderWithBody(ctx context.Context, name ProviderName, 
 // Corresponds with PUT /api/providers/{name} (the `UpdateProvider` operationId).
 func (c *Client) UpdateProvider(ctx context.Context, name ProviderName, body UpdateProviderJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewUpdateProviderRequest(c.Server, name, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetProviderModels Get a provider's known models as provider/model references.
+//
+// Corresponds with GET /api/providers/{name}/models (the `GetProviderModels` operationId).
+func (c *Client) GetProviderModels(ctx context.Context, name ProviderName, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetProviderModelsRequest(c.Server, name)
 	if err != nil {
 		return nil, err
 	}
@@ -4927,6 +4947,40 @@ func NewUpdateProviderRequestWithBody(server string, name ProviderName, contentT
 	return req, nil
 }
 
+// NewGetProviderModelsRequest constructs an http.Request for the GetProviderModels method
+func NewGetProviderModelsRequest(server string, name ProviderName) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/providers/%s/models", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewTestProviderRequest constructs an http.Request for the TestProvider method
 func NewTestProviderRequest(server string, name ProviderName) (*http.Request, error) {
 	var err error
@@ -5814,6 +5868,13 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with PUT /api/providers/{name} (the `UpdateProvider` operationId).
 	UpdateProviderWithResponse(ctx context.Context, name ProviderName, body UpdateProviderJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateProviderResponse, error)
+
+	// GetProviderModelsWithResponse Get a provider's known models as provider/model references.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/providers/{name}/models (the `GetProviderModels` operationId).
+	GetProviderModelsWithResponse(ctx context.Context, name ProviderName, reqEditors ...RequestEditorFn) (*GetProviderModelsResponse, error)
 
 	// TestProviderWithResponse Send a small request to the provider and report the result.
 	//
@@ -7839,6 +7900,65 @@ func (r UpdateProviderResponse) ContentType() string {
 	return ""
 }
 
+type GetProviderModelsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *struct {
+		Models []string `json:"models"`
+	}
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetProviderModelsResponse) GetJSON200() *struct {
+	Models []string `json:"models"`
+} {
+	return r.JSON200
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetProviderModelsResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetProviderModelsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetProviderModelsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetProviderModelsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetProviderModelsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetProviderModelsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type TestProviderResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -8989,6 +9109,19 @@ func (c *ClientWithResponses) UpdateProviderWithResponse(ctx context.Context, na
 		return nil, err
 	}
 	return ParseUpdateProviderResponse(rsp)
+}
+
+// GetProviderModelsWithResponse Get a provider's known models as provider/model references.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/providers/{name}/models (the `GetProviderModels` operationId).
+func (c *ClientWithResponses) GetProviderModelsWithResponse(ctx context.Context, name ProviderName, reqEditors ...RequestEditorFn) (*GetProviderModelsResponse, error) {
+	rsp, err := c.GetProviderModels(ctx, name, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetProviderModelsResponse(rsp)
 }
 
 // TestProviderWithResponse Send a small request to the provider and report the result.
@@ -10516,6 +10649,48 @@ func ParseUpdateProviderResponse(rsp *http.Response) (*UpdateProviderResponse, e
 	return response, nil
 }
 
+// ParseGetProviderModelsResponse parses an HTTP response from a GetProviderModelsWithResponse call
+func ParseGetProviderModelsResponse(rsp *http.Response) (*GetProviderModelsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetProviderModelsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Models []string `json:"models"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseTestProviderResponse parses an HTTP response from a TestProviderWithResponse call
 func ParseTestProviderResponse(rsp *http.Response) (*TestProviderResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -10930,6 +11105,9 @@ type ServerInterface interface {
 	// UpdateProvider Replace a provider. Keys sent without a value keep their stored secret.
 	// (PUT /api/providers/{name})
 	UpdateProvider(w http.ResponseWriter, r *http.Request, name ProviderName)
+	// GetProviderModels Get a provider's known models as provider/model references.
+	// (GET /api/providers/{name}/models)
+	GetProviderModels(w http.ResponseWriter, r *http.Request, name ProviderName)
 	// TestProvider Send a small request to the provider and report the result.
 	// (POST /api/providers/{name}/test)
 	TestProvider(w http.ResponseWriter, r *http.Request, name ProviderName)
@@ -12289,6 +12467,32 @@ func (siw *ServerInterfaceWrapper) UpdateProvider(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// GetProviderModels operation middleware
+func (siw *ServerInterfaceWrapper) GetProviderModels(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name ProviderName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetProviderModels(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // TestProvider operation middleware
 func (siw *ServerInterfaceWrapper) TestProvider(w http.ResponseWriter, r *http.Request) {
 
@@ -12711,6 +12915,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/providers/{name}", wrapper.DeleteProvider)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/providers/{name}", wrapper.GetProvider)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/providers/{name}", wrapper.UpdateProvider)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/providers/{name}/models", wrapper.GetProviderModels)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/providers/{name}/test", wrapper.TestProvider)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/accounts", wrapper.ListAccounts)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/accounts/pool", wrapper.GetAccountPool)
@@ -14348,6 +14553,61 @@ func (response UpdateProviderdefaultJSONResponse) VisitUpdateProviderResponse(w 
 	return err
 }
 
+type GetProviderModelsRequestObject struct {
+	Name ProviderName `json:"name"`
+}
+
+type GetProviderModelsResponseObject interface {
+	VisitGetProviderModelsResponse(w http.ResponseWriter) error
+}
+
+type GetProviderModels200JSONResponse struct {
+	Models []string `json:"models"`
+}
+
+func (response GetProviderModels200JSONResponse) VisitGetProviderModelsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetProviderModels404JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetProviderModels404JSONResponse) VisitGetProviderModelsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetProviderModelsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetProviderModelsdefaultJSONResponse) VisitGetProviderModelsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type TestProviderRequestObject struct {
 	Name ProviderName `json:"name"`
 }
@@ -14810,6 +15070,9 @@ type StrictServerInterface interface {
 	// UpdateProvider Replace a provider. Keys sent without a value keep their stored secret.
 	// (PUT /api/providers/{name})
 	UpdateProvider(ctx context.Context, request UpdateProviderRequestObject) (UpdateProviderResponseObject, error)
+	// GetProviderModels Get a provider's known models as provider/model references.
+	// (GET /api/providers/{name}/models)
+	GetProviderModels(ctx context.Context, request GetProviderModelsRequestObject) (GetProviderModelsResponseObject, error)
 	// TestProvider Send a small request to the provider and report the result.
 	// (POST /api/providers/{name}/test)
 	TestProvider(ctx context.Context, request TestProviderRequestObject) (TestProviderResponseObject, error)
@@ -16015,6 +16278,32 @@ func (sh *strictHandler) UpdateProvider(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UpdateProviderResponseObject); ok {
 		if err := validResponse.VisitUpdateProviderResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetProviderModels operation middleware
+func (sh *strictHandler) GetProviderModels(w http.ResponseWriter, r *http.Request, name ProviderName) {
+	var request GetProviderModelsRequestObject
+
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetProviderModels(ctx, request.(GetProviderModelsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetProviderModels")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetProviderModelsResponseObject); ok {
+		if err := validResponse.VisitGetProviderModelsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

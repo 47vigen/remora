@@ -457,6 +457,8 @@ func TestNamesAdapterTranslatesSubscriptionProviders(t *testing.T) {
 
 type fakeLister map[string][]bifrost.KeyStatus
 
+func (f fakeLister) ProviderModels(context.Context, string) ([]string, error) { return nil, nil }
+
 func (f fakeLister) RefreshProviderModels(_ context.Context, name string) ([]bifrost.KeyStatus, error) {
 	return f[name], nil
 }

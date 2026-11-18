@@ -63,8 +63,9 @@ func read(ctx context.Context, st *store.Store, fn func(tx *store.Tx) error) err
 	return st.Write(ctx, fn)
 }
 
-// ModelLister lists models with every key of a front-door provider; *bifrost.Client satisfies it.
+// ModelLister reads and refreshes the front-door model catalog; *bifrost.Client satisfies it.
 type ModelLister interface {
+	ProviderModels(ctx context.Context, name string) ([]string, error)
 	RefreshProviderModels(ctx context.Context, name string) ([]bifrost.KeyStatus, error)
 }
 
@@ -131,6 +132,17 @@ func (a providersAdapter) Get(ctx context.Context, name string) (Provider, error
 		}
 	}
 	return Provider{}, fmt.Errorf("%w: provider %s", store.ErrNotFound, name)
+}
+
+func (a providersAdapter) Models(ctx context.Context, name string) ([]string, error) {
+	p, err := a.Get(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	if a.fd == nil {
+		return nil, errNotImplemented
+	}
+	return a.fd.ProviderModels(ctx, p.Name)
 }
 
 func (a providersAdapter) Create(ctx context.Context, p Provider) (Provider, error) {

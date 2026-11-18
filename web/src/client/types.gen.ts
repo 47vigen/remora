@@ -980,6 +980,46 @@ export type UpdateProviderResponses = {
 
 export type UpdateProviderResponse = UpdateProviderResponses[keyof UpdateProviderResponses];
 
+export type GetProviderModelsData = {
+    body?: never;
+    path: {
+        /**
+         * The provider name.
+         */
+        name: string;
+    };
+    query?: never;
+    url: '/api/providers/{name}/models';
+};
+
+export type GetProviderModelsErrors = {
+    /**
+     * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     *
+     */
+    404: Error;
+    /**
+     * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     *
+     */
+    default: Error;
+};
+
+export type GetProviderModelsError = GetProviderModelsErrors[keyof GetProviderModelsErrors];
+
+export type GetProviderModelsResponses = {
+    /**
+     * The known models.
+     */
+    200: {
+        models: Array<string>;
+    };
+};
+
+export type GetProviderModelsResponse = GetProviderModelsResponses[keyof GetProviderModelsResponses];
+
 export type TestProviderData = {
     body?: never;
     path: {

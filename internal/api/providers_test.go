@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -265,5 +266,37 @@ func TestTestProvider(t *testing.T) {
 	}
 	if code, body := env.do(t, env.client, http.MethodPost, "/api/providers/none/test", ""); code != http.StatusNotFound {
 		t.Errorf("test unknown = %d %s", code, body)
+	}
+}
+
+func TestGetProviderModels(t *testing.T) {
+	env := newTestEnv(t)
+	env.providers.m = map[string]Provider{
+		"acme":  {Name: "acme", Kind: "openai-compatible"},
+		"empty": {Name: "empty", Kind: "openai-compatible"},
+	}
+	env.providers.models = map[string][]string{"acme": {"small", "vendor/large"}}
+	for _, tc := range []struct {
+		name   string
+		status int
+		models []string
+	}{
+		{"acme", http.StatusOK, []string{"acme/small", "acme/vendor/large"}},
+		{"empty", http.StatusOK, []string{}},
+		{"unknown", http.StatusNotFound, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, body := env.do(t, env.client, http.MethodGet, "/api/providers/"+tc.name+"/models", "")
+			if code != tc.status {
+				t.Fatalf("status = %d, want %d: %s", code, tc.status, body)
+			}
+			if code == http.StatusOK {
+				var got struct{ Models []string }
+				decode(t, body, &got)
+				if got.Models == nil || !slices.Equal(got.Models, tc.models) {
+					t.Errorf("models = %s, want %v", body, tc.models)
+				}
+			}
+		})
 	}
 }

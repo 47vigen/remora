@@ -21,9 +21,10 @@ import (
 // In-memory port fakes. Later tasks extend them as their handlers need.
 
 type fakeProviders struct {
-	mu   sync.Mutex
-	m    map[string]Provider
-	test map[string]ProviderTest // Test's answer per provider; OK when absent
+	mu     sync.Mutex
+	m      map[string]Provider
+	models map[string][]string
+	test   map[string]ProviderTest // Test's answer per provider; OK when absent
 }
 
 func (f *fakeProviders) setTest(name string, r ProviderTest) {
@@ -86,6 +87,13 @@ func (f *fakeProviders) Delete(_ context.Context, name string) error {
 	}
 	delete(f.m, name)
 	return nil
+}
+
+func (f *fakeProviders) Models(ctx context.Context, name string) ([]string, error) {
+	if _, err := f.Get(ctx, name); err != nil {
+		return nil, err
+	}
+	return f.models[name], nil
 }
 
 func (f *fakeProviders) Test(_ context.Context, name string) (ProviderTest, error) {

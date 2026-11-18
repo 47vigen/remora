@@ -118,6 +118,22 @@ test("?key= opens the drawer with the allowlist and usage", async () => {
   expect(await requests.find((r) => r.method === "PATCH")!.json()).toEqual({ name: "ci", allow: ["fast"] });
 });
 
+test("a provider wildcard previews matching aliases and discovered models", async () => {
+  renderRoute("/keys?key=k1", (req, url) => {
+    if (url.pathname === "/api/keys/k1") return Response.json({ ...k1, allow: ["acme/*"] });
+    if (url.pathname === "/api/aliases")
+      return Response.json({ items: [{ name: "acme/fast" }, { name: "unrelated" }], total: 2 });
+    if (url.pathname === "/api/providers") return Response.json({ items: [{ name: "acme" }], total: 1 });
+    if (url.pathname === "/api/providers/acme/models")
+      return Response.json({ models: ["acme/small", "acme/vendor/large"] });
+    return api()(req, url);
+  });
+  const matches = within(await screen.findByRole("list", { name: "Matches 3" }));
+  expect(matches.getByText("acme/fast")).toBeInTheDocument();
+  expect(matches.getByText("acme/small")).toBeInTheDocument();
+  expect(matches.getByText("acme/vendor/large")).toBeInTheDocument();
+});
+
 test("?create=true opens the new key dialog and closing it clears the parameter", async () => {
   const { router } = renderRoute("/keys?create=true", api());
   const dialog = await screen.findByRole("dialog");
