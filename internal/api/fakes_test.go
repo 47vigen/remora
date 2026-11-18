@@ -571,14 +571,12 @@ type fakeLogs struct {
 	histogram []bifrost.HistogramBucket
 	tokens    []bifrost.TokenBucket
 	costs     []bifrost.CostBucket
-	latency   []bifrost.LatencyBucket
 	usage     []bifrost.ModelUsage
 	models    []string // the distinct models LogModels searches
 
 	searches   []bifrost.LogFilter
 	statsCalls []bifrost.LogFilter
 	histCalls  []bifrost.LogFilter
-	latCalls   []bifrost.LogFilter
 	usageCalls []bifrost.LogFilter
 }
 
@@ -712,13 +710,6 @@ func (f *fakeLogs) CostHistogram(context.Context, bifrost.LogFilter) ([]bifrost.
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return slices.Clone(f.costs), nil
-}
-
-func (f *fakeLogs) LatencyHistogram(_ context.Context, fl bifrost.LogFilter) ([]bifrost.LatencyBucket, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.latCalls = append(f.latCalls, fl)
-	return slices.Clone(f.latency), nil
 }
 
 func (f *fakeLogs) ModelUsage(_ context.Context, fl bifrost.LogFilter) ([]bifrost.ModelUsage, error) {

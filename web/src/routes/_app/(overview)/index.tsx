@@ -237,11 +237,7 @@ function OverviewPage() {
           <>
             <TokenChart rows={overTime} total={summary?.tokens} className="lg:col-span-4" />
             <CostChart rows={overTime} total={summary?.cost} className="lg:col-span-4" />
-            <LatencyChart
-              rows={overTime}
-              total={summary?.p95 === "—" ? undefined : `p95 ${summary?.p95}`}
-              className="lg:col-span-4"
-            />
+            <LatencyChart rows={overTime} className="lg:col-span-4" />
           </>
         ) : null}
 

@@ -97,7 +97,6 @@ func TestStatsSummary(t *testing.T) {
 	}
 	ts := time.Now().UTC().Truncate(time.Hour)
 	env.logs.histogram = []bifrost.HistogramBucket{{Timestamp: ts, Count: 4, Success: 3, Error: 1}}
-	env.logs.latency = []bifrost.LatencyBucket{{Timestamp: ts, P95Latency: 30, TotalRequests: 3}}
 	for i, ms := range []float64{30, 10, 20} {
 		env.logs.add(bifrost.Log{ID: string(rune('a' + i)), Timestamp: ts, Status: "success", Latency: ptr(ms)})
 	}
@@ -117,6 +116,31 @@ func TestStatsSummary(t *testing.T) {
 	}
 	if len(s.Groups) != 0 {
 		t.Errorf("groups without group_by = %v", s.Groups)
+	}
+}
+
+func TestStatsSingleBucketP95MatchesSummary(t *testing.T) {
+	env := newTestEnv(t)
+	ts := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	env.server.now = func() time.Time { return ts.Add(45 * time.Second) }
+	env.logs.stats = func(bifrost.LogFilter) bifrost.LogStats {
+		return bifrost.LogStats{Completed: new(int64(17)), SuccessRate: 100.0 * 16 / 17}
+	}
+	env.logs.histogram = []bifrost.HistogramBucket{{Timestamp: ts, Count: 17, Success: 16, Error: 1}}
+	for i := range 15 {
+		env.logs.add(bifrost.Log{ID: string(rune('a' + i)), Timestamp: ts, Status: "success", Latency: ptr(10.0)})
+	}
+	env.logs.add(
+		bifrost.Log{ID: "slow", Timestamp: ts, Status: "success", Latency: ptr(4520.0), Stream: true},
+		bifrost.Log{ID: "failed", Timestamp: ts, Status: "error", Latency: ptr(9000.0)},
+	)
+
+	s, raw := getStats(t, env, "/api/stats?from="+ts.Format(time.RFC3339))
+	if len(s.Series) != 1 {
+		t.Fatalf("expected one bucket: %s", raw)
+	}
+	if summary, bucket := s.Summary["latency_p95_ms"], s.Series[0]["latency_p95_ms"]; summary != 4520.0 || bucket != summary {
+		t.Errorf("window p95 = %v ms, bucket p95 = %v ms; want 4520 ms for both", summary, bucket)
 	}
 }
 
@@ -298,41 +322,45 @@ func TestStatsSubscriptionProvidersSplitByModel(t *testing.T) {
 func TestStatsSeries(t *testing.T) {
 	env := newTestEnv(t)
 	t0 := time.Date(2026, 10, 14, 10, 0, 0, 0, time.UTC)
-	t1 := t0.Add(time.Hour)
-	env.server.now = func() time.Time { return t1.Add(30 * time.Minute) }
-	env.logs.histogram = []bifrost.HistogramBucket{{Timestamp: t0, Count: 4, Success: 3, Error: 1}, {Timestamp: t1}}
-	env.logs.tokens = []bifrost.TokenBucket{{Timestamp: t0, PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}, {Timestamp: t1}}
-	env.logs.costs = []bifrost.CostBucket{{Timestamp: t0, TotalCost: 0.25}, {Timestamp: t1}}
-	env.logs.latency = []bifrost.LatencyBucket{{Timestamp: t0, P95Latency: 120, TotalRequests: 3}, {Timestamp: t1}}
-	for i, ms := range []float64{80, 40, 60} {
-		env.logs.add(bifrost.Log{ID: string(rune('a' + i)), Timestamp: t0.Add(5 * time.Minute), Status: "success", Latency: ptr(ms)})
+	t1, t2 := t0.Add(time.Hour), t0.Add(2*time.Hour)
+	env.server.now = func() time.Time { return t2 }
+	env.logs.histogram = []bifrost.HistogramBucket{
+		{Timestamp: t0}, {Timestamp: t1, Count: 4, Success: 3, Error: 1}, {Timestamp: t2, Count: 1, Success: 1},
 	}
-	// Before the first bucket: a p50 over the whole range would read 40, not 60.
-	env.logs.add(bifrost.Log{ID: "early", Timestamp: t0.Add(-time.Hour), Status: "success", Latency: ptr(1.0)})
+	env.logs.tokens = []bifrost.TokenBucket{{Timestamp: t1, PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}}
+	env.logs.costs = []bifrost.CostBucket{{Timestamp: t1, TotalCost: 0.25}}
+	for i, ms := range []float64{80, 40, 60} {
+		env.logs.add(bifrost.Log{ID: string(rune('a' + i)), Timestamp: t1.Add(5 * time.Minute), Status: "success", Latency: ptr(ms)})
+	}
+	// These belong to different buckets, including the row exactly at the window's inclusive end.
+	env.logs.add(
+		bifrost.Log{ID: "early", Timestamp: t0.Add(-time.Hour), Status: "success", Latency: ptr(1.0)},
+		bifrost.Log{ID: "boundary", Timestamp: t2, Status: "success", Latency: ptr(500.0)},
+	)
 
 	s, raw := getStats(t, env, "/api/stats")
-	if len(s.Series) != 2 {
+	if len(s.Series) != 3 {
 		t.Fatalf("series = %s", raw)
 	}
 	want := map[string]any{
 		"requests": 4.0, "errors": 1.0, "prompt_tokens": 10.0, "completion_tokens": 5.0, "total_tokens": 15.0,
-		"cost_usd": 0.25, "latency_p50_ms": 60.0, "latency_p95_ms": 120.0,
+		"cost_usd": 0.25, "latency_p50_ms": 60.0, "latency_p95_ms": 80.0,
 	}
 	for k, v := range want {
-		if s.Series[0][k] != v {
-			t.Errorf("series[0].%s = %v, want %v", k, s.Series[0][k], v)
+		if s.Series[1][k] != v {
+			t.Errorf("series[1].%s = %v, want %v", k, s.Series[1][k], v)
 		}
 	}
 	for _, k := range []string{"requests", "errors", "prompt_tokens", "completion_tokens", "total_tokens", "cost_usd"} {
-		if v, ok := s.Series[1][k]; !ok || v != 0.0 {
-			t.Errorf("series[1].%s = %v (present %v), want 0", k, v, ok)
+		if v, ok := s.Series[0][k]; !ok || v != 0.0 {
+			t.Errorf("series[0].%s = %v (present %v), want 0", k, v, ok)
 		}
 	}
-	if s.Series[1]["latency_p50_ms"] != nil || s.Series[1]["latency_p95_ms"] != nil {
+	if s.Series[0]["latency_p50_ms"] != nil || s.Series[0]["latency_p95_ms"] != nil {
 		t.Errorf("empty bucket percentiles = %s", raw)
 	}
-	if f := env.logs.latCalls[0]; !slices.Equal(f.Status, []string{"success"}) || f.Start == nil {
-		t.Errorf("latency filter = %+v", f)
+	if got := s.Series[2]["latency_p95_ms"]; got != 500.0 {
+		t.Errorf("last bucket p95 = %v, want 500 ms", got)
 	}
 }
 

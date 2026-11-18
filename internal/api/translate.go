@@ -24,7 +24,6 @@ type LogSource interface {
 	Histogram(ctx context.Context, f bifrost.LogFilter) ([]bifrost.HistogramBucket, error)
 	TokenHistogram(ctx context.Context, f bifrost.LogFilter) ([]bifrost.TokenBucket, error)
 	CostHistogram(ctx context.Context, f bifrost.LogFilter) ([]bifrost.CostBucket, error)
-	LatencyHistogram(ctx context.Context, f bifrost.LogFilter) ([]bifrost.LatencyBucket, error)
 	ModelUsage(ctx context.Context, f bifrost.LogFilter) ([]bifrost.ModelUsage, error)
 	LogModels(ctx context.Context, query string) ([]string, error)
 }

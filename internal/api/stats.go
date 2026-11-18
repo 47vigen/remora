@@ -94,7 +94,7 @@ func (s *Server) stats(ctx context.Context, f bifrost.LogFilter, groupBy string,
 		if out.Summary, err = s.summary(ctx, f); err != nil {
 			return gen.Stats{}, err
 		}
-		if out.Series, err = s.series(ctx, f); err != nil {
+		if out.Series, err = s.series(ctx, f, out.Summary); err != nil {
 			return gen.Stats{}, err
 		}
 	}
@@ -128,23 +128,17 @@ func (s *Server) stats(ctx context.Context, f bifrost.LogFilter, groupBy string,
 	return out, nil
 }
 
-// series is the time buckets over f's range: the engine's request, token, cost and latency histograms merged by
-// bucket start, plus each bucket's median read the way the summary's is. The p95 comes from the engine's latency
-// histogram over the successful attempts, the same set the median ranks, whose size the histogram also gives.
-func (s *Server) series(ctx context.Context, f bifrost.LogFilter) ([]gen.StatsPoint, error) {
+// series merges the request, token and cost histograms by bucket start and ranks latency as the summary does.
+func (s *Server) series(ctx context.Context, f bifrost.LogFilter, summary gen.StatsSummary) ([]gen.StatsPoint, error) {
 	var (
 		counts []bifrost.HistogramBucket
 		tokens []bifrost.TokenBucket
 		costs  []bifrost.CostBucket
-		lat    []bifrost.LatencyBucket
 	)
-	lf := f
-	lf.Status = []string{"success"}
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() (err error) { counts, err = s.d.Logs.Histogram(gctx, f); return err })
 	g.Go(func() (err error) { tokens, err = s.d.Logs.TokenHistogram(gctx, f); return err })
 	g.Go(func() (err error) { costs, err = s.d.Logs.CostHistogram(gctx, f); return err })
-	g.Go(func() (err error) { lat, err = s.d.Logs.LatencyHistogram(gctx, lf); return err })
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
@@ -165,31 +159,31 @@ func (s *Server) series(ctx context.Context, f bifrost.LogFilter) ([]gen.StatsPo
 			out[i].CostUsd = finite(b.TotalCost)
 		}
 	}
-	ranked := make([]int64, len(counts)) // successful attempts with a latency, per bucket
-	for _, b := range lat {
-		if i, ok := at[b.Timestamp.Unix()]; ok && b.TotalRequests > 0 {
-			out[i].LatencyP95Ms = new(finite(b.P95Latency))
-			ranked[i] = b.TotalRequests
-		}
+	// The one bucket covers the summary's range, so reuse its values even if new rows arrive mid-read.
+	if len(out) == 1 {
+		out[0].LatencyP50Ms, out[0].LatencyP95Ms = summary.LatencyP50Ms, summary.LatencyP95Ms
+		return out, nil
 	}
-	// The engine has no median histogram, so each bucket that saw a success ranks its own window.
 	g, gctx = errgroup.WithContext(ctx)
 	g.SetLimit(groupReads)
-	for i := range counts {
-		if ranked[i] == 0 {
+	for i, b := range counts {
+		if b.Success == 0 {
 			continue
 		}
 		start, end := *f.Start, *f.End
-		if ts := counts[i].Timestamp; ts.After(start) {
+		if ts := b.Timestamp; ts.After(start) {
 			start = ts
 		}
-		if i+1 < len(counts) && counts[i+1].Timestamp.Before(end) {
+		if i+1 < len(counts) && !counts[i+1].Timestamp.After(end) {
 			end = counts[i+1].Timestamp.Add(-time.Nanosecond)
 		}
 		bf := f
 		bf.Start, bf.End = &start, &end
 		g.Go(func() (err error) {
-			out[i].LatencyP50Ms, err = percentile(gctx, s.d.Logs, bf, 0.5, ranked[i])
+			if out[i].LatencyP50Ms, err = percentile(gctx, s.d.Logs, bf, 0.5, b.Success); err != nil {
+				return err
+			}
+			out[i].LatencyP95Ms, err = percentile(gctx, s.d.Logs, bf, 0.95, b.Success)
 			return err
 		})
 	}

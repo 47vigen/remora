@@ -177,14 +177,6 @@ type CostBucket struct {
 	TotalCost float64   `json:"total_cost"`
 }
 
-// LatencyBucket is one time bucket of GET /api/logs/histogram/latency, in milliseconds. P95Latency is 0 when
-// TotalRequests is.
-type LatencyBucket struct {
-	Timestamp     time.Time `json:"timestamp"`
-	P95Latency    float64   `json:"p95_latency"`
-	TotalRequests int64     `json:"total_requests"`
-}
-
 // ModelUsage is one row of GET /api/logs/rankings: a front-door provider and model that served requests.
 type ModelUsage struct {
 	Provider      string `json:"provider"`
@@ -217,11 +209,6 @@ func (c *Client) TokenHistogram(ctx context.Context, f LogFilter) ([]TokenBucket
 // CostHistogram calls GET /api/logs/histogram/cost.
 func (c *Client) CostHistogram(ctx context.Context, f LogFilter) ([]CostBucket, error) {
 	return histogram[CostBucket](ctx, c, "/api/logs/histogram/cost", f)
-}
-
-// LatencyHistogram calls GET /api/logs/histogram/latency.
-func (c *Client) LatencyHistogram(ctx context.Context, f LogFilter) ([]LatencyBucket, error) {
-	return histogram[LatencyBucket](ctx, c, "/api/logs/histogram/latency", f)
 }
 
 // ModelUsage calls GET /api/logs/rankings: the provider and model pairs that served requests matching f, busiest

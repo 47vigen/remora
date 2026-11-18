@@ -1014,7 +1014,7 @@ type StatsPoint struct {
 	// LatencyP50Ms Over the successful attempts in the bucket, by nearest rank. Null when there are none.
 	LatencyP50Ms *float64 `json:"latency_p50_ms,omitempty"`
 
-	// LatencyP95Ms Over the successful attempts in the bucket, interpolated. Null when there are none.
+	// LatencyP95Ms Over the successful attempts in the bucket, by nearest rank. Null when there are none.
 	LatencyP95Ms *float64 `json:"latency_p95_ms,omitempty"`
 	PromptTokens int      `json:"prompt_tokens"`
 	Requests     int      `json:"requests"`

@@ -261,9 +261,6 @@ func TestSeriesHistogramsDecode(t *testing.T) {
 		case "/api/logs/histogram/cost":
 			_, _ = w.Write([]byte(`{"buckets":[{"timestamp":"2026-10-14T00:00:00Z","total_cost":0.25,"by_model":{}}],` +
 				`"bucket_size_seconds":3600,"models":[]}`))
-		case "/api/logs/histogram/latency":
-			_, _ = w.Write([]byte(`{"buckets":[{"timestamp":"2026-10-14T00:00:00Z","avg_latency":80,"p90_latency":110,` +
-				`"p95_latency":120,"p99_latency":150,"total_requests":3}],"bucket_size_seconds":3600}`))
 		case "/api/logs/rankings":
 			_, _ = w.Write([]byte(`{"rankings":[{"model":"gpt-x","provider":"fd-or","total_requests":4,"trend":{}}]}`))
 		}
@@ -282,15 +279,11 @@ func TestSeriesHistogramsDecode(t *testing.T) {
 	if err != nil || len(cost) != 1 || cost[0].TotalCost != 0.25 {
 		t.Fatalf("cost = %+v, %v", cost, err)
 	}
-	lat, err := c.LatencyHistogram(ctx, f)
-	if err != nil || len(lat) != 1 || lat[0].P95Latency != 120 || lat[0].TotalRequests != 3 {
-		t.Fatalf("latency = %+v, %v", lat, err)
-	}
 	usage, err := c.ModelUsage(ctx, f)
 	if err != nil || len(usage) != 1 || usage[0] != (ModelUsage{Provider: "fd-or", Model: "gpt-x", TotalRequests: 4}) {
 		t.Fatalf("model usage = %+v, %v", usage, err)
 	}
-	for _, p := range []string{"/api/logs/histogram/tokens", "/api/logs/histogram/cost", "/api/logs/histogram/latency", "/api/logs/rankings"} {
+	for _, p := range []string{"/api/logs/histogram/tokens", "/api/logs/histogram/cost", "/api/logs/rankings"} {
 		if q, ok := paths[p]; !ok || q.Get("virtual_key_ids") != "vk1" || q.Get("start_time") == "" {
 			t.Errorf("%s query = %v (called %v)", p, q, ok)
 		}

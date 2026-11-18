@@ -1966,7 +1966,7 @@ components:
         latency_p95_ms:
           type: [number, "null"]
           format: double
-          description: Over the successful attempts in the bucket, interpolated. Null when there are none.
+          description: Over the successful attempts in the bucket, by nearest rank. Null when there are none.
     StatsGroup:
       type: object
       required: [name, summary]

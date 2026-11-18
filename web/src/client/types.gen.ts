@@ -460,7 +460,7 @@ export type StatsPoint = {
      */
     latency_p50_ms?: number | null;
     /**
-     * Over the successful attempts in the bucket, interpolated. Null when there are none.
+     * Over the successful attempts in the bucket, by nearest rank. Null when there are none.
      */
     latency_p95_ms?: number | null;
 };
