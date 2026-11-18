@@ -25,3 +25,17 @@ func TestRemoteIP(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoteIPProxyChain(t *testing.T) {
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/auth/login", nil)
+	r.RemoteAddr = "127.0.0.1:4000"
+	r.Header.Set("X-Forwarded-For", "192.0.2.99, 198.51.100.1, 10.0.0.2")
+	r.Header.Set("X-Real-IP", "198.51.100.1") // Resolved by nginx realip, not by Go.
+	if got := remoteIP(r); got != "198.51.100.1" {
+		t.Errorf("remoteIP = %q, want 198.51.100.1", got)
+	}
+	r.Header.Del("X-Real-IP")
+	if got := remoteIP(r); got != "127.0.0.1" {
+		t.Errorf("remoteIP with only X-Forwarded-For = %q, want 127.0.0.1", got)
+	}
+}

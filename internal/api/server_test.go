@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/auth"
@@ -204,14 +205,18 @@ func TestLoginSetsCookie(t *testing.T) {
 	}
 }
 
-func TestLoginTooManyAttempts(t *testing.T) {
+func TestLoginLimiterDelay(t *testing.T) {
 	env := newTestEnv(t)
 	for range 5 {
 		env.do(t, http.DefaultClient, http.MethodPost, "/api/auth/login", `{"password":"wrong-password-1"}`)
 	}
+	start := time.Now()
 	code, body := env.do(t, http.DefaultClient, http.MethodPost, "/api/auth/login", `{"password":"`+testAdminPassword+`"}`)
-	if code != http.StatusTooManyRequests || errCode(t, body) != "too_many_attempts" {
-		t.Errorf("6th login = %d %s", code, body)
+	if code != http.StatusNoContent {
+		t.Errorf("6th login = %d %s, want 204", code, body)
+	}
+	if got := time.Since(start); got < time.Second {
+		t.Errorf("6th login took %v, want at least 1s", got)
 	}
 }
 

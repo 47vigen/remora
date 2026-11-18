@@ -5,11 +5,11 @@ import (
 	"time"
 )
 
-// Login limits: after limiterMax failed logins from one IP within limiterWindow, every login from that IP is
-// refused until the window that began with the first failure ends.
 const (
-	limiterMax    = 5
-	limiterWindow = 15 * time.Minute
+	limiterThreshold = 5
+	limiterWindow    = 15 * time.Minute
+	limiterMaxDelay  = 30 * time.Second
+	limiterMaxFails  = limiterThreshold + 5 // By 2^5 seconds the delay has reached its cap.
 )
 
 type attempts struct {
@@ -25,19 +25,22 @@ type limiter struct {
 
 func newLimiter() *limiter { return &limiter{ips: map[string]*attempts{}} }
 
-// allow reports whether ip may try to log in at now.
-func (l *limiter) allow(ip string, now time.Time) bool {
+// delay returns how long the next login from ip should wait before checking the password.
+func (l *limiter) delay(ip string, now time.Time) time.Duration {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	a, ok := l.ips[ip]
 	if !ok {
-		return true
+		return 0
 	}
 	if !now.Before(a.start.Add(limiterWindow)) {
 		delete(l.ips, ip)
-		return true
+		return 0
 	}
-	return a.fails < limiterMax
+	if a.fails < limiterThreshold {
+		return 0
+	}
+	return min(time.Second<<(a.fails-limiterThreshold), limiterMaxDelay)
 }
 
 // fail records a failed login from ip at now.
@@ -46,11 +49,11 @@ func (l *limiter) fail(ip string, now time.Time) {
 	defer l.mu.Unlock()
 	l.prune(now)
 	a, ok := l.ips[ip]
-	if !ok || !now.Before(a.start.Add(limiterWindow)) {
+	if !ok {
 		a = &attempts{start: now}
 		l.ips[ip] = a
 	}
-	a.fails++
+	a.fails = min(a.fails+1, limiterMaxFails)
 }
 
 // succeed forgets ip's failures.

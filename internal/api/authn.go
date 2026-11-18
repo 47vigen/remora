@@ -48,8 +48,7 @@ func (s *Server) GetSession(ctx context.Context, _ gen.GetSessionRequestObject) 
 	return gen.GetSession200JSONResponse{Authenticated: true, Via: gen.SessionVia(p.Via)}, nil
 }
 
-// remoteIP is the client's IP. X-Real-IP is trusted only from a loopback peer, the nginx in front of remora in its
-// image; from anyone else a client could set it to escape the login limiter.
+// remoteIP trusts only the resolved X-Real-IP reported by the loopback proxy; nginx handles the forwarded chain.
 func remoteIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
