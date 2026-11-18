@@ -97,6 +97,18 @@ func TestUIServed(t *testing.T) {
 	root := uiGet(t, anon, "/")
 	wantIndex(t, "/", root)
 
+	for _, path := range []string{"/favicon.ico", "/favicon.svg"} {
+		t.Run(path, func(t *testing.T) {
+			rep := uiGet(t, anon, path)
+			if rep.Status != http.StatusOK {
+				t.Errorf("GET %s: status %d, want 200", path, rep.Status)
+			}
+			if ct := rep.Header.Get("Content-Type"); !strings.HasPrefix(ct, "image/") {
+				t.Errorf("GET %s: content-type %q, want image", path, ct)
+			}
+		})
+	}
+
 	// A deep link is the same document: the app routes on the client.
 	logs := uiGet(t, anon, "/logs")
 	wantIndex(t, "/logs", logs)
