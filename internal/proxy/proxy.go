@@ -9,12 +9,14 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/cooling"
+	"github.com/47vigen/remora/internal/engine/cliproxyapi"
 	"github.com/47vigen/remora/internal/store"
 )
 
@@ -28,7 +30,7 @@ const (
 // instead of dialing.
 const upstreamIdleConns = 1024
 
-// Leave the front door time to emit its error after the default 600s provider deadline.
+// Leave the front door time to emit its error after the default 600s API-key provider deadline.
 const upstreamHeaderTimeout = 610 * time.Second
 
 // ResponseHook sees every proxied response in ModifyResponse, after remora's own x-remora-* headers are set and
@@ -41,13 +43,12 @@ type ResponseHook func(r *http.Request, reqBody []byte, resp *http.Response)
 // allowlist, swaps in the key's front-door virtual key and streams the front door's answer back unbuffered,
 // rewriting only headers and error envelopes so no engine detail reaches a client.
 type Proxy struct {
-	upstream               *url.URL
-	store                  *store.Store
-	log                    *slog.Logger
-	transport              *http.Transport
-	rp                     *httputil.ReverseProxy
-	transcriptionTransport *http.Transport
-	transcription          *httputil.ReverseProxy
+	upstream  *url.URL
+	store     *store.Store
+	log       *slog.Logger
+	transport *http.Transport
+	rp        *httputil.ReverseProxy
+	uncapped  *httputil.ReverseProxy
 
 	hooksMu sync.RWMutex
 	hooks   []ResponseHook
@@ -57,8 +58,8 @@ type Proxy struct {
 	Ready func() bool
 	// Picker, when set, picks the first member of a spreading alias's request (X-Remora-First).
 	Picker *Picker
-	// Cooler, when set, admits half-open probes for HTTP inference. MaxAliasDepth matches the reconciler.
-	// shortcut: WebSocket sessions use the compiled chain; add per-frame admission if they need to probe.
+	// Cooler, when set, admits half-open probes. MaxAliasDepth matches the reconciler.
+	// shortcut: Half-open probes are HTTP only; WebSocket sessions use the precompiled chain. Add per-frame admission if they need to probe.
 	Cooler        *cooling.Cooler
 	MaxAliasDepth int
 }
@@ -89,12 +90,12 @@ func New(upstream *url.URL, st *store.Store, log *slog.Logger) *Proxy {
 		ErrorHandler:   p.errorHandler,
 		ErrorLog:       slog.NewLogLogger(log.Handler(), slog.LevelWarn),
 	}
-	// Transcription can take much longer than the default provider deadline.
-	p.transcriptionTransport = p.transport.Clone()
-	p.transcriptionTransport.ResponseHeaderTimeout = 0
-	transcription := *p.rp
-	transcription.Transport = p.transcriptionTransport
-	p.transcription = &transcription
+	// The front door sets longer deadlines for subscription and transcription requests.
+	transport := p.transport.Clone()
+	transport.ResponseHeaderTimeout = 0
+	uncapped := *p.rp
+	uncapped.Transport = transport
+	p.uncapped = &uncapped
 	return p
 }
 
@@ -156,9 +157,10 @@ type reqInfo struct {
 	body     []byte
 	spans    bodySpans // where the parts of body the proxy reads sit; zero for multipart
 
-	probe       alias.Target
-	probeStatus int
-	probeRetry  time.Duration
+	headerTimeout cooling.Event // set only for a capped request with one attributable target
+	probe         alias.Target
+	probeStatus   int
+	probeRetry    time.Duration
 }
 
 type reqInfoKey struct{}
@@ -278,12 +280,32 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt route, sh sha
 		return
 	}
 	info.isAlias = isAlias
-	probe, denied := p.admit(ctx, model, isAlias)
-	if denied != nil {
-		denied.write(w, sh)
-		return
+	transcription := rt.aliasKind == alias.KindTranscription
+	breakers := p.Cooler != nil && p.Cooler.HasBreakers()
+	var chain []alias.Target
+	if isAlias && (!transcription || breakers) {
+		all, err := p.store.Aliases(ctx)
+		if err != nil {
+			p.log.ErrorContext(ctx, "proxy: load alias chain", "err", err)
+			errInternal.write(w, sh)
+			return
+		}
+		// If the current alias cannot compile, the last valid engine configuration may still be serving it.
+		chain, _ = alias.Compile(all, model, p.MaxAliasDepth)
+	} else if !isAlias {
+		if provider, name, ok := strings.Cut(model, "/"); ok && provider != "" && name != "" {
+			chain = []alias.Target{{Provider: provider, Model: name}}
+		}
 	}
-	info.probe = probe
+	if breakers && len(chain) != 0 {
+		probe, denied := p.admit(chain)
+		if denied != nil {
+			denied.write(w, sh)
+			return
+		}
+		info.probe = probe
+	}
+	probe := info.probe
 	if probe != (alias.Target{}) {
 		defer func() {
 			if err := p.Cooler.CompleteProbe(ctx, probe, info.probeStatus, info.probeRetry); err != nil && ctx.Err() == nil {
@@ -297,6 +319,7 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt route, sh sha
 		if probe != (alias.Target{}) {
 			// shortcut: a probe has no fallback; add a probe-only rule if failed probes must fall back.
 			outModel = probe.Provider + "/" + probe.Model
+			chain = []alias.Target{probe}
 		} else if p.Picker != nil {
 			info.first = p.Picker.Pick(model)
 		}
@@ -310,34 +333,21 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt route, sh sha
 	out.Body = &dropReader{b: body}
 	out.ContentLength = int64(len(body))
 	out.TransferEncoding = nil
-	if rt.aliasKind == alias.KindTranscription {
-		p.transcription.ServeHTTP(w, out)
-	} else {
-		p.rp.ServeHTTP(w, out)
+	// Use the longest limit in the chain: any subscription member leaves the deadline to the front door.
+	if transcription || (isAlias && len(chain) == 0) || slices.ContainsFunc(chain, func(t alias.Target) bool {
+		return cliproxyapi.IsSubscription(t.Provider)
+	}) {
+		p.uncapped.ServeHTTP(w, out)
+		return
 	}
+	// With fallbacks and no response headers, there is no reliable way to identify the failed member.
+	if p.Cooler != nil && len(chain) == 1 {
+		info.headerTimeout = cooling.Event{At: time.Now(), Target: chain[0], StatusCode: http.StatusGatewayTimeout}
+	}
+	p.rp.ServeHTTP(w, out)
 }
 
-func (p *Proxy) admit(ctx context.Context, model string, isAlias bool) (alias.Target, *apiError) {
-	if p.Cooler == nil || !p.Cooler.HasBreakers() {
-		return alias.Target{}, nil
-	}
-	var chain []alias.Target
-	if isAlias {
-		all, err := p.store.Aliases(ctx)
-		if err != nil {
-			p.log.ErrorContext(ctx, "proxy: load chain for cooling probe", "err", err)
-			return alias.Target{}, &errInternal
-		}
-		chain, err = alias.Compile(all, model, p.MaxAliasDepth)
-		if err != nil {
-			// The last valid engine configuration is still serving requests while configuration is reconciled.
-			return alias.Target{}, nil
-		}
-	} else if provider, name, ok := strings.Cut(model, "/"); ok {
-		chain = []alias.Target{{Provider: provider, Model: name}}
-	} else {
-		return alias.Target{}, nil
-	}
+func (p *Proxy) admit(chain []alias.Target) (alias.Target, *apiError) {
 	if probe, ok := p.Cooler.Admit(chain); ok {
 		return probe, nil
 	}
@@ -475,8 +485,22 @@ func (p *Proxy) errorHandler(w http.ResponseWriter, r *http.Request, err error) 
 	sh := shapeOpenAI
 	if info := infoFrom(r.Context()); info != nil {
 		sh = info.shape
-		if info.probe != (alias.Target{}) && r.Context().Err() == nil {
-			info.probeStatus = http.StatusBadGateway
+		ctx := r.Context()
+		if ctx.Err() == nil {
+			// net/http does not export its response-header timeout sentinel. Other timeouts aren't this cap.
+			if e := info.headerTimeout; e.StatusCode != 0 && errors.Is(err, context.DeadlineExceeded) &&
+				err.Error() == "net/http: timeout awaiting response headers" {
+				if info.probe != (alias.Target{}) {
+					info.probeStatus = e.StatusCode
+				} else if err := p.Cooler.Observe(ctx, e); err != nil && ctx.Err() == nil {
+					p.log.WarnContext(ctx, "proxy: observe header timeout", "err", err)
+				}
+			} else if info.probe != (alias.Target{}) {
+				var timeout net.Error
+				if !errors.Is(err, context.Canceled) && (!errors.As(err, &timeout) || !timeout.Timeout()) {
+					info.probeStatus = http.StatusBadGateway
+				}
+			}
 		}
 		info.body, info.spans = nil, bodySpans{}
 	}
