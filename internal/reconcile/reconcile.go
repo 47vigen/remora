@@ -94,9 +94,10 @@ type Reconciler struct {
 	SonioxDeadline time.Duration
 	Log            *slog.Logger
 
-	syncMu       sync.Mutex // serializes sync transactions with their post-commit full-push bookkeeping
+	syncMu       sync.Mutex // serializes engine passes, Change compensation and publication
 	lastForce    time.Time
 	lastRestarts int
+	pending      map[string]bool // engine mutations not yet acknowledged by a successful commit
 
 	synced     atomic.Bool // a Sync has completed
 	alsoSynced atomic.Bool // a SyncAll has run every Also step without an error
@@ -109,14 +110,12 @@ func (r *Reconciler) log() *slog.Logger {
 	return r.Log
 }
 
-// Sync runs one pass inside store.Write. An alias that does not compile is logged and its rule removed; any other
+// Sync reconciles from a store snapshot. An alias that does not compile is logged and its rule removed; any other
 // invalid configuration fails the pass with ErrInvalid before the engine is called.
 func (r *Reconciler) Sync(ctx context.Context) error {
-	if err := r.sync(ctx, nil); err != nil {
-		return err
-	}
-	r.synced.Store(true)
-	return nil
+	r.syncMu.Lock()
+	defer r.syncMu.Unlock()
+	return r.sync(ctx)
 }
 
 // Synced reports whether the front door holds the store's state: false until a Sync completes, and again after a
@@ -126,83 +125,106 @@ func (r *Reconciler) Synced() bool {
 	return r.synced.Load() && (len(r.Also) == 0 || r.alsoSynced.Load())
 }
 
-// sync runs a non-strict pass, ignoring matching MACs for objects in force or when a full push is due.
-// A pass that fails after changing the engine clears Synced until a pass succeeds again.
-func (r *Reconciler) sync(ctx context.Context, force map[string]bool) error {
-	p := &pass{r: r, force: force, touched: map[string]bool{}}
-	if err := r.commitSync(ctx, p); err != nil {
-		if len(p.touched) > 0 {
-			r.synced.Store(false)
-		}
-		return fmt.Errorf("reconcile: sync: %w", err)
-	}
-	r.publish(p.chains)
-	return nil
-}
-
-func (r *Reconciler) commitSync(ctx context.Context, p *pass) error {
-	r.syncMu.Lock()
-	defer r.syncMu.Unlock()
-
+// sync runs with syncMu held. A failed full push leaves its trigger pending for the next sync.
+func (r *Reconciler) sync(ctx context.Context) error {
 	every := r.ForceEvery
 	if every <= 0 {
 		every = time.Hour
 	}
-	var now time.Time
+	now := time.Now()
 	var restarts int
-	err := r.Store.Write(ctx, func(tx *store.Tx) error {
-		now = time.Now()
-		if r.RestartCount != nil {
-			restarts = r.RestartCount()
-		}
-		p.tx = tx
-		p.forceAll = r.lastForce.IsZero() || restarts != r.lastRestarts || now.Sub(r.lastForce) >= every
-		return p.run(ctx)
-	})
-	// A failed full push leaves its trigger pending for the next sync.
-	if err == nil && p.forceAll {
+	if r.RestartCount != nil {
+		restarts = r.RestartCount()
+	}
+	forceAll := r.lastForce.IsZero() || restarts != r.lastRestarts || now.Sub(r.lastForce) >= every
+	if err := r.runPasses(ctx, nil, false, forceAll); err != nil {
+		return fmt.Errorf("reconcile: sync: %w", err)
+	}
+	if forceAll {
 		r.lastForce, r.lastRestarts = now, restarts
 	}
-	return err
+	r.synced.Store(true)
+	return nil
 }
 
-// Change runs fn and a strict pass in one store.Write, so a change the engine refuses is not committed. When the pass
-// fails after it changed the engine, a recovery Sync pushes the committed state again, forcing every object the
-// failed pass touched, because the rolled-back MAC still matches the committed state while the engine holds the
-// newer write. The first error is returned. Inside Batch, fn runs in the batch's transaction and its pass.
+var errStalePass = errors.New("reconcile: store changed during the pass")
+
+// runPasses retries a stale snapshot twice. Unacknowledged mutations must be forced even when the old MAC matches.
+func (r *Reconciler) runPasses(ctx context.Context, p *pass, strict, forceAll bool) (err error) {
+	defer func() {
+		if err != nil && len(r.pending) != 0 {
+			r.synced.Store(false)
+		}
+	}()
+	for range 3 {
+		if p == nil {
+			p = &pass{r: r}
+			if err := r.Store.Read(ctx, func(tx *store.Tx) error { return p.read(ctx, tx, strict) }); err != nil {
+				return err
+			}
+		}
+		p.force, p.forceAll = r.pending, forceAll
+		p.touched = map[string]bool{}
+		err := p.push(ctx)
+		if len(p.touched) != 0 {
+			if r.pending == nil {
+				r.pending = p.touched
+			} else {
+				maps.Copy(r.pending, p.touched)
+			}
+		}
+		if err != nil {
+			return err
+		}
+		err = r.Store.Write(ctx, func(tx *store.Tx) error { return p.commit(ctx, tx) })
+		if errors.Is(err, errStalePass) {
+			p = nil
+			continue
+		}
+		if err == nil {
+			r.pending = nil
+			if r.Publish != nil {
+				r.Publish(p.desired.Chains)
+			}
+		}
+		return err
+	}
+	return errStalePass
+}
+
+// Change commits fn and validates its desired state before calling the engine. On failure it compensates the store
+// write, then repushes the restored state if the engine was touched. Inside Batch, fn joins the batch transaction.
 func (r *Reconciler) Change(ctx context.Context, fn func(ctx context.Context, tx *store.Tx) error) error {
 	if tx, ok := store.TxFrom(ctx); ok {
 		return fn(ctx, tx)
 	}
-	touched := map[string]bool{}
-	var chains map[string]alias.Chain
-	err := r.Store.Write(ctx, func(tx *store.Tx) error {
+	r.syncMu.Lock()
+	defer r.syncMu.Unlock()
+
+	p := &pass{r: r}
+	undo, err := r.Store.WriteWithUndo(ctx, func(tx *store.Tx) error {
 		if err := fn(ctx, tx); err != nil {
 			return err
 		}
-		p := &pass{r: r, tx: tx, strict: true, touched: touched}
-		err := p.run(ctx)
-		chains = p.chains
-		return err
+		return p.read(ctx, tx, true)
 	})
 	if err == nil {
-		r.publish(chains)
-		return nil
-	}
-	if len(touched) > 0 {
-		if rerr := r.sync(context.WithoutCancel(ctx), touched); rerr != nil {
-			r.log().Error("reconcile: recovery after a failed change", "err", rerr)
-		} else {
-			r.synced.Store(true)
+		err = r.runPasses(ctx, p, true, false)
+		if err == nil {
+			return nil
+		}
+		recovery := context.WithoutCancel(ctx)
+		if undoErr := undo(recovery); undoErr != nil {
+			r.synced.Store(false)
+			return fmt.Errorf("reconcile: change: %w", errors.Join(err, fmt.Errorf("compensate store change: %w", undoErr)))
+		}
+		if len(r.pending) != 0 {
+			if recoveryErr := r.sync(recovery); recoveryErr != nil {
+				r.log().Error("reconcile: recovery after a failed change", "err", recoveryErr)
+			}
 		}
 	}
 	return fmt.Errorf("reconcile: change: %w", err)
-}
-
-func (r *Reconciler) publish(chains map[string]alias.Chain) {
-	if r.Publish != nil {
-		r.Publish(chains)
-	}
 }
 
 // Batch runs fn as one Change: every Change made with the context fn receives joins its store transaction and its
@@ -213,6 +235,9 @@ func (r *Reconciler) Batch(ctx context.Context, fn func(ctx context.Context) err
 
 // SyncAll runs every Also function and then one Sync pass. Every step runs; the errors are joined.
 func (r *Reconciler) SyncAll(ctx context.Context) error {
+	r.syncMu.Lock()
+	defer r.syncMu.Unlock()
+
 	var errs []error
 	for _, fn := range r.Also {
 		if err := fn(ctx); err != nil {
@@ -222,7 +247,7 @@ func (r *Reconciler) SyncAll(ctx context.Context) error {
 	if len(errs) == 0 {
 		r.alsoSynced.Store(true)
 	}
-	if err := r.Sync(ctx); err != nil {
+	if err := r.sync(ctx); err != nil {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
@@ -248,32 +273,46 @@ func (r *Reconciler) Run(ctx context.Context) {
 	}
 }
 
-// pass is one reconcile pass inside a store transaction.
+// pass carries the read snapshot and buffers engine output until the generation can be checked.
 type pass struct {
-	r        *Reconciler
-	tx       *store.Tx
-	strict   bool
-	forceAll bool
-	force    map[string]bool // objects to push even when their MAC matches
-	touched  map[string]bool // objects this pass sent a mutating call for; survives a rollback
-	macs     map[string]string
-	chains   map[string]alias.Chain // the desired state's live chains, set once it is built
+	r          *Reconciler
+	desired    *desiredState
+	generation int64
+	sign       func([]byte) ([]byte, error)
+	forceAll   bool
+	force      map[string]bool // objects to push even when their MAC matches
+	touched    map[string]bool // objects this pass sent a mutating call for
+	macs       map[string]string
+	aliasIDs   map[string]string
+	ruleIDs    map[string]string
+	vks        []recordedVK
 }
+
+type recordedVK struct{ key, id, value string }
 
 // stale is an engine object to delete after the pushes.
 type stale struct{ provider, id, name string }
 
-func (p *pass) run(ctx context.Context) error {
-	d, err := p.r.desired(ctx, p.tx, p.strict)
-	if err != nil {
+func (p *pass) read(ctx context.Context, tx *store.Tx, strict bool) (err error) {
+	if p.generation, err = tx.Generation(ctx); err != nil {
 		return err
 	}
-	p.chains = d.Chains
+	if p.desired, err = p.r.desired(ctx, tx, strict); err != nil {
+		return err
+	}
+	if p.macs, err = tx.EngineMACs(ctx); err != nil {
+		return err
+	}
+	// MAC uses the transaction's sealer, not its database connection.
+	p.sign = tx.MAC
+	p.aliasIDs, err = tx.AliasRuleIDs(ctx)
+	return err
+}
+
+func (p *pass) push(ctx context.Context) error {
+	d := p.desired
 	for _, name := range slices.Sorted(maps.Keys(d.Skipped)) {
 		p.r.log().Error("reconcile: alias skipped", "alias", name, "err", d.Skipped[name])
-	}
-	if p.macs, err = p.tx.EngineMACs(ctx); err != nil {
-		return err
 	}
 	e := p.r.Engine
 	engProviders, err := e.ListProviders(ctx)
@@ -330,11 +369,37 @@ func (p *pass) run(ctx context.Context) error {
 		}
 	}
 
-	// Forget the MACs of objects that are no longer wanted.
-	want := d.objects()
-	for obj := range p.macs {
-		if !want[obj] {
-			if err := p.tx.DeleteEngineMAC(ctx, obj); err != nil {
+	return nil
+}
+
+func (p *pass) commit(ctx context.Context, tx *store.Tx) error {
+	generation, err := tx.Generation(ctx)
+	if err != nil {
+		return err
+	}
+	if generation != p.generation {
+		return errStalePass
+	}
+	want := p.desired.objects()
+	for obj, mac := range p.macs {
+		switch {
+		case !want[obj]:
+			err = tx.DeleteEngineMAC(ctx, obj)
+		case p.touched[obj]:
+			err = tx.SetEngineMAC(ctx, obj, mac)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	for _, vk := range p.vks {
+		if err := tx.SetClientKeyVK(ctx, vk.key, vk.id, vk.value); err != nil {
+			return err
+		}
+	}
+	for _, name := range p.desired.Aliases {
+		if p.ruleIDs[name] != p.aliasIDs[name] {
+			if err := tx.SetAliasRuleID(ctx, name, p.ruleIDs[name]); err != nil {
 				return err
 			}
 		}
@@ -360,7 +425,7 @@ func (p *pass) mac(v any) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("encode engine object: %w", err)
 	}
-	m, err := p.tx.MAC(b)
+	m, err := p.sign(b)
 	if err != nil {
 		return "", err
 	}
@@ -396,9 +461,7 @@ func (p *pass) pushProviders(ctx context.Context, d *desiredState, eng []bifrost
 		if err != nil {
 			return nil, fmt.Errorf("push provider %q: %w", dp.Provider.Name, err)
 		}
-		if err := p.tx.SetEngineMAC(ctx, obj, mac); err != nil {
-			return nil, err
-		}
+		p.macs[obj] = mac
 	}
 	var out []stale
 	for _, ep := range eng {
@@ -469,9 +532,7 @@ func (p *pass) pushKeys(ctx context.Context, d *desiredState, eng []bifrost.Prov
 			if err != nil {
 				return nil, fmt.Errorf("push key %q of %q: %w", k.ID, prov, err)
 			}
-			if err := p.tx.SetEngineMAC(ctx, obj, mac); err != nil {
-				return nil, err
-			}
+			p.macs[obj] = mac
 		}
 		for _, ek := range engKeys[prov] {
 			if !wanted[ek.ID] {
@@ -515,9 +576,7 @@ func (p *pass) pushVKs(ctx context.Context, d *desiredState, eng []bifrost.Virtu
 			return nil, fmt.Errorf("push virtual key %q: %w", dv.VK.Name, err)
 		}
 		if mac != "" {
-			if err := p.tx.SetEngineMAC(ctx, obj, mac); err != nil {
-				return nil, err
-			}
+			p.macs[obj] = mac
 		}
 		// Re-record the engine's id and value when they differ from the store (a recreated key, or a key whose
 		// recording was rolled back).
@@ -526,9 +585,7 @@ func (p *pass) pushVKs(ctx context.Context, d *desiredState, eng []bifrost.Virtu
 			value = dv.StoredValue
 		}
 		if cur.ID != dv.StoredID || value != dv.StoredValue {
-			if err := p.tx.SetClientKeyVK(ctx, dv.ClientKeyID, cur.ID, value); err != nil {
-				return nil, err
-			}
+			p.vks = append(p.vks, recordedVK{dv.ClientKeyID, cur.ID, value})
 		}
 	}
 	var out []stale
@@ -544,10 +601,6 @@ func (p *pass) pushVKs(ctx context.Context, d *desiredState, eng []bifrost.Virtu
 // returns the rules to delete: unknown names, and every rule but one for a wanted name. Rules of the OAuth engine
 // integration are never returned.
 func (p *pass) pushRules(ctx context.Context, d *desiredState, eng []bifrost.RoutingRule) ([]stale, error) {
-	storedIDs, err := p.tx.AliasRuleIDs(ctx)
-	if err != nil {
-		return nil, err
-	}
 	used := map[int]bool{}
 	holder := map[int]string{} // priority → id of an engine rule holding it
 	byName := map[string][]bifrost.RoutingRule{}
@@ -566,12 +619,12 @@ func (p *pass) pushRules(ctx context.Context, d *desiredState, eng []bifrost.Rou
 	}
 
 	kept := map[string]string{} // rule name → id of the engine rule kept
-	ruleIDs := map[string]string{}
+	p.ruleIDs = map[string]string{}
 	for _, dr := range d.Rules {
 		name := dr.Rule.Name
 		var cur *bifrost.RoutingRule
 		for i, er := range byName[name] {
-			if cur == nil || (dr.Alias != "" && er.ID == storedIDs[dr.Alias]) {
+			if cur == nil || (dr.Alias != "" && er.ID == p.aliasIDs[dr.Alias]) {
 				cur = &byName[name][i]
 			}
 		}
@@ -611,23 +664,13 @@ func (p *pass) pushRules(ctx context.Context, d *desiredState, eng []bifrost.Rou
 			return nil, fmt.Errorf("push routing rule %q: %w", name, err)
 		}
 		if mac != "" {
-			if err := p.tx.SetEngineMAC(ctx, dr.Object, mac); err != nil {
-				return nil, err
-			}
+			p.macs[dr.Object] = mac
 		}
 		kept[name] = rule.ID
 		if dr.Alias != "" {
-			ruleIDs[dr.Alias] = rule.ID
+			p.ruleIDs[dr.Alias] = rule.ID
 		}
 	}
-	for _, name := range d.Aliases {
-		if ruleIDs[name] != storedIDs[name] {
-			if err := p.tx.SetAliasRuleID(ctx, name, ruleIDs[name]); err != nil {
-				return nil, err
-			}
-		}
-	}
-
 	var out []stale
 	for _, er := range eng {
 		if id, ok := kept[er.Name]; (ok && id == er.ID) || (!ok && isOAuthRule(er.Name)) {
