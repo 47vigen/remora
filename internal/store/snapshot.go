@@ -3,6 +3,7 @@ package store
 import (
 	"cmp"
 	"context"
+	"database/sql"
 	"fmt"
 	"maps"
 	"slices"
@@ -116,25 +117,28 @@ func (s *Store) RedactSecrets(text string) string {
 
 func (s *Store) loadLogSecrets(ctx context.Context, sl *Sealer, secrets []string) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `
- SELECT id, secret FROM provider_keys
+ SELECT NULL, id, secret FROM provider_keys
  UNION ALL
- SELECT '', value FROM engine_state WHERE key IN ('admin_password', 'encryption_key', 'management_secret', 'api_key')`)
+ SELECT engine, key, value FROM engine_state WHERE key IN ('admin_password', 'encryption_key', 'management_secret', 'api_key')`)
 	if err != nil {
 		return nil, fmt.Errorf("log secrets: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
+		var engine sql.NullString
 		var id string
 		var value []byte
-		if err := rows.Scan(&id, &value); err != nil {
+		if err := rows.Scan(&engine, &id, &value); err != nil {
 			return nil, fmt.Errorf("log secrets: %w", err)
 		}
-		secret := string(value)
-		if id != "" {
+		var secret string
+		if engine.Valid {
+			secret, err = sl.openEngineValue(engine.String, id, string(value))
+		} else {
 			secret, err = sl.Open(value, providerKeyAAD(id))
-			if err != nil {
-				return nil, fmt.Errorf("log secrets: %w", err)
-			}
+		}
+		if err != nil {
+			return nil, fmt.Errorf("log secrets: %w", err)
 		}
 		if secret != "" {
 			secrets = append(secrets, secret)

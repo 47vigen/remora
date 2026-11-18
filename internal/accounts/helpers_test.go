@@ -36,6 +36,11 @@ func openStore(t *testing.T) *store.Store {
 		t.Fatalf("store.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
+	sl, err := store.NewSealer(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.SetSealer(sl)
 	return st
 }
 

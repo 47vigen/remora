@@ -125,7 +125,11 @@ In the last two names, letters are upper-cased and every other character that is
 /data/<engine>/     one directory per engine: its configuration, request logs and subscription account credentials
 ```
 
-Back up the whole volume, including `master.key`.
+**The data volume is the secret.** Remora seals engine credentials in `remora.db`, but the volume can also
+contain `master.key`, an engine configuration with its own encryption key, and OAuth credential files. Restrict
+access to the volume and encrypt its backups. Keep the master key separate from the volume backup: if you use
+`master.key`, back it up separately; for new installations, supply `REMORA_MASTER_KEY` from a separate secret
+store to avoid writing the key to the volume. You need that same key to restore `remora.db`.
 
 ## Architecture
 

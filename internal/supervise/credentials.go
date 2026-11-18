@@ -15,8 +15,8 @@ const BifrostAdminUser = "remora"
 // secretBytes is the entropy of each generated engine secret (43 characters in base64url).
 const secretBytes = 32
 
-// Credentials are the secrets remora shares with its engines. They live in the store's engine_state table and are
-// generated once, at first boot.
+// Credentials are the secrets remora shares with its engines. They are generated at first boot and sealed in the
+// store's engine_state table.
 type Credentials struct {
 	BifrostAdminUser         string // engine_state bifrost/admin_username, fixed "remora"
 	BifrostAdminPassword     string // engine_state bifrost/admin_password
@@ -26,7 +26,7 @@ type Credentials struct {
 }
 
 // EnsureCredentials returns the engine credentials, generating and storing only the values that are missing. A
-// value already in the store is never replaced.
+// nonempty value already in the store is never regenerated. The store must have a sealer configured.
 func EnsureCredentials(ctx context.Context, s *store.Store) (Credentials, error) {
 	var c Credentials
 	fields := []struct {

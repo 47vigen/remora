@@ -1,12 +1,15 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
@@ -289,7 +292,7 @@ func TestSettingsRoundTrip(t *testing.T) {
 
 func TestEngineValueRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	s := openTemp(t)
+	s := openSealed(t)
 
 	v, ok, err := s.EngineValue(ctx, "bifrost", "x")
 	if v != "" || ok || err != nil {
@@ -308,6 +311,73 @@ func TestEngineValueRoundTrip(t *testing.T) {
 		if v != tt.want || !ok || err != nil {
 			t.Errorf("EngineValue(%s, x) = (%q, %v, %v), want (%s, true, nil)", tt.engine, v, ok, err, tt.want)
 		}
+	}
+}
+
+func TestEngineValueSealed(t *testing.T) {
+	const value = "synthetic-engine-value"
+	s := openSealed(t)
+	if err := s.SetEngineValue(t.Context(), "test-engine", "api_key", value); err != nil {
+		t.Fatal(err)
+	}
+	assertEngineValueSealed(t, s, value)
+}
+
+func TestEngineValueUpgradesPlaintext(t *testing.T) {
+	const value = "synthetic-legacy-value"
+	s := openSealed(t)
+	if _, err := s.db.ExecContext(t.Context(), "INSERT INTO engine_state (engine, key, value) VALUES ('test-engine', 'api_key', ?)", value); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		got, ok, err := s.EngineValue(t.Context(), "test-engine", "api_key")
+		if got != value || !ok || err != nil {
+			t.Fatalf("legacy engine value did not round-trip: ok=%t, err=%v", ok, err)
+		}
+		assertEngineValueSealed(t, s, value)
+	}
+}
+
+func TestEngineValueRejectsWrongMasterKey(t *testing.T) {
+	const value = "synthetic-engine-value"
+	s := openSealed(t)
+	if err := s.SetEngineValue(t.Context(), "test-engine", "api_key", value); err != nil {
+		t.Fatal(err)
+	}
+	original := s.sealer.Load()
+	s.SetSealer(mustSealer(t, bytes.Repeat([]byte{2}, 32)))
+	got, ok, err := s.EngineValue(t.Context(), "test-engine", "api_key")
+	if got != "" || ok || err == nil {
+		t.Fatal("reading with the wrong master key must fail without returning a value")
+	}
+	s.SetSealer(original)
+	assertEngineValueSealed(t, s, value)
+}
+
+func TestEngineValueWriteRequiresSealer(t *testing.T) {
+	s := openTemp(t)
+	if err := s.SetEngineValue(t.Context(), "test-engine", "api_key", "synthetic-engine-value"); !errors.Is(err, ErrNoSealer) {
+		t.Fatal("writing without a sealer must fail")
+	}
+}
+
+func assertEngineValueSealed(t *testing.T, s *Store, plaintext string) {
+	t.Helper()
+	var raw string
+	if err := s.db.QueryRowContext(t.Context(), "SELECT value FROM engine_state WHERE engine = 'test-engine' AND key = 'api_key'").Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	encoded, ok := strings.CutPrefix(raw, "v1:")
+	if !ok || strings.Contains(raw, plaintext) {
+		t.Fatal("engine value must have a version prefix and contain no plaintext")
+	}
+	sealed, err := base64.RawStdEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.sealer.Load().Open(sealed, "engine_state/test-engine/api_key")
+	if got != plaintext || err != nil {
+		t.Fatalf("engine value must open with the row's AAD: %v", err)
 	}
 }
 

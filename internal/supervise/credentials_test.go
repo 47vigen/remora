@@ -1,6 +1,7 @@
 package supervise
 
 import (
+	"bytes"
 	"context"
 	"path/filepath"
 	"testing"
@@ -8,30 +9,36 @@ import (
 	"github.com/47vigen/remora/internal/store"
 )
 
-func openStore(t *testing.T) *store.Store {
+func openCredentialsStore(t *testing.T, path string) *store.Store {
 	t.Helper()
-	s, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "remora.db"))
+	s, err := store.Open(context.Background(), path)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
+	sl, err := store.NewSealer(bytes.Repeat([]byte{1}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetSealer(sl)
 	t.Cleanup(func() { _ = s.Close() })
 	return s
 }
 
 func TestEnsureCredentialsIsStable(t *testing.T) {
 	ctx := context.Background()
-	s := openStore(t)
+	path := filepath.Join(t.TempDir(), "remora.db")
+	s := openCredentialsStore(t, path)
 
 	c1, err := EnsureCredentials(ctx, s)
 	if err != nil {
 		t.Fatalf("EnsureCredentials: %v", err)
 	}
-	c2, err := EnsureCredentials(ctx, s)
+	c2, err := EnsureCredentials(ctx, openCredentialsStore(t, path))
 	if err != nil {
 		t.Fatalf("EnsureCredentials (second): %v", err)
 	}
 	if c1 != c2 {
-		t.Fatalf("credentials changed between calls:\n%+v\n%+v", c1, c2)
+		t.Fatal("credentials changed after reopening the database")
 	}
 	if c1.BifrostAdminUser != "remora" {
 		t.Errorf("BifrostAdminUser = %q, want remora", c1.BifrostAdminUser)
@@ -56,7 +63,7 @@ func TestEnsureCredentialsIsStable(t *testing.T) {
 
 func TestEnsureCredentialsFillsOnlyMissing(t *testing.T) {
 	ctx := context.Background()
-	s := openStore(t)
+	s := openCredentialsStore(t, filepath.Join(t.TempDir(), "remora.db"))
 	if err := s.SetEngineValue(ctx, "bifrost", "encryption_key", "keep-me"); err != nil {
 		t.Fatalf("SetEngineValue: %v", err)
 	}
@@ -65,9 +72,9 @@ func TestEnsureCredentialsFillsOnlyMissing(t *testing.T) {
 		t.Fatalf("EnsureCredentials: %v", err)
 	}
 	if c.BifrostEncryptionKey != "keep-me" {
-		t.Errorf("BifrostEncryptionKey = %q, want keep-me", c.BifrostEncryptionKey)
+		t.Error("existing encryption key changed")
 	}
 	if c.BifrostAdminPassword == "" || c.CLIProxyAPIKey == "" {
-		t.Errorf("missing values were not generated: %+v", c)
+		t.Error("missing values were not generated")
 	}
 }
