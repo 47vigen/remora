@@ -3,6 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <script>
+      (() => {
+        let theme;
+        try {
+          theme = localStorage.getItem("heroui-theme");
+        } catch {
+          // Storage may be unavailable in restricted browsing modes.
+        }
+        if (theme == null || theme === "system") {
+          theme = window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        }
+        document.documentElement.classList.add(theme);
+        document.documentElement.dataset.theme = theme;
+      })();
+    </script>
     <title>remora</title>
   </head>
   <body class="bg-background text-foreground">
