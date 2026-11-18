@@ -44,6 +44,7 @@ paths:
     get:
       tags: [system]
       operationId: getHealth
+      x-remora-scope: none
       summary: Report whether remora and its components are healthy.
       security: []
       responses:
@@ -60,6 +61,7 @@ paths:
     get:
       tags: [system]
       operationId: getVersion
+      x-remora-scope: none
       summary: Report the version of remora and of each engine it runs.
       security: []
       responses:
@@ -76,6 +78,7 @@ paths:
     post:
       tags: [auth]
       operationId: login
+      x-remora-scope: none
       summary: Sign in as the admin and receive a session cookie.
       security: []
       requestBody:
@@ -99,6 +102,7 @@ paths:
     post:
       tags: [auth]
       operationId: logout
+      x-remora-scope: none
       summary: End the current session.
       responses:
         "204":
@@ -115,6 +119,7 @@ paths:
     get:
       tags: [auth]
       operationId: getSession
+      x-remora-scope: none
       summary: Report how the caller is authenticated; 401 when it is not.
       responses:
         "200":
@@ -130,6 +135,7 @@ paths:
     get:
       tags: [providers]
       operationId: listProviders
+      x-remora-scope: read
       summary: List providers.
       parameters:
         - $ref: "#/components/parameters/Limit"
@@ -158,6 +164,7 @@ paths:
     post:
       tags: [providers]
       operationId: createProvider
+      x-remora-scope: admin
       summary: Create a provider.
       requestBody:
         required: true
@@ -181,6 +188,7 @@ paths:
     get:
       tags: [providers]
       operationId: getProvider
+      x-remora-scope: read
       summary: Get a provider.
       responses:
         "200":
@@ -194,6 +202,7 @@ paths:
     put:
       tags: [providers]
       operationId: updateProvider
+      x-remora-scope: admin
       summary: Replace a provider. Keys sent without a value keep their stored secret.
       requestBody:
         required: true
@@ -213,6 +222,7 @@ paths:
     delete:
       tags: [providers]
       operationId: deleteProvider
+      x-remora-scope: admin
       summary: Delete a provider.
       responses:
         "204":
@@ -226,6 +236,7 @@ paths:
     post:
       tags: [providers]
       operationId: testProvider
+      x-remora-scope: read
       summary: Send a small request to the provider and report the result.
       responses:
         "200":
@@ -241,6 +252,7 @@ paths:
     get:
       tags: [accounts]
       operationId: listAccounts
+      x-remora-scope: read
       summary: List subscription accounts with quota, cooldown and models.
       parameters:
         - $ref: "#/components/parameters/Limit"
@@ -266,6 +278,7 @@ paths:
     get:
       tags: [accounts]
       operationId: getAccountPool
+      x-remora-scope: read
       summary: Enabled subscription accounts that dropped out of the pool, per provider.
       description: >-
         An account is out when its sign-in is missing, its refresh failed for good, or the provider signed it out or
@@ -287,6 +300,7 @@ paths:
     get:
       tags: [accounts]
       operationId: listAccountStrategies
+      x-remora-scope: read
       summary: The routing strategy of every subscription provider's account pool.
       parameters:
         - $ref: "#/components/parameters/Limit"
@@ -312,6 +326,7 @@ paths:
     put:
       tags: [accounts]
       operationId: setAccountStrategy
+      x-remora-scope: admin
       summary: Set which account of a subscription provider serves a request.
       requestBody:
         required: true
@@ -337,6 +352,7 @@ paths:
     get:
       tags: [accounts]
       operationId: getQuota
+      x-remora-scope: read
       summary: Every subscription account's quota, merged with its status and cooldowns, grouped by provider.
       description: >-
         Only providers with accounts are listed. A provider whose quota remora cannot read has `supported` false and
@@ -357,6 +373,7 @@ paths:
     post:
       tags: [accounts]
       operationId: refreshQuota
+      x-remora-scope: operate
       summary: Queue quota checks of one account or of every enabled account of one provider.
       description: >-
         Checks run one at a time in the background. An account checked less than a minute ago, or disabled, is
@@ -381,6 +398,7 @@ paths:
     post:
       tags: [accounts]
       operationId: startAccountLogin
+      x-remora-scope: operate
       summary: Start an OAuth login for a subscription provider.
       requestBody:
         required: true
@@ -404,6 +422,7 @@ paths:
     get:
       tags: [accounts]
       operationId: getAccountLogin
+      x-remora-scope: operate
       summary: Poll the status of a login.
       responses:
         "200":
@@ -417,6 +436,7 @@ paths:
     delete:
       tags: [accounts]
       operationId: cancelAccountLogin
+      x-remora-scope: operate
       summary: Cancel a login that has not finished.
       responses:
         "204":
@@ -430,6 +450,7 @@ paths:
     post:
       tags: [accounts]
       operationId: completeAccountLogin
+      x-remora-scope: operate
       summary: Complete a login with the redirect URL the user pasted from the browser.
       requestBody:
         required: true
@@ -447,6 +468,7 @@ paths:
     post:
       tags: [accounts]
       operationId: importAccount
+      x-remora-scope: admin
       summary: Import an account from an existing OAuth credential.
       requestBody:
         required: true
@@ -470,6 +492,7 @@ paths:
     patch:
       tags: [accounts]
       operationId: updateAccount
+      x-remora-scope: operate
       summary: Enable or disable an account, or set its priority.
       requestBody:
         required: true
@@ -489,6 +512,7 @@ paths:
     delete:
       tags: [accounts]
       operationId: deleteAccount
+      x-remora-scope: admin
       summary: Delete an account.
       responses:
         "204":
@@ -502,6 +526,7 @@ paths:
     post:
       tags: [accounts]
       operationId: resetAccountCooldown
+      x-remora-scope: operate
       summary: Clear an account's cooldown so it serves requests again.
       responses:
         "204":
@@ -513,6 +538,7 @@ paths:
     get:
       tags: [aliases]
       operationId: listAliases
+      x-remora-scope: read
       summary: List aliases.
       parameters:
         - $ref: "#/components/parameters/Limit"
@@ -535,6 +561,7 @@ paths:
     post:
       tags: [aliases]
       operationId: createAlias
+      x-remora-scope: admin
       summary: Create an alias.
       requestBody:
         required: true
@@ -556,6 +583,7 @@ paths:
     post:
       tags: [aliases]
       operationId: compileAlias
+      x-remora-scope: read
       summary: Compile an unsaved alias into its chain of targets; nothing is stored.
       description: Returns 400 `invalid_request` on a cycle, a nesting depth over the limit, or an unknown member.
       requestBody:
@@ -580,6 +608,7 @@ paths:
     get:
       tags: [aliases]
       operationId: getAlias
+      x-remora-scope: read
       summary: Get an alias.
       responses:
         "200":
@@ -593,6 +622,7 @@ paths:
     put:
       tags: [aliases]
       operationId: updateAlias
+      x-remora-scope: admin
       summary: Replace an alias.
       requestBody:
         required: true
@@ -612,6 +642,7 @@ paths:
     delete:
       tags: [aliases]
       operationId: deleteAlias
+      x-remora-scope: admin
       summary: Delete an alias.
       responses:
         "204":
@@ -625,6 +656,7 @@ paths:
     get:
       tags: [aliases]
       operationId: getAliasChain
+      x-remora-scope: read
       summary: Get the compiled chain of a stored alias, with cooling members marked.
       responses:
         "200":
@@ -640,6 +672,7 @@ paths:
     get:
       tags: [aliases]
       operationId: listCooling
+      x-remora-scope: read
       summary: List the alias members that are cooling down.
       parameters:
         - $ref: "#/components/parameters/Limit"
@@ -659,6 +692,7 @@ paths:
     get:
       tags: [keys]
       operationId: listKeys
+      x-remora-scope: read
       summary: List client keys.
       parameters:
         - $ref: "#/components/parameters/Limit"
@@ -676,6 +710,7 @@ paths:
     post:
       tags: [keys]
       operationId: createKey
+      x-remora-scope: admin
       summary: Create a client key. The value is returned only here.
       requestBody:
         required: true
@@ -699,6 +734,7 @@ paths:
     get:
       tags: [keys]
       operationId: getKey
+      x-remora-scope: read
       summary: Get a client key.
       responses:
         "200":
@@ -712,6 +748,7 @@ paths:
     patch:
       tags: [keys]
       operationId: updateKey
+      x-remora-scope: admin
       summary: Rename a key, change its allowlist, or enable or disable it.
       requestBody:
         required: true
@@ -731,6 +768,7 @@ paths:
     delete:
       tags: [keys]
       operationId: deleteKey
+      x-remora-scope: admin
       summary: Delete a client key.
       responses:
         "204":
@@ -744,6 +782,7 @@ paths:
     get:
       tags: [keys]
       operationId: getKeyUsage
+      x-remora-scope: read
       summary: Get the usage of one key over a time range.
       parameters:
         - $ref: "#/components/parameters/From"
@@ -762,6 +801,7 @@ paths:
     get:
       tags: [logs]
       operationId: listLogs
+      x-remora-scope: read
       summary: List request logs, newest first.
       parameters:
         - $ref: "#/components/parameters/Limit"
@@ -793,6 +833,7 @@ paths:
     get:
       tags: [logs]
       operationId: streamLogs
+      x-remora-scope: read
       summary: Stream new log entries over a WebSocket.
       description: |
         A WebSocket, authenticated by the session cookie or an API token. Each text frame the server sends is one
@@ -821,6 +862,7 @@ paths:
     get:
       tags: [logs]
       operationId: getLog
+      x-remora-scope: read
       summary: Get one log entry with its bodies and fallback path.
       responses:
         "200":
@@ -836,6 +878,7 @@ paths:
     get:
       tags: [stats]
       operationId: getStats
+      x-remora-scope: read
       summary: Get volume, errors, latency, tokens and cost over a time range.
       parameters:
         - $ref: "#/components/parameters/From"
@@ -876,6 +919,7 @@ paths:
     put:
       tags: [settings]
       operationId: changePassword
+      x-remora-scope: admin
       summary: Change the admin password.
       requestBody:
         required: true
@@ -893,6 +937,7 @@ paths:
     get:
       tags: [settings]
       operationId: listApiTokens
+      x-remora-scope: read
       summary: List API tokens.
       parameters:
         - $ref: "#/components/parameters/Limit"
@@ -910,6 +955,7 @@ paths:
     post:
       tags: [settings]
       operationId: createApiToken
+      x-remora-scope: admin
       summary: Create an API token. The value is returned only here.
       requestBody:
         required: true
@@ -938,6 +984,7 @@ paths:
     delete:
       tags: [settings]
       operationId: deleteApiToken
+      x-remora-scope: admin
       summary: Delete an API token.
       responses:
         "204":
@@ -949,6 +996,7 @@ paths:
     get:
       tags: [config]
       operationId: exportConfig
+      x-remora-scope: admin
       summary: Export the whole configuration as `remora.yaml`, with secrets as `env:NAME` references.
       responses:
         "200":
@@ -969,6 +1017,7 @@ paths:
     post:
       tags: [config]
       operationId: planConfig
+      x-remora-scope: read
       summary: Show the changes a `remora.yaml` document would make; nothing is changed.
       requestBody:
         required: true
@@ -990,6 +1039,7 @@ paths:
     post:
       tags: [config]
       operationId: applyConfig
+      x-remora-scope: admin
       summary: Make the store match a `remora.yaml` document.
       requestBody:
         required: true
@@ -1873,6 +1923,10 @@ components:
         new:
           type: string
           minLength: 12
+    ApiTokenScope:
+      type: string
+      enum: [read, operate, admin]
+      default: admin
     ApiToken:
       type: object
       required: [id, name, prefix, created_at]
@@ -1887,6 +1941,11 @@ components:
           type: string
           format: date-time
         last_used_at:
+          type: string
+          format: date-time
+        scope:
+          $ref: "#/components/schemas/ApiTokenScope"
+        expires_at:
           type: string
           format: date-time
     ApiTokenCreated:
@@ -1904,6 +1963,11 @@ components:
       properties:
         name:
           type: string
+        scope:
+          $ref: "#/components/schemas/ApiTokenScope"
+        expires_at:
+          type: string
+          format: date-time
     ApiTokenList:
       type: object
       required: [items, total]

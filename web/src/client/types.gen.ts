@@ -475,12 +475,16 @@ export type PasswordChange = {
     new: string;
 };
 
+export type ApiTokenScope = 'read' | 'operate' | 'admin';
+
 export type ApiToken = {
     id: string;
     name: string;
     prefix: string;
     created_at: string;
     last_used_at?: string;
+    scope?: ApiTokenScope;
+    expires_at?: string;
 };
 
 export type ApiTokenCreated = ApiToken & {
@@ -492,6 +496,8 @@ export type ApiTokenCreated = ApiToken & {
 
 export type ApiTokenCreate = {
     name: string;
+    scope?: ApiTokenScope;
+    expires_at?: string;
 };
 
 export type ApiTokenList = {

@@ -67,6 +67,27 @@ func (e AliasKind) Valid() bool {
 	}
 }
 
+// Defines values for ApiTokenScope.
+const (
+	Admin   ApiTokenScope = "admin"
+	Operate ApiTokenScope = "operate"
+	Read    ApiTokenScope = "read"
+)
+
+// Valid indicates whether the value is a known member of the ApiTokenScope enum.
+func (e ApiTokenScope) Valid() bool {
+	switch e {
+	case Admin:
+		return true
+	case Operate:
+		return true
+	case Read:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ChangeKind.
 const (
 	ChangeKindAccountStrategy ChangeKind = "account_strategy"
@@ -496,25 +517,31 @@ type AliasList struct {
 
 // ApiToken defines model for ApiToken.
 type ApiToken struct {
-	CreatedAt  time.Time  `json:"created_at"`
-	Id         string     `json:"id"`
-	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
-	Name       string     `json:"name"`
-	Prefix     string     `json:"prefix"`
+	CreatedAt  time.Time      `json:"created_at"`
+	ExpiresAt  *time.Time     `json:"expires_at,omitempty"`
+	Id         string         `json:"id"`
+	LastUsedAt *time.Time     `json:"last_used_at,omitempty"`
+	Name       string         `json:"name"`
+	Prefix     string         `json:"prefix"`
+	Scope      *ApiTokenScope `json:"scope,omitempty"`
 }
 
 // ApiTokenCreate defines model for ApiTokenCreate.
 type ApiTokenCreate struct {
-	Name string `json:"name"`
+	ExpiresAt *time.Time     `json:"expires_at,omitempty"`
+	Name      string         `json:"name"`
+	Scope     *ApiTokenScope `json:"scope,omitempty"`
 }
 
 // ApiTokenCreated defines model for ApiTokenCreated.
 type ApiTokenCreated struct {
-	CreatedAt  time.Time  `json:"created_at"`
-	Id         string     `json:"id"`
-	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
-	Name       string     `json:"name"`
-	Prefix     string     `json:"prefix"`
+	CreatedAt  time.Time      `json:"created_at"`
+	ExpiresAt  *time.Time     `json:"expires_at,omitempty"`
+	Id         string         `json:"id"`
+	LastUsedAt *time.Time     `json:"last_used_at,omitempty"`
+	Name       string         `json:"name"`
+	Prefix     string         `json:"prefix"`
+	Scope      *ApiTokenScope `json:"scope,omitempty"`
 
 	// Value The token's value, returned only when it is created.
 	Value string `json:"value"`
@@ -525,6 +552,9 @@ type ApiTokenList struct {
 	Items []ApiToken `json:"items"`
 	Total int        `json:"total"`
 }
+
+// ApiTokenScope defines model for ApiTokenScope.
+type ApiTokenScope string
 
 // ChainTarget defines model for ChainTarget.
 type ChainTarget struct {
