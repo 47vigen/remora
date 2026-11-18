@@ -26,9 +26,17 @@ const tokenShownPrefix = len(tokenPrefix) + 6
 
 var tokenEncoding = base32.StdEncoding.WithPadding(base32.NoPadding)
 
-// CreateToken creates an API token named name. The value ("rmt_" + 32 base32 characters) is returned only here;
-// the store keeps its sha256 and a short prefix.
+// CreateToken creates an admin API token without expiry.
 func (s *Service) CreateToken(ctx context.Context, name string) (store.APIToken, string, error) {
+	return s.CreateScopedToken(ctx, name, store.ScopeAdmin, nil)
+}
+
+// CreateScopedToken creates a token with the given scope (admin if empty) and optional expiry.
+// It returns the token value once; the store keeps only its hash and a short prefix.
+func (s *Service) CreateScopedToken(ctx context.Context, name, scope string, expiresAt *time.Time) (store.APIToken, string, error) {
+	if scope == "" {
+		scope = store.ScopeAdmin
+	}
 	buf := make([]byte, tokenBytes)
 	_, _ = rand.Read(buf) // crypto/rand.Read never fails (it aborts the program instead)
 	value := tokenPrefix + strings.ToLower(tokenEncoding.EncodeToString(buf))
@@ -41,6 +49,8 @@ func (s *Service) CreateToken(ctx context.Context, name string) (store.APIToken,
 		Prefix:    value[:tokenShownPrefix],
 		Hash:      hashToken(value),
 		CreatedAt: s.now().UTC(),
+		Scope:     scope,
+		ExpiresAt: expiresAt,
 	}
 	if err := s.st.CreateAPIToken(ctx, t); err != nil {
 		return store.APIToken{}, "", fmt.Errorf("auth: create token: %w", err)
@@ -48,25 +58,28 @@ func (s *Service) CreateToken(ctx context.Context, name string) (store.APIToken,
 	return t, value, nil
 }
 
-// validToken reports whether value is a stored API token, and records its use.
-func (s *Service) validToken(ctx context.Context, value string) (bool, error) {
+// authenticateToken returns the principal for an unexpired token and records its use.
+func (s *Service) authenticateToken(ctx context.Context, value string) (Principal, error) {
 	t, err := s.st.APITokenByHash(ctx, hashToken(value))
 	if errors.Is(err, store.ErrNotFound) {
-		return false, nil
+		return Principal{}, ErrUnauthenticated
 	}
 	if err != nil {
-		return false, fmt.Errorf("auth: token: %w", err)
+		return Principal{}, fmt.Errorf("auth: token: %w", err)
+	}
+	at := s.now()
+	if t.ExpiresAt != nil && !at.Before(*t.ExpiresAt) {
+		return Principal{}, ErrUnauthenticated
 	}
 	if v, ok := activeTokenTouches.Load(s); ok {
 		uses := v.(*tokenTouches)
-		at := s.now()
 		uses.mu.Lock()
 		if at.After(uses.pending[t.ID]) {
 			uses.pending[t.ID] = at
 		}
 		uses.mu.Unlock()
 	}
-	return true, nil
+	return Principal{Via: "token", TokenID: t.ID, TokenName: t.Name, Scope: t.Scope}, nil
 }
 
 // Buffers are scoped to a running auth service and removed when it stops.
