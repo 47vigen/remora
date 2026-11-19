@@ -156,10 +156,12 @@ type reqInfo struct {
 	body     []byte
 	spans    bodySpans // where the parts of body the proxy reads sit; zero for multipart
 
-	headerTimeout cooling.Event // set only for a capped request with one attributable target
-	probe         alias.Target
-	probeStatus   int
-	probeRetry    time.Duration
+	headerTimeout    cooling.Event // set only for a capped request with one attributable target
+	probe            alias.Target
+	probeStatus      int
+	probeRetry       time.Duration
+	probeHasResponse bool
+	probeStreamError int
 }
 
 type reqInfoKey struct{}
@@ -307,7 +309,15 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt route, sh sha
 	probe := info.probe
 	if probe != (alias.Target{}) {
 		defer func() {
-			if err := p.Cooler.CompleteProbe(ctx, probe, info.probeStatus, info.probeRetry); err != nil && ctx.Err() == nil {
+			status := info.probeStatus
+			complete := p.Cooler.CompleteProbe
+			if info.probeStreamError != 0 {
+				status, complete = info.probeStreamError, p.Cooler.FailProbe
+			} else if status == 0 && info.probeHasResponse && ctx.Err() == nil {
+				// A body-copy error can unwind the handler without calling ErrorHandler.
+				status = http.StatusBadGateway
+			}
+			if err := complete(ctx, probe, status, info.probeRetry); err != nil && ctx.Err() == nil {
 				p.log.WarnContext(ctx, "proxy: finish cooling probe", "err", err)
 			}
 		}()
@@ -443,14 +453,17 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 	info := infoFrom(resp.Request.Context())
 	var probe *probeBody
 	if info.probe != (alias.Target{}) && resp.StatusCode != http.StatusSwitchingProtocols {
-		// A body-copy error bypasses ErrorHandler and may unwind the handler.
-		info.probeStatus = http.StatusBadGateway
+		info.probeHasResponse = true
 		probe = &probeBody{info: info, status: resp.StatusCode, retry: cooling.RetryAfter(resp.Header.Get("Retry-After"), time.Now())}
 	}
 	setRemoraHeaders(resp.Header, info)
 	switch {
 	case isEventStream(resp.Header):
-		resp.Body = newSSEScrubber(resp.Body, info.shape)
+		stream := newSSEScrubber(resp.Body, info.shape)
+		if probe != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			stream.probeError = &info.probeStreamError
+		}
+		resp.Body = stream
 		resp.Header.Del("Content-Length")
 		resp.ContentLength = -1
 	case resp.StatusCode >= http.StatusBadRequest:
@@ -501,6 +514,8 @@ func (b *probeBody) Read(p []byte) (int, error) {
 			return n, nil
 		}
 		b.info.probeStatus, b.info.probeRetry = b.status, b.retry
+	} else if err != nil && b.info.in.Context().Err() == nil {
+		b.info.probeStatus = http.StatusBadGateway
 	}
 	return n, err
 }
