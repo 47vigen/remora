@@ -74,7 +74,9 @@ func (s *Store) ClientKeyByValue(ctx context.Context, value string) (ClientKey, 
 		return ClientKey{}, ErrNoSealer
 	}
 	mac := sl.MAC([]byte(value))
-	if snap := s.snap.Load(); snap != nil {
+	snap, unlock := s.snapshotForRead()
+	defer unlock()
+	if snap != nil {
 		k, ok := snap.keys[string(mac)]
 		if !ok {
 			return ClientKey{}, ErrNotFound
