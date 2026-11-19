@@ -120,7 +120,7 @@ func New(cfg Config, apply func(context.Context) error, now func() time.Time, lo
 	}
 }
 
-// Restore drops expired rows and loads active cooldowns before the first reconcile and before serving requests.
+// Restore loads persisted cooldowns and tripped breakers before the first reconcile and before serving requests.
 func (c *Cooler) Restore(ctx context.Context, storage Storage) error {
 	rows, err := storage.LoadCooling(ctx, c.now())
 	if err != nil {
