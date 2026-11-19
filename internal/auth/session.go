@@ -123,7 +123,10 @@ func (s *Service) ChangePassword(ctx context.Context, currentSession, current, n
 
 // Principal is how a request is authenticated.
 type Principal struct {
-	Via string // "session" | "token"
+	Via       string // "session" | "token"
+	TokenID   string
+	TokenName string
+	Scope     string
 }
 
 // Authenticate accepts a valid session cookie or "Authorization: Bearer rmt_…". Anything else, including a /v1
@@ -136,17 +139,11 @@ func (s *Service) Authenticate(r *http.Request) (Principal, error) {
 			return Principal{}, err
 		}
 		if ok {
-			return Principal{Via: "session"}, nil
+			return Principal{Via: "session", Scope: store.ScopeAdmin}, nil
 		}
 	}
 	if v, ok := bearer(r); ok && strings.HasPrefix(v, tokenPrefix) {
-		ok, err := s.validToken(ctx, v)
-		if err != nil {
-			return Principal{}, err
-		}
-		if ok {
-			return Principal{Via: "token"}, nil
-		}
+		return s.authenticateToken(ctx, v)
 	}
 	return Principal{}, ErrUnauthenticated
 }

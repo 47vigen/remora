@@ -3,7 +3,9 @@ package store
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -86,5 +88,61 @@ func TestAuthAPITokens(t *testing.T) {
 	}
 	if list, _ := s.ListAPITokens(ctx); len(list) != 0 {
 		t.Errorf("ListAPITokens after delete = %+v", list)
+	}
+}
+
+func TestMigrationsTokenScope(t *testing.T) {
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "remora.db")
+	// The fourth legacy migration created api_tokens, before scope and expiry.
+	db := legacyDB(t, path, 4)
+	if _, err := db.ExecContext(ctx, `INSERT INTO api_tokens (id, name, prefix, hash, created_at)
+		VALUES ('legacy', 'ci', 'prefix', ?, 1)`, []byte("legacy-hash")); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	var scope string
+	var expires sql.NullInt64
+	if err := s.DB().QueryRowContext(ctx, "SELECT scope, expires_at FROM api_tokens WHERE id = 'legacy'").Scan(&scope, &expires); err != nil {
+		t.Fatal(err)
+	}
+	if scope != "admin" || expires.Valid {
+		t.Errorf("migrated token scope = %q, has expiry = %v; want admin with no expiry", scope, expires.Valid)
+	}
+}
+
+func TestAPITokenScopeAndExpiry(t *testing.T) {
+	ctx := t.Context()
+	s := openTemp(t)
+	expiry := time.Date(2026, 10, 14, 9, 0, 0, 123456789, time.UTC)
+	tok := APIToken{
+		ID: "scoped", Name: "ci", Prefix: "prefix", Hash: []byte("scoped-hash"),
+		CreatedAt: expiry.Add(-time.Hour), Scope: "operate", ExpiresAt: &expiry,
+	}
+	if err := s.CreateAPIToken(ctx, tok); err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.ListAPITokens(ctx)
+	if err != nil || len(list) != 1 || list[0].Scope != "operate" || list[0].ExpiresAt == nil || !list[0].ExpiresAt.Equal(expiry) {
+		t.Fatalf("ListAPITokens did not round-trip scope and expiry: %v", err)
+	}
+	tok.ID, tok.Hash = "invalid", []byte("invalid-hash")
+	tok.Scope = "invalid"
+	if err := s.CreateAPIToken(ctx, tok); err == nil {
+		t.Error("CreateAPIToken accepted an unknown scope")
+	}
+	tok.Scope = "read"
+	outOfRange := time.Date(2500, 1, 1, 0, 0, 0, 0, time.UTC)
+	tok.ExpiresAt = &outOfRange
+	if err := s.CreateAPIToken(ctx, tok); err == nil {
+		t.Error("CreateAPIToken accepted an expiry outside the Unix nanosecond range")
 	}
 }

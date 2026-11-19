@@ -5,18 +5,24 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 )
 
 // Admin sessions and API tokens are stored only as hashes (sha256 of the value, computed by internal/auth).
 // Times are stored as Unix nanoseconds.
 
+// ScopeAdmin is the default scope for API tokens and the scope of admin sessions.
+const ScopeAdmin = "admin"
+
 // APIToken is an API token for /api/*. Hash is the sha256 of its value; the value itself is never stored.
 type APIToken struct {
 	ID, Name, Prefix string
+	Scope            string
 	Hash             []byte
 	CreatedAt        time.Time
 	LastUsedAt       *time.Time
+	ExpiresAt        *time.Time
 }
 
 // CreateSession stores a session by its hash.
@@ -65,32 +71,43 @@ func (s *Store) DeleteSessionsExcept(ctx context.Context, keep []byte) error {
 	return nil
 }
 
-// CreateAPIToken stores t. ErrDuplicate when its id or hash exists.
+// CreateAPIToken stores t, defaulting an empty scope to admin. ErrDuplicate when its id or hash exists.
 func (s *Store) CreateAPIToken(ctx context.Context, t APIToken) error {
+	if t.Scope == "" {
+		t.Scope = ScopeAdmin
+	}
+	if exp := t.ExpiresAt; exp != nil && (exp.Before(time.Unix(0, math.MinInt64)) || exp.After(time.Unix(0, math.MaxInt64))) {
+		return errors.New("store: API token expiry is outside the Unix nanosecond range")
+	}
 	_, err := s.db.ExecContext(ctx,
-		"INSERT INTO api_tokens (id, name, prefix, hash, created_at, last_used_at) VALUES (?, ?, ?, ?, ?, ?)",
-		t.ID, t.Name, t.Prefix, t.Hash, t.CreatedAt.UnixNano(), nanos(t.LastUsedAt))
+		`INSERT INTO api_tokens (id, name, prefix, hash, created_at, last_used_at, scope, expires_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Name, t.Prefix, t.Hash, t.CreatedAt.UnixNano(), nanos(t.LastUsedAt), t.Scope, nanos(t.ExpiresAt))
 	if err != nil {
 		return fmt.Errorf("store: create api token %q: %w", t.Name, mapErr(err))
 	}
 	return nil
 }
 
-const apiTokenCols = "id, name, prefix, hash, created_at, last_used_at" //nolint:gosec // G101: column names, not a credential.
+const apiTokenCols = "id, name, prefix, hash, created_at, last_used_at, scope, expires_at" //nolint:gosec // G101: column names, not a credential.
 
 func scanAPIToken(sc interface{ Scan(...any) error }) (APIToken, error) {
 	var (
-		t        APIToken
-		created  int64
-		lastUsed sql.NullInt64
+		t                 APIToken
+		created           int64
+		lastUsed, expires sql.NullInt64
 	)
-	if err := sc.Scan(&t.ID, &t.Name, &t.Prefix, &t.Hash, &created, &lastUsed); err != nil {
+	if err := sc.Scan(&t.ID, &t.Name, &t.Prefix, &t.Hash, &created, &lastUsed, &t.Scope, &expires); err != nil {
 		return APIToken{}, err
 	}
 	t.CreatedAt = time.Unix(0, created).UTC()
 	if lastUsed.Valid {
 		at := time.Unix(0, lastUsed.Int64).UTC()
 		t.LastUsedAt = &at
+	}
+	if expires.Valid {
+		at := time.Unix(0, expires.Int64).UTC()
+		t.ExpiresAt = &at
 	}
 	return t, nil
 }

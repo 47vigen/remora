@@ -67,6 +67,45 @@ func (e AliasKind) Valid() bool {
 	}
 }
 
+// Defines values for ApiTokenScope.
+const (
+	Admin   ApiTokenScope = "admin"
+	Operate ApiTokenScope = "operate"
+	Read    ApiTokenScope = "read"
+)
+
+// Valid indicates whether the value is a known member of the ApiTokenScope enum.
+func (e ApiTokenScope) Valid() bool {
+	switch e {
+	case Admin:
+		return true
+	case Operate:
+		return true
+	case Read:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AuditEntryPrincipal.
+const (
+	AuditEntryPrincipalSession AuditEntryPrincipal = "session"
+	AuditEntryPrincipalToken   AuditEntryPrincipal = "token"
+)
+
+// Valid indicates whether the value is a known member of the AuditEntryPrincipal enum.
+func (e AuditEntryPrincipal) Valid() bool {
+	switch e {
+	case AuditEntryPrincipalSession:
+		return true
+	case AuditEntryPrincipalToken:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ChangeKind.
 const (
 	ChangeKindAccountStrategy ChangeKind = "account_strategy"
@@ -496,25 +535,31 @@ type AliasList struct {
 
 // ApiToken defines model for ApiToken.
 type ApiToken struct {
-	CreatedAt  time.Time  `json:"created_at"`
-	Id         string     `json:"id"`
-	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
-	Name       string     `json:"name"`
-	Prefix     string     `json:"prefix"`
+	CreatedAt  time.Time      `json:"created_at"`
+	ExpiresAt  *time.Time     `json:"expires_at,omitempty"`
+	Id         string         `json:"id"`
+	LastUsedAt *time.Time     `json:"last_used_at,omitempty"`
+	Name       string         `json:"name"`
+	Prefix     string         `json:"prefix"`
+	Scope      *ApiTokenScope `json:"scope,omitempty"`
 }
 
 // ApiTokenCreate defines model for ApiTokenCreate.
 type ApiTokenCreate struct {
-	Name string `json:"name"`
+	ExpiresAt *time.Time     `json:"expires_at,omitempty"`
+	Name      string         `json:"name"`
+	Scope     *ApiTokenScope `json:"scope,omitempty"`
 }
 
 // ApiTokenCreated defines model for ApiTokenCreated.
 type ApiTokenCreated struct {
-	CreatedAt  time.Time  `json:"created_at"`
-	Id         string     `json:"id"`
-	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
-	Name       string     `json:"name"`
-	Prefix     string     `json:"prefix"`
+	CreatedAt  time.Time      `json:"created_at"`
+	ExpiresAt  *time.Time     `json:"expires_at,omitempty"`
+	Id         string         `json:"id"`
+	LastUsedAt *time.Time     `json:"last_used_at,omitempty"`
+	Name       string         `json:"name"`
+	Prefix     string         `json:"prefix"`
+	Scope      *ApiTokenScope `json:"scope,omitempty"`
 
 	// Value The token's value, returned only when it is created.
 	Value string `json:"value"`
@@ -524,6 +569,37 @@ type ApiTokenCreated struct {
 type ApiTokenList struct {
 	Items []ApiToken `json:"items"`
 	Total int        `json:"total"`
+}
+
+// ApiTokenScope defines model for ApiTokenScope.
+type ApiTokenScope string
+
+// AuditEntry defines model for AuditEntry.
+type AuditEntry struct {
+	At time.Time `json:"at"`
+
+	// Diff Target and submitted changes where applicable. Secrets are masked as `[set]`.
+	Diff map[string]interface{} `json:"diff"`
+	Id   int64                  `json:"id"`
+
+	// OperationId The OpenAPI operationId of the action.
+	OperationId string              `json:"operation_id"`
+	Principal   AuditEntryPrincipal `json:"principal"`
+
+	// TokenId Present for a token principal.
+	TokenId *string `json:"token_id,omitempty"`
+
+	// TokenName The token name at the time of the action.
+	TokenName *string `json:"token_name,omitempty"`
+}
+
+// AuditEntryPrincipal defines model for AuditEntry.Principal.
+type AuditEntryPrincipal string
+
+// AuditList defines model for AuditList.
+type AuditList struct {
+	Items []AuditEntry `json:"items"`
+	Total int          `json:"total"`
 }
 
 // ChainTarget defines model for ChainTarget.
@@ -1046,6 +1122,18 @@ type ListAliasesParams struct {
 	Kind *AliasKind `form:"kind,omitempty" json:"kind,omitempty"`
 }
 
+// ListAuditParams defines parameters for ListAudit.
+type ListAuditParams struct {
+	// Limit The page size.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset The number of items to skip.
+	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+
+	// Operation Filter by exact OpenAPI operationId (e.g. `updateAccount`).
+	Operation *string `form:"operation,omitempty" json:"operation,omitempty"`
+}
+
 // ListCoolingParams defines parameters for ListCooling.
 type ListCoolingParams struct {
 	// Limit The page size.
@@ -1468,6 +1556,11 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /api/aliases/{name}/chain (the `GetAliasChain` operationId).
 	GetAliasChain(ctx context.Context, name AliasName, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListAudit List audited management actions, newest recorded first.
+	//
+	// Corresponds with GET /api/audit (the `ListAudit` operationId).
+	ListAudit(ctx context.Context, params *ListAuditParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// LoginWithBody Sign in as the admin and receive a session cookie.
 	//
@@ -2149,6 +2242,21 @@ func (c *Client) UpdateAlias(ctx context.Context, name AliasName, body UpdateAli
 // Corresponds with GET /api/aliases/{name}/chain (the `GetAliasChain` operationId).
 func (c *Client) GetAliasChain(ctx context.Context, name AliasName, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetAliasChainRequest(c.Server, name)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListAudit List audited management actions, newest recorded first.
+//
+// Corresponds with GET /api/audit (the `ListAudit` operationId).
+func (c *Client) ListAudit(ctx context.Context, params *ListAuditParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListAuditRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -3654,6 +3762,84 @@ func NewGetAliasChainRequest(server string, name AliasName) (*http.Request, erro
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListAuditRequest constructs an http.Request for the ListAudit method
+func NewListAuditRequest(server string, params *ListAuditParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/audit")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Offset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "offset", *params.Offset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Operation != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "operation", *params.Operation, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
@@ -5414,6 +5600,13 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /api/aliases/{name}/chain (the `GetAliasChain` operationId).
 	GetAliasChainWithResponse(ctx context.Context, name AliasName, reqEditors ...RequestEditorFn) (*GetAliasChainResponse, error)
 
+	// ListAuditWithResponse List audited management actions, newest recorded first.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/audit (the `ListAudit` operationId).
+	ListAuditWithResponse(ctx context.Context, params *ListAuditParams, reqEditors ...RequestEditorFn) (*ListAuditResponse, error)
+
 	// LoginWithBodyWithResponse Sign in as the admin and receive a session cookie.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
@@ -6572,6 +6765,54 @@ func (r GetAliasChainResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetAliasChainResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListAuditResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *AuditList
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListAuditResponse) GetJSON200() *AuditList {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ListAuditResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ListAuditResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListAuditResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListAuditResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListAuditResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -8361,6 +8602,19 @@ func (c *ClientWithResponses) GetAliasChainWithResponse(ctx context.Context, nam
 	return ParseGetAliasChainResponse(rsp)
 }
 
+// ListAuditWithResponse List audited management actions, newest recorded first.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/audit (the `ListAudit` operationId).
+func (c *ClientWithResponses) ListAuditWithResponse(ctx context.Context, params *ListAuditParams, reqEditors ...RequestEditorFn) (*ListAuditResponse, error) {
+	rsp, err := c.ListAudit(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListAuditResponse(rsp)
+}
+
 // LoginWithBodyWithResponse Sign in as the admin and receive a session cookie.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
@@ -9494,6 +9748,39 @@ func ParseGetAliasChainResponse(rsp *http.Response) (*GetAliasChainResponse, err
 	return response, nil
 }
 
+// ParseListAuditResponse parses an HTTP response from a ListAuditWithResponse call
+func ParseListAuditResponse(rsp *http.Response) (*ListAuditResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListAuditResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AuditList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseLoginResponse parses an HTTP response from a LoginWithResponse call
 func ParseLoginResponse(rsp *http.Response) (*LoginResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -10565,6 +10852,9 @@ type ServerInterface interface {
 	// GetAliasChain Get the compiled chain of a stored alias, with cooling members marked.
 	// (GET /api/aliases/{name}/chain)
 	GetAliasChain(w http.ResponseWriter, r *http.Request, name AliasName)
+	// ListAudit List audited management actions, newest recorded first.
+	// (GET /api/audit)
+	ListAudit(w http.ResponseWriter, r *http.Request, params ListAuditParams)
 	// Login Sign in as the admin and receive a session cookie.
 	// (POST /api/auth/login)
 	Login(w http.ResponseWriter, r *http.Request)
@@ -11203,6 +11493,65 @@ func (siw *ServerInterfaceWrapper) GetAliasChain(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetAliasChain(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListAudit operation middleware
+func (siw *ServerInterfaceWrapper) ListAudit(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListAuditParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "operation" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "operation", r.URL.Query(), &params.Operation, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "operation"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "operation", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAudit(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12379,6 +12728,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/keys/{id}", wrapper.GetKey)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/api/keys/{id}", wrapper.UpdateKey)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/keys/{id}/usage", wrapper.GetKeyUsage)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/audit", wrapper.ListAudit)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/logs", wrapper.ListLogs)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/logs/{id}", wrapper.GetLog)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/stats", wrapper.GetStats)
@@ -13098,6 +13448,45 @@ type GetAliasChaindefaultJSONResponse struct {
 }
 
 func (response GetAliasChaindefaultJSONResponse) VisitGetAliasChainResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAuditRequestObject struct {
+	Params ListAuditParams
+}
+
+type ListAuditResponseObject interface {
+	VisitListAuditResponse(w http.ResponseWriter) error
+}
+
+type ListAudit200JSONResponse AuditList
+
+func (response ListAudit200JSONResponse) VisitListAuditResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAuditdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListAuditdefaultJSONResponse) VisitListAuditResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -14343,6 +14732,9 @@ type StrictServerInterface interface {
 	// GetAliasChain Get the compiled chain of a stored alias, with cooling members marked.
 	// (GET /api/aliases/{name}/chain)
 	GetAliasChain(ctx context.Context, request GetAliasChainRequestObject) (GetAliasChainResponseObject, error)
+	// ListAudit List audited management actions, newest recorded first.
+	// (GET /api/audit)
+	ListAudit(ctx context.Context, request ListAuditRequestObject) (ListAuditResponseObject, error)
 	// Login Sign in as the admin and receive a session cookie.
 	// (POST /api/auth/login)
 	Login(ctx context.Context, request LoginRequestObject) (LoginResponseObject, error)
@@ -15007,6 +15399,32 @@ func (sh *strictHandler) GetAliasChain(w http.ResponseWriter, r *http.Request, n
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetAliasChainResponseObject); ok {
 		if err := validResponse.VisitGetAliasChainResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListAudit operation middleware
+func (sh *strictHandler) ListAudit(w http.ResponseWriter, r *http.Request, params ListAuditParams) {
+	var request ListAuditRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListAudit(ctx, request.(ListAuditRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListAudit")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListAuditResponseObject); ok {
+		if err := validResponse.VisitListAuditResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

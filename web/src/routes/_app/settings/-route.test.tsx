@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { client } from "../../../client/client.gen";
@@ -40,6 +40,8 @@ test("a created token's value is shown once and kept nowhere else", async () => 
   expect(await screen.findByDisplayValue("rt-secret-456")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Done" }));
   await waitFor(() => expect(document.body.innerHTML).not.toContain("rt-secret-456"));
+  const post = requests.find((r) => r.method === "POST" && new URL(r.url).pathname === "/api/settings/tokens")!;
+  expect(await post.json()).toEqual({ name: "deploy", scope: "admin" });
   const cached = [
     ...queryClient
       .getQueryCache()
@@ -51,6 +53,55 @@ test("a created token's value is shown once and kept nowhere else", async () => 
       .map((m) => m.state.data),
   ];
   expect(JSON.stringify(cached)).not.toContain("rt-secret-456");
+});
+
+test("token creation sends the selected scope and local expiry as an ISO timestamp", async () => {
+  const { requests } = renderRoute("/settings", async (req, url) => {
+    if (url.pathname !== "/api/settings/tokens") return;
+    if (req.method === "POST")
+      return Response.json({ ...token, ...((await req.json()) as object), value: "rt-secret-456" }, { status: 201 });
+    return Response.json({ items: [token], total: 1 });
+  });
+  await screen.findByText("rt-ab…");
+  await userEvent.click(screen.getByRole("button", { name: "New token" }));
+  const dialog = within(await screen.findByRole("dialog"));
+  await userEvent.type(dialog.getByRole("textbox", { name: "Name" }), "monitor");
+  await userEvent.click(dialog.getByRole("button", { name: /Scope/ }));
+  await userEvent.click(await screen.findByRole("option", { name: "Read" }));
+  const expiry = "2099-10-14T17:15";
+  fireEvent.change(dialog.getByLabelText("Expiry"), { target: { value: expiry } });
+  await userEvent.click(dialog.getByRole("button", { name: "Create token" }));
+  expect(await screen.findByRole("dialog", { name: "Token created" })).toBeInTheDocument();
+  const post = requests.find((r) => r.method === "POST" && new URL(r.url).pathname === "/api/settings/tokens")!;
+  expect(await post.json()).toEqual({ name: "monitor", scope: "read", expires_at: new Date(expiry).toISOString() });
+});
+
+test("the audit log renders writes, pages, and filters by exact operation", async () => {
+  const { requests } = renderRoute("/settings", (_req, url) => {
+    if (url.pathname !== "/api/audit") return;
+    const operation = url.searchParams.get("operation");
+    const first = url.searchParams.get("offset") === "0";
+    const entry = { id: 26, at: "2026-10-14T09:00:00Z", operation_id: "updateAccount", diff: { enabled: false } };
+    return Response.json({
+      total: operation ? 1 : 26,
+      items:
+        first && !operation
+          ? [{ ...entry, principal: "token", token_name: "deploy" }]
+          : [{ ...entry, id: 1, principal: "session", operation_id: "createAlias", diff: { name: "fast" } }],
+    });
+  });
+  const audit = within(await screen.findByRole("region", { name: "Audit" }));
+  const write = await audit.findByRole("row", { name: /deploy.*updateAccount/ });
+  expect(within(write).getByText(/"enabled": false/)).toBeInTheDocument();
+  expect(write.querySelector("time")).toHaveAttribute("datetime", "2026-10-14T09:00:00Z");
+  await userEvent.click(audit.getByLabelText("Next"));
+  expect(await audit.findByRole("row", { name: /Session.*createAlias/ })).toBeInTheDocument();
+  expect(requests.map(describeRequest)).toContain("GET /api/audit?limit=25&offset=25");
+  await userEvent.type(audit.getByRole("searchbox", { name: "Filter by operation ID" }), "createAlias");
+  await waitFor(() =>
+    expect(requests.map(describeRequest)).toContain("GET /api/audit?limit=25&offset=0&operation=createAlias"),
+  );
+  expect(await audit.findByText("1–1 of 1")).toBeInTheDocument();
 });
 
 test("import reviews the dry run, then applies the same document", async () => {
@@ -164,7 +215,7 @@ test("the page is one column of titled sections with an in-page nav", async () =
   renderRoute("/settings", () => undefined);
   const nav = await screen.findByRole("navigation", { name: "Settings sections" });
   const links = within(nav).getAllByRole("link");
-  expect(links.map((a) => a.getAttribute("href"))).toEqual(["#password", "#tokens", "#backup", "#about"]);
-  for (const name of ["Password", "API tokens", "Import / export", "About"])
+  expect(links.map((a) => a.getAttribute("href"))).toEqual(["#password", "#tokens", "#audit", "#backup", "#about"]);
+  for (const name of ["Password", "API tokens", "Audit", "Import / export", "About"])
     expect(screen.getByRole("region", { name })).toBeInTheDocument();
 });

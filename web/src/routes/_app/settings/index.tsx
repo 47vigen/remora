@@ -1,5 +1,18 @@
 import { ArrowDownToLine, ArrowUpFromLine, Plus } from "@gravity-ui/icons";
-import { Alert, Button, FieldError, Form, Input, Label, Modal, Skeleton, TextField } from "@heroui/react";
+import {
+  Alert,
+  Button,
+  Description,
+  FieldError,
+  Form,
+  Input,
+  Label,
+  ListBox,
+  Modal,
+  Select,
+  Skeleton,
+  TextField,
+} from "@heroui/react";
 import { type MutationFunctionContext, useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
@@ -7,6 +20,7 @@ import { FileTrigger } from "react-aria-components";
 
 import {
   type ApiToken,
+  type ApiTokenScope,
   type ApplyConfigData,
   type CreateApiTokenData,
   exportConfig,
@@ -30,6 +44,7 @@ import { downloadFile } from "../../../lib/download";
 import { type ListSearch, parseListSearch } from "../../../lib/list-search";
 import { invalidateOps } from "../../../lib/query";
 import { About } from "./-components/About";
+import { AuditList } from "./-components/AuditList";
 import { ImportReview } from "./-components/ImportReview";
 import { PasswordForm } from "./-components/PasswordForm";
 import { TokensTable } from "./-components/TokensTable";
@@ -38,6 +53,7 @@ import { appliedBeforeError, formatChanges, type GeneratedKey, generatedKeys, wi
 const SECTIONS = [
   { id: "password", label: "Password" },
   { id: "tokens", label: "API tokens" },
+  { id: "audit", label: "Audit" },
   { id: "backup", label: "Import / export" },
   { id: "about", label: "About" },
 ] as const;
@@ -64,10 +80,7 @@ function ErrorAlert({ title, error }: { title: string; error: unknown }) {
 function SettingsPage() {
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader
-        title="Settings"
-        description="The admin password, management API tokens, and the configuration file."
-      />
+      <PageHeader title="Settings" description="Manage the admin password, API tokens, audit log, and configuration." />
       <div className="grid gap-8 lg:grid-cols-[11rem_minmax(0,1fr)]">
         <nav aria-label="Settings sections" className="sticky top-8 hidden self-start lg:block">
           <ul className="border-border flex flex-col border-l">
@@ -90,9 +103,12 @@ function SettingsPage() {
           <Panel
             id="tokens"
             title="API tokens"
-            description="Tokens call the management API and the MCP server at /mcp, with the same rights as the admin password."
+            description="Tokens call the management API and the MCP server at /mcp. Their scope controls what they can do."
           >
             <TokensPanel />
+          </Panel>
+          <Panel id="audit" title="Audit" description="Successful management writes, newest first.">
+            <AuditList />
           </Panel>
           <Panel id="backup" title="Import / export" description="Providers, aliases and keys as one remora.yaml file.">
             <BackupPanel />
@@ -136,7 +152,14 @@ function Panel({
 
 function PasswordPanel() {
   const [done, setDone] = useState(false);
-  const change = useMutation({ ...changePasswordMutation(), onSuccess: () => setDone(true) });
+  const queryClient = Route.useRouteContext({ select: (c) => c.queryClient });
+  const change = useMutation({
+    ...changePasswordMutation(),
+    onSuccess: () => {
+      setDone(true);
+      void invalidateOps(queryClient, "listAudit");
+    },
+  });
   return (
     <div className="flex flex-col gap-4">
       {done ? (
@@ -179,7 +202,7 @@ function TokensPanel() {
     ...deleteApiTokenMutation(),
     onSuccess: async () => {
       setDeleting(null);
-      await invalidateOps(queryClient, "listApiTokens");
+      await invalidateOps(queryClient, "listApiTokens", "listAudit");
     },
   });
 
@@ -253,6 +276,12 @@ function TokensPanel() {
   );
 }
 
+const TOKEN_SCOPES = [
+  { id: "read", label: "Read" },
+  { id: "operate", label: "Operate" },
+  { id: "admin", label: "Admin" },
+] as const;
+
 /** Same rule as a client key: the value goes only to SecretOnce, never into a cache or the URL. */
 function CreateTokenModal({
   isOpen,
@@ -265,6 +294,8 @@ function CreateTokenModal({
 }) {
   const queryClient = Route.useRouteContext({ select: (c) => c.queryClient });
   const [name, setName] = useState("");
+  const [scope, setScope] = useState<ApiTokenScope>("admin");
+  const [expiry, setExpiry] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const base = createApiTokenMutation();
   const create = useMutation({
@@ -276,11 +307,16 @@ function CreateTokenModal({
     },
     onSuccess: () => {
       setName("");
+      setScope("admin");
+      setExpiry("");
       setSubmitted(false);
-      void invalidateOps(queryClient, "listApiTokens");
+      void invalidateOps(queryClient, "listApiTokens", "listAudit");
     },
   });
   const nameError = submitted && name.trim() === "" ? "Enter a name." : undefined;
+  const expiryDate = expiry ? new Date(expiry) : undefined;
+  const invalidExpiry = expiryDate !== undefined && !Number.isFinite(expiryDate.getTime());
+  const expiryError = submitted && invalidExpiry ? "Enter a valid expiry date and time." : undefined;
   const close = () => {
     create.reset();
     onClose();
@@ -295,8 +331,8 @@ function CreateTokenModal({
             onSubmit={(e) => {
               e.preventDefault();
               setSubmitted(true);
-              if (name.trim() === "") return;
-              create.mutate({ body: { name: name.trim() } });
+              if (name.trim() === "" || invalidExpiry) return;
+              create.mutate({ body: { name: name.trim(), scope, expires_at: expiryDate?.toISOString() } });
             }}
           >
             <Modal.Header>
@@ -308,6 +344,32 @@ function CreateTokenModal({
                 <Label>Name</Label>
                 <Input placeholder="deploy" />
                 <FieldError>{nameError}</FieldError>
+              </TextField>
+              <Select
+                value={scope}
+                onChange={(key) => setScope(TOKEN_SCOPES.find(({ id }) => id === key)?.id ?? scope)}
+              >
+                <Label>Scope</Label>
+                <Select.Trigger>
+                  <Select.Value />
+                  <Select.Indicator />
+                </Select.Trigger>
+                <Select.Popover>
+                  <ListBox aria-label="Scope">
+                    {TOKEN_SCOPES.map(({ id, label }) => (
+                      <ListBox.Item key={id} id={id} textValue={label}>
+                        {label}
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                    ))}
+                  </ListBox>
+                </Select.Popover>
+              </Select>
+              <TextField value={expiry} onChange={setExpiry} isInvalid={expiryError !== undefined}>
+                <Label>Expiry</Label>
+                <Input type="datetime-local" />
+                <Description>Local time. Leave blank for no expiry.</Description>
+                <FieldError>{expiryError}</FieldError>
               </TextField>
               {create.error ? <ErrorAlert title="Could not create the token" error={create.error} /> : null}
             </Modal.Body>

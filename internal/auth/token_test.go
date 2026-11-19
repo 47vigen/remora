@@ -49,7 +49,7 @@ func TestAPIToken(t *testing.T) {
 	}
 
 	p, err := s.Authenticate(bearerReq(value))
-	if err != nil || p != (Principal{Via: "token"}) {
+	if err != nil || p != (Principal{Via: "token", TokenID: tok.ID, TokenName: "ci", Scope: "admin"}) {
 		t.Fatalf("Authenticate(bearer) = (%+v, %v)", p, err)
 	}
 	got, err := st.APITokenByHash(ctx, hashToken(value))
@@ -198,4 +198,50 @@ func TestTokenLastUsedFlushFailureIsLogged(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+}
+
+func TestExpiredAPITokenReturnsUnauthorized(t *testing.T) {
+	ctx := t.Context()
+	s, _, c := newService(t)
+	defer s.StartTokenTouches(ctx, slog.Default())()
+	expiry := c.now().Add(time.Hour)
+	_, value, err := s.CreateScopedToken(ctx, "ci", "read", &expiry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := s.Middleware(nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	c.add(time.Hour - time.Nanosecond)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, bearerReq(value))
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("before expiry: HTTP %d, want 204", w.Code)
+	}
+	c.add(time.Nanosecond)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, bearerReq(value))
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("at expiry: HTTP %d, want 401", w.Code)
+	}
+	list, err := s.ListTokens(ctx)
+	if err != nil || len(list) != 1 || list[0].LastUsedAt == nil || !list[0].LastUsedAt.Equal(expiry.Add(-time.Nanosecond)) {
+		t.Errorf("only the accepted request should update last used: %v", err)
+	}
+}
+
+func TestAPITokenPrincipalScope(t *testing.T) {
+	s, _, _ := newService(t)
+	for _, scope := range []string{"read", "operate", "admin"} {
+		t.Run(scope, func(t *testing.T) {
+			tok, value, err := s.CreateScopedToken(t.Context(), "automation", scope, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := Principal{Via: "token", TokenID: tok.ID, TokenName: "automation", Scope: scope}
+			if p, err := s.Authenticate(bearerReq(value)); err != nil || p != want {
+				t.Errorf("Authenticate = (%+v, %v), want %+v", p, err, want)
+			}
+		})
+	}
 }

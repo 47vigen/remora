@@ -16,11 +16,12 @@ import (
 
 // InspectIn is remora_inspect's input.
 type InspectIn struct {
-	Kind   string `json:"kind" jsonschema:"providers|accounts|aliases|keys|tokens|cooling|quota|account_strategies|logins"`
-	ID     string `json:"id,omitempty" jsonschema:"name or id; omitted lists. For logins the login state, required. For quota a provider name"`
-	Q      string `json:"q,omitempty" jsonschema:"free-text search when listing"`
-	Limit  int    `json:"limit,omitempty" jsonschema:"page size when listing, default 50"`
-	Offset int    `json:"offset,omitempty"`
+	Kind      string `json:"kind" jsonschema:"providers|accounts|aliases|keys|tokens|cooling|quota|account_strategies|logins|audit"`
+	Operation string `json:"operation,omitempty" jsonschema:"exact OpenAPI operationId filter for audit"`
+	ID        string `json:"id,omitempty" jsonschema:"name or id; omitted lists. For logins the login state, required. For quota a provider name"`
+	Q         string `json:"q,omitempty" jsonschema:"free-text search when listing"`
+	Limit     int    `json:"limit,omitempty" jsonschema:"page size when listing, default 50"`
+	Offset    int    `json:"offset,omitempty"`
 }
 
 // LogsIn is remora_logs' input.
@@ -61,13 +62,13 @@ type ConfigExportOut struct {
 // maxBody bounds each log body in a tool result; clients cap a result near 25k tokens.
 const maxBody = 4096
 
-const inspectKinds = "providers, accounts, aliases, keys, tokens, cooling, quota, account_strategies, logins"
+const inspectKinds = "providers, accounts, aliases, keys, tokens, cooling, quota, account_strategies, logins, audit"
 
 func addRead(s *sdk.Server, c *gen.ClientWithResponses) {
 	add(s, &sdk.Tool{
 		Name: "remora_inspect",
 		Description: "List or show one: providers, accounts, aliases (with the compiled chain and cooling), keys " +
-			"(with usage), tokens (listed only), cooling, quota, account_strategies, logins (by state).",
+			"(with usage), tokens (listed only), cooling, quota, account_strategies, logins (by state), audit (paged management actions).",
 		Annotations: readOnly,
 	}, func(ctx context.Context, in InspectIn) (any, error) { return inspect(ctx, c, in) })
 
@@ -210,6 +211,11 @@ func inspect(ctx context.Context, c gen.ClientWithResponsesInterface, in Inspect
 			return nil, toolError("Tokens are listed only.")
 		}
 		return ok200(c.ListApiTokensWithResponse(ctx, &gen.ListApiTokensParams{Limit: &limit, Offset: offset, Q: q}))
+	case "audit":
+		if in.ID != "" {
+			return nil, toolError("Audit entries are listed only.")
+		}
+		return ok200(c.ListAuditWithResponse(ctx, &gen.ListAuditParams{Limit: &limit, Offset: offset, Operation: opt(in.Operation)}))
 	case "cooling":
 		if in.ID != "" {
 			return nil, toolError("Cooling is listed only.")

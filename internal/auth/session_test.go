@@ -51,13 +51,13 @@ func TestLoginLogout(t *testing.T) {
 	}
 	tok, exp, err := s.Login(ctx, "192.0.2.1", testPassword)
 	if err != nil || tok == "" {
-		t.Fatalf("Login = (%q, %v)", tok, err)
+		t.Fatalf("Login failed or returned an empty session: %v", err)
 	}
 	if want := newClock().now().Add(SessionTTL); !exp.Equal(want) {
 		t.Errorf("expires = %v, want %v", exp, want)
 	}
 	p, err := s.Authenticate(cookieReq(tok))
-	if err != nil || p != (Principal{Via: "session"}) {
+	if err != nil || p != (Principal{Via: "session", Scope: "admin"}) {
 		t.Fatalf("Authenticate = (%+v, %v)", p, err)
 	}
 	if err := s.Logout(ctx, tok); err != nil {

@@ -25,6 +25,7 @@ type mcpEnv struct {
 	svc  *auth.Service
 	st   *store.Store
 	srv  *httptest.Server
+	api  http.Handler
 	mu   sync.Mutex
 	seen []string // Authorization of each /api call
 }
@@ -39,12 +40,12 @@ func newMCPEnv(t *testing.T) *mcpEnv {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	e := &mcpEnv{svc: auth.NewService(st, nil), st: st}
-	apiH := api.New(api.Deps{Auth: e.svc}).Handler()
+	e.api = api.New(api.Deps{Auth: e.svc, Audit: st}).Handler()
 	recording := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		e.mu.Lock()
 		e.seen = append(e.seen, r.Header.Get("Authorization"))
 		e.mu.Unlock()
-		apiH.ServeHTTP(w, r)
+		e.api.ServeHTTP(w, r)
 	})
 	c, err := InProcess(recording)
 	if err != nil {
@@ -259,5 +260,41 @@ func TestOversizedBodyIsLeftToTheSDK(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Errorf("oversized body = %d, want 413 from the go-sdk", resp.StatusCode)
+	}
+}
+
+func TestInspectAuditWithReadToken(t *testing.T) {
+	e := newMCPEnv(t)
+	admin := e.token(t, "writer")
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/settings/tokens", strings.NewReader(`{"name":"created"}`))
+	req.Header.Set("Authorization", "Bearer "+admin)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	e.api.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create token: status %d", w.Code)
+	}
+	_, reader, err := e.svc.CreateScopedToken(t.Context(), "reader", "read", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs, err := sdk.NewClient(&sdk.Implementation{Name: "test", Version: "0"}, nil).Connect(t.Context(), &sdk.StreamableClientTransport{
+		Endpoint: e.srv.URL, DisableStandaloneSSE: true, HTTPClient: &http.Client{Transport: bearerTransport(reader)},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cs.Close() })
+	res, out := call(t, cs, "remora_inspect", map[string]any{"kind": "audit", "operation": "createApiToken", "limit": 1})
+	if res.IsError || out["total"] != float64(1) {
+		t.Fatal("inspect did not return the filtered audit page")
+	}
+	items, ok := out["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatal("inspect did not return one audit entry")
+	}
+	row, ok := items[0].(map[string]any)
+	if !ok || row["operation_id"] != "createApiToken" || row["token_name"] != "writer" {
+		t.Fatal("inspect returned the wrong audit entry")
 	}
 }

@@ -32,3 +32,23 @@ test("rows show name, prefix, created and last used, and delete reports the toke
   await userEvent.click(within(second!).getByRole("button", { name: "Delete old" }));
   expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({ id: "t2" }));
 });
+
+test("rows show scope and expiry, defaulting to admin and no expiry", () => {
+  render(
+    <TokensTable
+      items={[
+        { ...t, scope: "operate", expires_at: "2026-10-14T11:00:00Z" },
+        { ...t, id: "t2" },
+      ]}
+      now={new Date("2026-10-14T10:00:00Z")}
+      onDelete={() => {}}
+    />,
+  );
+  expect(screen.getByRole("columnheader", { name: "Scope" })).toBeInTheDocument();
+  expect(screen.getByRole("columnheader", { name: "Expiry" })).toBeInTheDocument();
+  const [, first, second] = screen.getAllByRole("row");
+  expect(first).toHaveTextContent("operate");
+  expect(within(first!).getByText("in 1h")).toHaveAttribute("datetime", "2026-10-14T11:00:00Z");
+  expect(second).toHaveTextContent("admin");
+  expect(second).toHaveTextContent("Never");
+});

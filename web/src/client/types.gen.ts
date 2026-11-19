@@ -475,12 +475,16 @@ export type PasswordChange = {
     new: string;
 };
 
+export type ApiTokenScope = 'read' | 'operate' | 'admin';
+
 export type ApiToken = {
     id: string;
     name: string;
     prefix: string;
     created_at: string;
     last_used_at?: string;
+    scope?: ApiTokenScope;
+    expires_at?: string;
 };
 
 export type ApiTokenCreated = ApiToken & {
@@ -492,6 +496,37 @@ export type ApiTokenCreated = ApiToken & {
 
 export type ApiTokenCreate = {
     name: string;
+    scope?: ApiTokenScope;
+    expires_at?: string;
+};
+
+export type AuditEntry = {
+    id: number;
+    at: string;
+    principal: 'session' | 'token';
+    /**
+     * Present for a token principal.
+     */
+    token_id?: string;
+    /**
+     * The token name at the time of the action.
+     */
+    token_name?: string;
+    /**
+     * The OpenAPI operationId of the action.
+     */
+    operation_id: string;
+    /**
+     * Target and submitted changes where applicable. Secrets are masked as `[set]`.
+     */
+    diff: {
+        [key: string]: unknown;
+    };
+};
+
+export type AuditList = {
+    items: Array<AuditEntry>;
+    total: number;
 };
 
 export type ApiTokenList = {
@@ -1874,6 +1909,46 @@ export type GetKeyUsageResponses = {
 };
 
 export type GetKeyUsageResponse = GetKeyUsageResponses[keyof GetKeyUsageResponses];
+
+export type ListAuditData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * The page size.
+         */
+        limit?: number;
+        /**
+         * The number of items to skip.
+         */
+        offset?: number;
+        /**
+         * Filter by exact OpenAPI operationId (e.g. `updateAccount`).
+         */
+        operation?: string;
+    };
+    url: '/api/audit';
+};
+
+export type ListAuditErrors = {
+    /**
+     * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     *
+     */
+    default: Error;
+};
+
+export type ListAuditError = ListAuditErrors[keyof ListAuditErrors];
+
+export type ListAuditResponses = {
+    /**
+     * A page of audit entries.
+     */
+    200: AuditList;
+};
+
+export type ListAuditResponse = ListAuditResponses[keyof ListAuditResponses];
 
 export type ListLogsData = {
     body?: never;
