@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -90,7 +89,7 @@ func New(upstream *url.URL, st *store.Store, log *slog.Logger) *Proxy {
 		ErrorHandler:   p.errorHandler,
 		ErrorLog:       slog.NewLogLogger(log.Handler(), slog.LevelWarn),
 	}
-	// The front door sets longer deadlines for subscription and transcription requests.
+	// The front door owns the deadlines when a single API-key attempt cannot bound the request.
 	transport := p.transport.Clone()
 	transport.ResponseHeaderTimeout = 0
 	uncapped := *p.rp
@@ -333,15 +332,12 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt route, sh sha
 	out.Body = &dropReader{b: body}
 	out.ContentLength = int64(len(body))
 	out.TransferEncoding = nil
-	// Use the longest limit in the chain: any subscription member leaves the deadline to the front door.
-	if transcription || (isAlias && len(chain) == 0) || slices.ContainsFunc(chain, func(t alias.Target) bool {
-		return cliproxyapi.IsSubscription(t.Provider)
-	}) {
+	// Sequential fallbacks need the front door's per-attempt deadlines, not one shared cap.
+	if transcription || len(chain) != 1 || cliproxyapi.IsSubscription(chain[0].Provider) {
 		p.uncapped.ServeHTTP(w, out)
 		return
 	}
-	// With fallbacks and no response headers, there is no reliable way to identify the failed member.
-	if p.Cooler != nil && len(chain) == 1 {
+	if p.Cooler != nil {
 		info.headerTimeout = cooling.Event{At: time.Now(), Target: chain[0], StatusCode: http.StatusGatewayTimeout}
 	}
 	p.rp.ServeHTTP(w, out)
@@ -445,9 +441,11 @@ func setUpstreamHeaders(h http.Header, vk string) {
 // scrubbed, SSE error events rewritten as they pass. The body itself is never buffered on success.
 func (p *Proxy) modifyResponse(resp *http.Response) error {
 	info := infoFrom(resp.Request.Context())
-	if info.probe != (alias.Target{}) {
-		info.probeStatus = resp.StatusCode
-		info.probeRetry = cooling.RetryAfter(resp.Header.Get("Retry-After"), time.Now())
+	var probe *probeBody
+	if info.probe != (alias.Target{}) && resp.StatusCode != http.StatusSwitchingProtocols {
+		// A body-copy error bypasses ErrorHandler and may unwind the handler.
+		info.probeStatus = http.StatusBadGateway
+		probe = &probeBody{info: info, status: resp.StatusCode, retry: cooling.RetryAfter(resp.Header.Get("Retry-After"), time.Now())}
 	}
 	setRemoraHeaders(resp.Header, info)
 	switch {
@@ -476,7 +474,35 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 	}
 	// Nothing reads the request body past this point; a stream may run for minutes.
 	info.body, info.spans = nil, bodySpans{}
+	if probe != nil {
+		probe.ReadCloser = resp.Body
+		resp.Body = probe
+	}
 	return nil
+}
+
+type probeBody struct {
+	io.ReadCloser
+	info   *reqInfo
+	status int
+	retry  time.Duration
+	eof    bool
+}
+
+func (b *probeBody) Read(p []byte) (int, error) {
+	n, err := 0, io.EOF
+	if !b.eof {
+		n, err = b.ReadCloser.Read(p)
+	}
+	if err == io.EOF {
+		if n > 0 {
+			// Wait until the proxy has written these last bytes before crediting the probe.
+			b.eof = true
+			return n, nil
+		}
+		b.info.probeStatus, b.info.probeRetry = b.status, b.retry
+	}
+	return n, err
 }
 
 // errorHandler answers when the front door cannot be reached or its answer cannot be read. The cause, which names

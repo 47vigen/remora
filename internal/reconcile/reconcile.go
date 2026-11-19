@@ -137,7 +137,7 @@ func (r *Reconciler) sync(ctx context.Context) error {
 		restarts = r.RestartCount()
 	}
 	forceAll := r.lastForce.IsZero() || restarts != r.lastRestarts || now.Sub(r.lastForce) >= every
-	if err := r.runPasses(ctx, nil, false, forceAll); err != nil {
+	if err := r.runPasses(ctx, r.Store.Write, nil, false, forceAll); err != nil {
 		return fmt.Errorf("reconcile: sync: %w", err)
 	}
 	if forceAll {
@@ -150,7 +150,7 @@ func (r *Reconciler) sync(ctx context.Context) error {
 var errStalePass = errors.New("reconcile: store changed during the pass")
 
 // runPasses retries a stale snapshot twice. Unacknowledged mutations must be forced even when the old MAC matches.
-func (r *Reconciler) runPasses(ctx context.Context, p *pass, strict, forceAll bool) (err error) {
+func (r *Reconciler) runPasses(ctx context.Context, commit func(context.Context, func(*store.Tx) error) error, p *pass, strict, forceAll bool) (err error) {
 	defer func() {
 		if err != nil && len(r.pending) != 0 {
 			r.synced.Store(false)
@@ -176,7 +176,7 @@ func (r *Reconciler) runPasses(ctx context.Context, p *pass, strict, forceAll bo
 		if err != nil {
 			return err
 		}
-		err = r.Store.Write(ctx, func(tx *store.Tx) error { return p.commit(ctx, tx) })
+		err = commit(ctx, func(tx *store.Tx) error { return p.commit(ctx, tx) })
 		if errors.Is(err, errStalePass) {
 			p = nil
 			continue
@@ -202,19 +202,20 @@ func (r *Reconciler) Change(ctx context.Context, fn func(ctx context.Context, tx
 	defer r.syncMu.Unlock()
 
 	p := &pass{r: r}
-	undo, err := r.Store.WriteWithUndo(ctx, func(tx *store.Tx) error {
+	change, err := r.Store.WriteWithUndo(ctx, func(tx *store.Tx) error {
 		if err := fn(ctx, tx); err != nil {
 			return err
 		}
 		return p.read(ctx, tx, true)
 	})
 	if err == nil {
-		err = r.runPasses(ctx, p, true, false)
+		err = r.runPasses(ctx, change.Commit, p, true, false)
 		if err == nil {
 			return nil
 		}
 		recovery := context.WithoutCancel(ctx)
-		if undoErr := undo(recovery); undoErr != nil {
+		if undoErr := change.Undo(recovery); undoErr != nil {
+			change.Abandon(recovery)
 			r.synced.Store(false)
 			return fmt.Errorf("reconcile: change: %w", errors.Join(err, fmt.Errorf("compensate store change: %w", undoErr)))
 		}

@@ -44,6 +44,157 @@ func adapterStore(t *testing.T) (*store.Store, *reconcile.Reconciler, *reconcile
 	return st, &reconcile.Reconciler{Store: st, Engine: eng}, eng
 }
 
+type pausedReconcileEngine struct {
+	reconcile.Engine
+	entered, resume chan struct{}
+	refusal         error
+}
+
+func (e pausedReconcileEngine) ListProviders(ctx context.Context) ([]bifrost.Provider, error) {
+	select {
+	case <-e.entered: // Only pause the first pass; a concurrent write can trigger a retry.
+	default:
+		close(e.entered)
+		select {
+		case <-e.resume:
+			if e.refusal != nil {
+				return nil, e.refusal
+			}
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return e.Engine.ListProviders(ctx)
+}
+
+func TestPendingChangeHiddenFromConcurrentRead(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		refusal error
+	}{
+		{name: "accepted"},
+		{name: "refused", refusal: errors.New("engine refused the change")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			st, rec, eng := adapterStore(t)
+			providers := NewProviders(st, rec, nil, nil)
+			if _, err := providers.Create(ctx, Provider{
+				Name: "up", Kind: "openai-compatible", BaseURL: "http://up.test/v1",
+				Keys: []ProviderKey{{Name: "main", Value: store.GenerateKeyValue()}},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			as := NewAliases(st, rec, nil)
+			original := alias.Alias{Name: "original", Kind: alias.KindChat, Members: []alias.Member{{Ref: "up/m"}}}
+			if _, err := as.Put(ctx, original, true); err != nil {
+				t.Fatal(err)
+			}
+			key, value, err := NewKeys(st, rec).Create(ctx, "client", nil, "", true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			checkSnapshot := func(phase string, wantOriginal, wantOther bool) {
+				t.Helper()
+				all, err := st.Aliases(ctx)
+				_, hasOriginal := all[original.Name]
+				_, hasOther := all["other"]
+				if err != nil || hasOriginal != wantOriginal || hasOther != wantOther {
+					t.Errorf("%s: original alias present = %v, unrelated alias present = %v, err = %v; want %v, %v, nil", phase, hasOriginal, hasOther, err, wantOriginal, wantOther)
+				}
+				got, err := st.ClientKeyByValue(ctx, value)
+				if (wantOriginal && (err != nil || got.ID != key.ID)) || (!wantOriginal && !errors.Is(err, store.ErrNotFound)) {
+					t.Errorf("%s: original client key match = %v, err = %v; want match = %v", phase, got.ID == key.ID, err, wantOriginal)
+				}
+			}
+
+			paused := pausedReconcileEngine{Engine: eng, entered: make(chan struct{}), resume: make(chan struct{}), refusal: tc.refusal}
+			rec.Engine = paused
+			done := make(chan struct{})
+			t.Cleanup(func() { <-done })
+			var changeErr error
+			go func() {
+				defer close(done)
+				changeErr = rec.Change(ctx, func(ctx context.Context, tx *store.Tx) error {
+					if err := tx.DeleteAlias(ctx, original.Name); err != nil {
+						return err
+					}
+					return tx.DeleteClientKey(ctx, key.ID)
+				})
+			}()
+			select {
+			case <-paused.entered:
+			case <-done:
+				t.Fatalf("change did not reach the engine: %v", changeErr)
+			case <-ctx.Done():
+				t.Fatal("timed out waiting for the engine")
+			}
+			if _, err := providers.List(ctx); err != nil { // Uses the API read helper.
+				t.Fatal(err)
+			}
+			checkSnapshot("after an API read", true, false)
+			other := original
+			other.Name = "other"
+			if err := st.Write(ctx, func(tx *store.Tx) error { return tx.PutAlias(ctx, other) }); err != nil {
+				t.Fatal(err)
+			}
+			checkSnapshot("after an unrelated write", true, false)
+			close(paused.resume)
+			<-done
+			if !errors.Is(changeErr, tc.refusal) {
+				t.Fatalf("change error = %v, want %v", changeErr, tc.refusal)
+			}
+			checkSnapshot("after reconciliation", tc.refusal != nil, true)
+		})
+	}
+}
+
+func TestAdapterReadDoesNotWaitForWriter(t *testing.T) {
+	st, _, _ := adapterStore(t)
+	ctx := t.Context()
+	entered, resume := make(chan struct{}), make(chan struct{})
+	writer := make(chan error, 1)
+	go func() {
+		writer <- st.Write(ctx, func(*store.Tx) error {
+			close(entered)
+			<-resume
+			return nil
+		})
+	}()
+	defer func() {
+		close(resume)
+		if err := <-writer; err != nil {
+			t.Error(err)
+		}
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("writer did not start")
+	}
+	reader := make(chan error, 1)
+	go func() {
+		reader <- read(ctx, st, func(tx *store.Tx) error {
+			_, err := tx.Generation(ctx)
+			return err
+		})
+	}()
+	select {
+	case err := <-reader:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Error("read waited for the writer")
+		t.Cleanup(func() {
+			if err := <-reader; err != nil {
+				t.Error(err)
+			}
+		})
+	}
+}
+
 func TestProvidersAdapter(t *testing.T) {
 	ctx := context.Background()
 	st, rec, _ := adapterStore(t)

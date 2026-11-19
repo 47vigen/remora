@@ -54,13 +54,12 @@ func (a systemAdapter) Version() (string, []EngineVersion) {
 	return version.Version, out
 }
 
-// read runs fn in a store transaction that only reads. The store offers its repositories on write transactions.
-// Inside reconcile.Reconciler.Batch it reads the batch's transaction, so the batch sees its own writes.
+// read runs fn in a read-only transaction, or joins the batch's transaction so it sees its own writes.
 func read(ctx context.Context, st *store.Store, fn func(tx *store.Tx) error) error {
 	if tx, ok := store.TxFrom(ctx); ok {
 		return fn(tx)
 	}
-	return st.Write(ctx, fn)
+	return st.Read(ctx, fn)
 }
 
 // ModelLister reads and refreshes the front-door model catalog; *bifrost.Client satisfies it.
