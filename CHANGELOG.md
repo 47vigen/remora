@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/47vigen/remora/compare/v0.7.0...v0.7.1) (2026-11-19)
+
+
+### Bug Fixes
+
+* **e2e:** restart remora with compose up in the drain test ([#98](https://github.com/47vigen/remora/issues/98)) ([63a36b5](https://github.com/47vigen/remora/commit/63a36b5db38a416293445317b19a3d68db7395f6))
+
 ## [0.7.0](https://github.com/47vigen/remora/compare/v0.6.1...v0.7.0) (2026-11-19)
 
 
