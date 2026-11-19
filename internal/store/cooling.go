@@ -7,11 +7,11 @@ import (
 	"github.com/47vigen/remora/internal/cooling"
 )
 
-// LoadCooling deletes expired cooldowns and loads the remaining rows at startup.
+// LoadCooling deletes expired plain cooldowns but keeps breakers until a probe succeeds.
 func (s *Store) LoadCooling(ctx context.Context, now time.Time) ([]cooling.Cooling, error) {
 	var active []cooling.Cooling
 	err := s.write(ctx, func(tx *Tx) error {
-		if _, err := tx.tx.ExecContext(ctx, `DELETE FROM cooling WHERE until_ns <= ?`, now.UnixNano()); err != nil {
+		if _, err := tx.tx.ExecContext(ctx, `DELETE FROM cooling WHERE backoff_ns = 0 AND until_ns <= ?`, now.UnixNano()); err != nil {
 			return err
 		}
 		rows, err := tx.tx.QueryContext(ctx, `SELECT provider, model, until_ns, reason, backoff_ns FROM cooling`)

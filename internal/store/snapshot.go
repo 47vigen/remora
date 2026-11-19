@@ -13,19 +13,52 @@ import (
 )
 
 // snapshot holds client keys, aliases and the log redactor in memory so reads do not touch SQLite.
-// It is rebuilt after every committed Write; its maps and their values are shared and never modified.
+// Its maps and their values are shared and never modified.
 type snapshot struct {
 	keys    map[string]ClientKey // by string(Sealer.MAC(value)), VKValue opened
 	aliases map[string]alias.Alias
 	secrets *strings.Replacer
 }
 
-// Refresh rebuilds the snapshot from the committed database. Rebuilds are serialised, so the last one to run reads
-// the last commit. On failure the snapshot is dropped, reads fall back to SQL (and fail there too, closed), and the
-// error is returned. Without a sealer there is nothing to rebuild.
+// Refresh rebuilds the snapshot from the committed database, unless a reconcile write is still pending.
+// On failure it drops the snapshot and returns the error; reads fall back to SQL. Without a sealer there is nothing to rebuild.
 func (s *Store) Refresh(ctx context.Context) error {
 	s.snapMu.Lock()
 	defer s.snapMu.Unlock()
+	if s.pending {
+		return nil
+	}
+	return s.refreshSnapshot(ctx)
+}
+
+// beginPending pins a snapshot before the unaccepted rows can be committed.
+func (s *Store) beginPending(ctx context.Context) error {
+	s.snapMu.Lock()
+	defer s.snapMu.Unlock()
+	if s.pending {
+		return fmt.Errorf("store: a reconcile write is already pending")
+	}
+	if s.snap.Load() == nil {
+		if s.sealer.Load() == nil {
+			return ErrNoSealer
+		}
+		if err := s.refreshSnapshot(ctx); err != nil {
+			return err
+		}
+	}
+	s.pending = true
+	return nil
+}
+
+func (s *Store) finishPending(ctx context.Context) {
+	s.snapMu.Lock()
+	defer s.snapMu.Unlock()
+	s.pending = false
+	_ = s.refreshSnapshot(context.WithoutCancel(ctx))
+}
+
+// refreshSnapshot requires snapMu to be held.
+func (s *Store) refreshSnapshot(ctx context.Context) error {
 	sl := s.sealer.Load()
 	if sl == nil {
 		s.snap.Store(nil)
@@ -89,9 +122,20 @@ type withExtra struct {
 
 func (w withExtra) Scan(dest ...any) error { return w.sc.Scan(append(dest, w.extra)...) }
 
+// snapshotForRead keeps a SQL fallback from crossing the start of a pending write.
+func (s *Store) snapshotForRead() (*snapshot, func()) {
+	if snap := s.snap.Load(); snap != nil {
+		return snap, func() {}
+	}
+	s.snapMu.Lock()
+	return s.snap.Load(), s.snapMu.Unlock
+}
+
 // Alias returns the alias named name, without copying the whole set.
 func (s *Store) Alias(ctx context.Context, name string) (alias.Alias, bool, error) {
-	if snap := s.snap.Load(); snap != nil {
+	snap, unlock := s.snapshotForRead()
+	defer unlock()
+	if snap != nil {
 		a, ok := snap.aliases[name]
 		return a, ok, nil
 	}

@@ -49,22 +49,35 @@ func (tx *Tx) Generation(ctx context.Context) (int64, error) {
 	return generation, nil
 }
 
-// Write runs fn in one BEGIN IMMEDIATE transaction and commits iff fn returns nil, then rebuilds the snapshot.
-// Concurrent writers serialise on the database lock; Write waits up to 30 s for it.
+// Write runs fn in one BEGIN IMMEDIATE transaction and commits iff fn returns nil, then refreshes the snapshot
+// unless a reconcile write is pending. Concurrent writers serialise on the database lock; Write waits up to 30 s.
 func (s *Store) Write(ctx context.Context, fn func(tx *Tx) error) error {
 	if err := s.write(ctx, fn); err != nil {
 		return err
 	}
-	// Every change to keys and aliases commits here, reconcile passes included, so the snapshot follows each one.
-	// It runs once the write's connection is back in the pool: concurrent writers may hold every other one. A failed
-	// rebuild leaves reads on SQL, which reports it.
+	// Refresh only after returning the write's connection to the pool.
 	_ = s.Refresh(context.WithoutCancel(ctx))
 	return nil
 }
 
-// WriteWithUndo commits fn and returns a compensating write for the rows it changed, without refreshing the
-// public snapshot until the caller either finalizes the change with Write or compensates it.
-func (s *Store) WriteWithUndo(ctx context.Context, fn func(tx *Tx) error) (func(context.Context) error, error) {
+// PendingWrite holds a committed change whose publication waits for engine acceptance or compensation.
+// The caller must resolve it once, through either Commit or Undo.
+type PendingWrite struct {
+	store *Store
+	undo  []string
+}
+
+// WriteWithUndo commits fn without publishing it. The caller must resolve the returned PendingWrite.
+func (s *Store) WriteWithUndo(ctx context.Context, fn func(tx *Tx) error) (*PendingWrite, error) {
+	if err := s.beginPending(ctx); err != nil {
+		return nil, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			s.finishPending(ctx)
+		}
+	}()
 	var undo []string
 	tables := []string{"providers", "provider_keys", "aliases", "alias_members", "client_keys", "account_strategies", "engine_sync"}
 	err := s.write(ctx, func(tx *Tx) error {
@@ -109,16 +122,35 @@ func (s *Store) WriteWithUndo(ctx context.Context, fn func(tx *Tx) error) (func(
 	if err != nil {
 		return nil, err
 	}
-	return func(ctx context.Context) error {
-		return s.Write(ctx, func(tx *Tx) error {
-			for _, stmt := range undo {
-				if _, err := tx.tx.ExecContext(ctx, stmt); err != nil {
-					return err
-				}
+	committed = true
+	return &PendingWrite{store: s, undo: undo}, nil
+}
+
+// Commit writes the engine's output and publishes the change. On error the change stays pending.
+func (p *PendingWrite) Commit(ctx context.Context, fn func(tx *Tx) error) error {
+	if err := p.store.write(ctx, fn); err != nil {
+		return err
+	}
+	p.store.finishPending(ctx)
+	return nil
+}
+
+// Undo compensates the write and publishes the restored state. On error the change stays pending.
+func (p *PendingWrite) Undo(ctx context.Context) error {
+	return p.Commit(ctx, func(tx *Tx) error {
+		for _, stmt := range p.undo {
+			if _, err := tx.tx.ExecContext(ctx, stmt); err != nil {
+				return err
 			}
-			return nil
-		})
-	}, nil
+		}
+		return nil
+	})
+}
+
+// Abandon ends a change whose compensation failed and will not be retried: the committed rows, unaccepted by the
+// engine, are published so later writes and changes are not held back; the next full sync pushes them.
+func (p *PendingWrite) Abandon(ctx context.Context) {
+	p.store.finishPending(ctx)
 }
 
 func (tx *Tx) captureUndo(ctx context.Context, table string) error {
