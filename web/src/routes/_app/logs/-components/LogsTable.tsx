@@ -60,7 +60,7 @@ export function LogsTable({
                   </time>
                 </Table.Cell>
                 <Table.Cell>
-                  <StatusChip status={statusOf(l.status)} />
+                  <StatusChip status={statusOf(l.status)} statusCode={l.statusCode} />
                 </Table.Cell>
                 <Table.Cell>
                   <span className="flex items-center gap-2 font-mono text-[13px] whitespace-nowrap">

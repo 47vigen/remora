@@ -3,8 +3,8 @@
 import { type InfiniteData, infiniteQueryOptions, queryOptions, type UseMutationOptions } from '@tanstack/react-query';
 
 import { client } from '../client.gen';
-import { applyConfig, cancelAccountLogin, changePassword, compileAlias, completeAccountLogin, createAlias, createApiToken, createKey, createProvider, deleteAccount, deleteAlias, deleteApiToken, deleteKey, deleteProvider, exportConfig, getAccountLogin, getAccountPool, getAlias, getAliasChain, getHealth, getKey, getKeyUsage, getLog, getProvider, getQuota, getSession, getStats, getVersion, importAccount, listAccounts, listAccountStrategies, listAliases, listApiTokens, listAudit, listCooling, listKeys, listLogs, listProviders, login, logout, type Options, planConfig, refreshQuota, resetAccountCooldown, setAccountStrategy, startAccountLogin, testProvider, updateAccount, updateAlias, updateKey, updateProvider } from '../sdk.gen';
-import type { ApplyConfigData, ApplyConfigError, ApplyConfigResponse, CancelAccountLoginData, CancelAccountLoginError, CancelAccountLoginResponse, ChangePasswordData, ChangePasswordError, ChangePasswordResponse, CompileAliasData, CompileAliasError, CompileAliasResponse, CompleteAccountLoginData, CompleteAccountLoginError, CreateAliasData, CreateAliasError, CreateAliasResponse, CreateApiTokenData, CreateApiTokenError, CreateApiTokenResponse, CreateKeyData, CreateKeyError, CreateKeyResponse, CreateProviderData, CreateProviderError, CreateProviderResponse, DeleteAccountData, DeleteAccountError, DeleteAccountResponse, DeleteAliasData, DeleteAliasError, DeleteAliasResponse, DeleteApiTokenData, DeleteApiTokenError, DeleteApiTokenResponse, DeleteKeyData, DeleteKeyError, DeleteKeyResponse, DeleteProviderData, DeleteProviderError, DeleteProviderResponse, ExportConfigData, ExportConfigError, ExportConfigResponse, GetAccountLoginData, GetAccountLoginError, GetAccountLoginResponse, GetAccountPoolData, GetAccountPoolError, GetAccountPoolResponse, GetAliasChainData, GetAliasChainError, GetAliasChainResponse, GetAliasData, GetAliasError, GetAliasResponse, GetHealthData, GetHealthError, GetHealthResponse, GetKeyData, GetKeyError, GetKeyResponse, GetKeyUsageData, GetKeyUsageError, GetKeyUsageResponse, GetLogData, GetLogError, GetLogResponse, GetProviderData, GetProviderError, GetProviderResponse, GetQuotaData, GetQuotaError, GetQuotaResponse, GetSessionData, GetSessionError, GetSessionResponse, GetStatsData, GetStatsError, GetStatsResponse, GetVersionData, GetVersionError, GetVersionResponse, ImportAccountData, ImportAccountError, ImportAccountResponse, ListAccountsData, ListAccountsError, ListAccountsResponse, ListAccountStrategiesData, ListAccountStrategiesError, ListAccountStrategiesResponse, ListAliasesData, ListAliasesError, ListAliasesResponse, ListApiTokensData, ListApiTokensError, ListApiTokensResponse, ListAuditData, ListAuditError, ListAuditResponse, ListCoolingData, ListCoolingError, ListCoolingResponse, ListKeysData, ListKeysError, ListKeysResponse, ListLogsData, ListLogsError, ListLogsResponse, ListProvidersData, ListProvidersError, ListProvidersResponse, LoginData, LoginError, LoginResponse, LogoutData, LogoutError, LogoutResponse, PlanConfigData, PlanConfigError, PlanConfigResponse, RefreshQuotaData, RefreshQuotaError, RefreshQuotaResponse, ResetAccountCooldownData, ResetAccountCooldownError, ResetAccountCooldownResponse, SetAccountStrategyData, SetAccountStrategyError, SetAccountStrategyResponse, StartAccountLoginData, StartAccountLoginError, StartAccountLoginResponse, TestProviderData, TestProviderError, TestProviderResponse, UpdateAccountData, UpdateAccountError, UpdateAccountResponse, UpdateAliasData, UpdateAliasError, UpdateAliasResponse, UpdateKeyData, UpdateKeyError, UpdateKeyResponse, UpdateProviderData, UpdateProviderError, UpdateProviderResponse } from '../types.gen';
+import { applyConfig, cancelAccountLogin, changePassword, compileAlias, completeAccountLogin, createAlias, createApiToken, createKey, createProvider, deleteAccount, deleteAlias, deleteApiToken, deleteKey, deleteProvider, exportConfig, getAccountLogin, getAccountPool, getAlias, getAliasChain, getHealth, getKey, getKeyUsage, getLog, getProvider, getProviderModels, getQuota, getSession, getStats, getVersion, importAccount, listAccounts, listAccountStrategies, listAliases, listApiTokens, listAudit, listCooling, listKeys, listLogs, listProviders, login, logout, type Options, planConfig, refreshQuota, resetAccountCooldown, setAccountStrategy, startAccountLogin, testProvider, updateAccount, updateAlias, updateKey, updateProvider } from '../sdk.gen';
+import type { ApplyConfigData, ApplyConfigError, ApplyConfigResponse, CancelAccountLoginData, CancelAccountLoginError, CancelAccountLoginResponse, ChangePasswordData, ChangePasswordError, ChangePasswordResponse, CompileAliasData, CompileAliasError, CompileAliasResponse, CompleteAccountLoginData, CompleteAccountLoginError, CreateAliasData, CreateAliasError, CreateAliasResponse, CreateApiTokenData, CreateApiTokenError, CreateApiTokenResponse, CreateKeyData, CreateKeyError, CreateKeyResponse, CreateProviderData, CreateProviderError, CreateProviderResponse, DeleteAccountData, DeleteAccountError, DeleteAccountResponse, DeleteAliasData, DeleteAliasError, DeleteAliasResponse, DeleteApiTokenData, DeleteApiTokenError, DeleteApiTokenResponse, DeleteKeyData, DeleteKeyError, DeleteKeyResponse, DeleteProviderData, DeleteProviderError, DeleteProviderResponse, ExportConfigData, ExportConfigError, ExportConfigResponse, GetAccountLoginData, GetAccountLoginError, GetAccountLoginResponse, GetAccountPoolData, GetAccountPoolError, GetAccountPoolResponse, GetAliasChainData, GetAliasChainError, GetAliasChainResponse, GetAliasData, GetAliasError, GetAliasResponse, GetHealthData, GetHealthError, GetHealthResponse, GetKeyData, GetKeyError, GetKeyResponse, GetKeyUsageData, GetKeyUsageError, GetKeyUsageResponse, GetLogData, GetLogError, GetLogResponse, GetProviderData, GetProviderError, GetProviderModelsData, GetProviderModelsError, GetProviderModelsResponse, GetProviderResponse, GetQuotaData, GetQuotaError, GetQuotaResponse, GetSessionData, GetSessionError, GetSessionResponse, GetStatsData, GetStatsError, GetStatsResponse, GetVersionData, GetVersionError, GetVersionResponse, ImportAccountData, ImportAccountError, ImportAccountResponse, ListAccountsData, ListAccountsError, ListAccountsResponse, ListAccountStrategiesData, ListAccountStrategiesError, ListAccountStrategiesResponse, ListAliasesData, ListAliasesError, ListAliasesResponse, ListApiTokensData, ListApiTokensError, ListApiTokensResponse, ListAuditData, ListAuditError, ListAuditResponse, ListCoolingData, ListCoolingError, ListCoolingResponse, ListKeysData, ListKeysError, ListKeysResponse, ListLogsData, ListLogsError, ListLogsResponse, ListProvidersData, ListProvidersError, ListProvidersResponse, LoginData, LoginError, LoginResponse, LogoutData, LogoutError, LogoutResponse, PlanConfigData, PlanConfigError, PlanConfigResponse, RefreshQuotaData, RefreshQuotaError, RefreshQuotaResponse, ResetAccountCooldownData, ResetAccountCooldownError, ResetAccountCooldownResponse, SetAccountStrategyData, SetAccountStrategyError, SetAccountStrategyResponse, StartAccountLoginData, StartAccountLoginError, StartAccountLoginResponse, TestProviderData, TestProviderError, TestProviderResponse, UpdateAccountData, UpdateAccountError, UpdateAccountResponse, UpdateAliasData, UpdateAliasError, UpdateAliasResponse, UpdateKeyData, UpdateKeyError, UpdateKeyResponse, UpdateProviderData, UpdateProviderError, UpdateProviderResponse } from '../types.gen';
 
 export type QueryKey<TOptions extends Options> = [
     Pick<TOptions, 'baseUrl' | 'body' | 'headers' | 'path' | 'query'> & {
@@ -273,6 +273,24 @@ export const updateProviderMutation = (options?: Partial<Options<UpdateProviderD
     return mutationOptions;
 };
 
+export const getProviderModelsQueryKey = (options: Options<GetProviderModelsData>) => createQueryKey('getProviderModels', options);
+
+/**
+ * Get a provider's known models as provider/model references.
+ */
+export const getProviderModelsOptions = (options: Options<GetProviderModelsData>) => queryOptions<GetProviderModelsResponse, GetProviderModelsError, GetProviderModelsResponse, ReturnType<typeof getProviderModelsQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await getProviderModels({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: getProviderModelsQueryKey(options)
+});
+
 /**
  * Send a small request to the provider and report the result.
  */
@@ -426,9 +444,9 @@ export const setAccountStrategyMutation = (options?: Partial<Options<SetAccountS
 export const getQuotaQueryKey = (options?: Options<GetQuotaData>) => createQueryKey('getQuota', options);
 
 /**
- * Every subscription account's quota, merged with its status and cooldowns, grouped by provider.
+ * List subscription account quotas, grouped by provider.
  *
- * Only providers with accounts are listed. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
+ * Paging and case-insensitive search by account label, id or plan apply to accounts, not provider summaries. Provider summaries retain their full counts even when they have no accounts on the page. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
  */
 export const getQuotaOptions = (options?: Options<GetQuotaData>) => queryOptions<GetQuotaResponse, GetQuotaError, GetQuotaResponse, ReturnType<typeof getQuotaQueryKey>>({
     queryFn: async ({ queryKey, signal }) => {
@@ -442,6 +460,38 @@ export const getQuotaOptions = (options?: Options<GetQuotaData>) => queryOptions
     },
     queryKey: getQuotaQueryKey(options)
 });
+
+export const getQuotaInfiniteQueryKey = (options?: Options<GetQuotaData>): QueryKey<Options<GetQuotaData>> => createQueryKey('getQuota', options, true);
+
+/**
+ * List subscription account quotas, grouped by provider.
+ *
+ * Paging and case-insensitive search by account label, id or plan apply to accounts, not provider summaries. Provider summaries retain their full counts even when they have no accounts on the page. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
+ */
+export const getQuotaInfiniteOptions = (options?: Options<GetQuotaData>) => {
+    const opts = infiniteQueryOptions<GetQuotaResponse, GetQuotaError, InfiniteData<GetQuotaResponse>, QueryKey<Options<GetQuotaData>>, number | Pick<QueryKey<Options<GetQuotaData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+    // @ts-ignore
+    {
+        queryFn: async ({ pageParam, queryKey, signal }) => {
+            // @ts-ignore
+            const page: Pick<QueryKey<Options<GetQuotaData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+                query: {
+                    offset: pageParam
+                }
+            };
+            const params = createInfiniteParams(queryKey, page);
+            const { data } = await getQuota({
+                ...options,
+                ...params,
+                signal,
+                throwOnError: true
+            });
+            return data;
+        },
+        queryKey: getQuotaInfiniteQueryKey(options)
+    });
+    return opts as Omit<typeof opts, 'initialData'>;
+};
 
 /**
  * Queue quota checks of one account or of every enabled account of one provider.

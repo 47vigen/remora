@@ -12,12 +12,12 @@ import {
   listProvidersOptions,
   testProviderMutation,
 } from "../../../client/@tanstack/react-query.gen";
-import { listProviders } from "../../../client/sdk.gen";
-import type { Stats } from "../../../client/types.gen";
+import { getQuota, listProviders } from "../../../client/sdk.gen";
+import type { QuotaProvider, Stats } from "../../../client/types.gen";
 import { PageHeader } from "../../../components/page-header/PageHeader";
 import { errorMessage } from "../../../lib/api";
 import { buildCSV, downloadFile } from "../../../lib/download";
-import { parseEnum } from "../../../lib/list-search";
+import { PAGE_SIZES, parseEnum } from "../../../lib/list-search";
 import { invalidateOps } from "../../../lib/query";
 import { Attention, COOLING_LIMIT } from "./-components/Attention";
 import { Breakdown } from "./-components/Breakdown";
@@ -36,6 +36,12 @@ const RANGES = ["1h", "24h", "7d"] as const;
 type Range = (typeof RANGES)[number];
 const RANGE_MS: Record<Range, number> = { "1h": 3_600_000, "24h": 86_400_000, "7d": 604_800_000 };
 const RANGE_HINT: Record<Range, string> = { "1h": "last hour", "24h": "last 24 hours", "7d": "last 7 days" };
+
+export function statsFrom(range: Range, now: number): string | undefined {
+  if (range === "24h") return undefined;
+  const bucket = range === "1h" ? 60_000 : 86_400_000;
+  return new Date(Math.floor((now - RANGE_MS[range]) / bucket) * bucket).toISOString();
+}
 
 export const Route = createFileRoute("/_app/(overview)/")({
   validateSearch: (raw: Record<string, unknown>): { range?: Range } => ({
@@ -74,7 +80,7 @@ function OverviewPage() {
   const range: Range = search.range ?? "24h";
   const now = useNow();
   // The default window is the server's own (the last 24 hours ending now), so its refetch moves with the clock.
-  const from = range === "24h" ? undefined : new Date(now - RANGE_MS[range]).toISOString();
+  const from = statsFrom(range, now);
 
   const stats = useQuery({
     ...getStatsOptions({ query: { group_by: "provider", from } }),
@@ -106,7 +112,26 @@ function OverviewPage() {
   });
   const cooling = useQuery(listCoolingOptions({ query: { limit: COOLING_LIMIT } }));
   const pool = useQuery({ ...getAccountPoolOptions(), refetchInterval: POOL_REFRESH_MS });
-  const quota = useQuery({ ...getQuotaOptions(), refetchInterval: STATS_REFRESH_MS });
+  const quota = useQuery({
+    queryKey: getQuotaOptions().queryKey,
+    refetchInterval: STATS_REFRESH_MS,
+    queryFn: async ({ signal }) => {
+      const providers = new Map<string, QuotaProvider>();
+      for (let offset = 0; ;) {
+        const { data } = await getQuota({ query: { limit: PAGE_SIZES[2], offset }, signal, throwOnError: true });
+        let count = 0;
+        for (const group of data.items) {
+          const prev = providers.get(group.provider);
+          if (prev) prev.accounts.push(...group.accounts);
+          else providers.set(group.provider, group);
+          count += group.accounts.length;
+        }
+        offset += count;
+        if (count === 0 || offset >= data.total) break;
+      }
+      return [...providers.values()];
+    },
+  });
 
   const summary = stats.data ? summarize(stats.data.summary) : undefined;
   const series = stats.data?.series ?? [];
@@ -212,11 +237,7 @@ function OverviewPage() {
           <>
             <TokenChart rows={overTime} total={summary?.tokens} className="lg:col-span-4" />
             <CostChart rows={overTime} total={summary?.cost} className="lg:col-span-4" />
-            <LatencyChart
-              rows={overTime}
-              total={summary?.p95 === "—" ? undefined : `p95 ${summary?.p95}`}
-              className="lg:col-span-4"
-            />
+            <LatencyChart rows={overTime} className="lg:col-span-4" />
           </>
         ) : null}
 
@@ -233,7 +254,7 @@ function OverviewPage() {
         {providers.data ? (
           <Attention
             className="lg:col-span-4"
-            health={healthCounts(providers.data.items)}
+            health={healthCounts(providers.data.items, stats.isPlaceholderData ? undefined : stats.data?.groups)}
             pool={pool.data ?? []}
             quota={quota.data ?? []}
             quotaError={quota.error && !quota.data ? errorMessage(quota.error) : undefined}

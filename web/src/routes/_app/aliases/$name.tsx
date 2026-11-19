@@ -1,6 +1,7 @@
 import { ArrowLeft, TrashBin } from "@gravity-ui/icons";
 import {
   Alert,
+  AlertDialog,
   Button,
   Description,
   FieldError,
@@ -16,14 +17,15 @@ import {
   TagGroup,
   TextField,
 } from "@heroui/react";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
+import { createFileRoute, useBlocker, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 
 import {
   createAliasMutation,
   deleteAliasMutation,
   getAliasOptions,
+  getStatsOptions,
   listAccountsOptions,
   listAliasesOptions,
   listCoolingOptions,
@@ -37,6 +39,7 @@ import { errorMessage } from "../../../lib/api";
 import { parseListSearch } from "../../../lib/list-search";
 import { invalidateOps } from "../../../lib/query";
 import { StrategyIcon, StrategyValue } from "../../../lib/routing";
+import { useNow } from "../../../lib/use-now";
 import { ChainPreview } from "./-components/ChainPreview";
 import { MemberList } from "./-components/MemberList";
 import { useChainPreview } from "./-hooks/useChainPreview";
@@ -55,6 +58,8 @@ import {
 } from "./-lib/alias-form";
 
 const NEW = "new";
+const STATS_REFRESH_MS = 60_000;
+const HOUR_MS = 3_600_000;
 /** The API caps a page at 200; the add box offers what fits in one page of each list. */
 const MAX_LIMIT = 200;
 
@@ -91,6 +96,7 @@ function AliasEditor({ initial, original }: { initial: AliasDraft; original: str
   const navigate = useNavigate();
   const queryClient = Route.useRouteContext({ select: (c) => c.queryClient });
   const [draft, setDraft] = useState<AliasDraft>(initial);
+  const [savedDraft, setSavedDraft] = useState(initial);
   const [submitted, setSubmitted] = useState(false);
   const [memberError, setMemberError] = useState<string>();
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -100,6 +106,18 @@ function AliasEditor({ initial, original }: { initial: AliasDraft; original: str
   const providers = useQuery(listProvidersOptions({ query: { limit: MAX_LIMIT } }));
   const accounts = useQuery(listAccountsOptions({ query: { limit: MAX_LIMIT } }));
   const cooling = useQuery(listCoolingOptions({ query: { limit: MAX_LIMIT } }));
+  const now = useNow(STATS_REFRESH_MS);
+  const stats = useQuery({
+    ...getStatsOptions({
+      query: { group_by: "model", groups_only: true, from: new Date(+now - HOUR_MS).toISOString() },
+    }),
+    enabled: draft.members.some((member) => member.includes("/")),
+    placeholderData: keepPreviousData,
+  });
+  const successRates = useMemo(
+    () => new Map(stats.data?.groups.map(({ name, summary }) => [name, 1 - summary.error_rate])),
+    [stats.data],
+  );
 
   const options = useMemo(() => {
     const sources: ModelSource[] = [
@@ -133,30 +151,48 @@ function AliasEditor({ initial, original }: { initial: AliasDraft; original: str
       ),
     [draft.members, draft.name, aliases.data, coolingUntil],
   );
-  const isDirty = JSON.stringify(draft) !== JSON.stringify(initial);
+  const isDirty = JSON.stringify(draft) !== JSON.stringify(savedDraft);
+  const canSave = original === undefined || isDirty;
+  const blocker = useBlocker({
+    shouldBlockFn: ({ current, next }) => current.pathname !== next.pathname,
+    disabled: !isDirty,
+    withResolver: true,
+  });
 
   const errors = validateAliasDraft(draft);
   const shown = submitted ? errors : {};
   const set = (patch: Partial<AliasDraft>) => setDraft((d) => ({ ...d, ...patch }));
 
-  const onSaved = async (saved: string) => {
-    await invalidateOps(queryClient, "listAliases", "getAlias", "getAliasChain", "listCooling");
-    await navigate({ to: "/aliases/$name", params: { name: saved } });
-  };
-  const create = useMutation({ ...createAliasMutation(), onSuccess: (a) => onSaved(a.name) });
-  const update = useMutation({ ...updateAliasMutation(), onSuccess: (a) => onSaved(a.name) });
+  const refreshAliases = () => invalidateOps(queryClient, "listAliases", "getAlias", "getAliasChain", "listCooling");
+  const create = useMutation({
+    ...createAliasMutation(),
+    onSuccess: async ({ name }) => {
+      await refreshAliases();
+      await navigate({ to: "/aliases/$name", params: { name }, ignoreBlocker: true });
+    },
+  });
+  const update = useMutation({
+    ...updateAliasMutation(),
+    onSuccess: (a, { body }) => {
+      const saved = draftFromAlias(a);
+      setSavedDraft(saved);
+      setDraft((current) => (JSON.stringify(aliasFromDraft(current)) === JSON.stringify(body) ? saved : current));
+      return refreshAliases();
+    },
+  });
   const remove = useMutation({
     ...deleteAliasMutation(),
     onSuccess: async () => {
       setConfirmDelete(false);
-      await invalidateOps(queryClient, "listAliases", "getAlias", "getAliasChain", "listCooling");
-      await navigate({ to: "/aliases", search: parseListSearch({}) });
+      await refreshAliases();
+      await navigate({ to: "/aliases", search: parseListSearch({}), ignoreBlocker: true });
     },
   });
   const saveError = create.error ?? update.error;
   const isSaving = create.isPending || update.isPending;
 
   const save = () => {
+    if (!canSave || isSaving) return;
     setSubmitted(true);
     if (Object.keys(errors).length > 0) return;
     const body = aliasFromDraft(draft);
@@ -209,7 +245,7 @@ function AliasEditor({ initial, original }: { initial: AliasDraft; original: str
                 Delete
               </Button>
             ) : null}
-            <Button size="sm" variant="primary" isPending={isSaving} onPress={save}>
+            <Button size="sm" variant="primary" isDisabled={!canSave} isPending={isSaving} onPress={save}>
               {original === undefined ? "Create alias" : "Save"}
             </Button>
           </>
@@ -304,6 +340,7 @@ function AliasEditor({ initial, original }: { initial: AliasDraft; original: str
               <MemberList
                 members={draft.members}
                 cooling={coolingRefs}
+                successRates={successRates}
                 onReorder={(members) => set({ members })}
                 onRemove={(ref) => set({ members: draft.members.filter((m) => m !== ref) })}
               />
@@ -382,6 +419,32 @@ function AliasEditor({ initial, original }: { initial: AliasDraft; original: str
           />
         </div>
       </div>
+      <AlertDialog.Backdrop
+        isOpen={blocker.status === "blocked"}
+        onOpenChange={(open) => {
+          if (!open) blocker.reset?.();
+        }}
+      >
+        <AlertDialog.Container size="sm">
+          <AlertDialog.Dialog>
+            <AlertDialog.Header>
+              <AlertDialog.Icon status="warning" />
+              <AlertDialog.Heading>Discard unsaved changes?</AlertDialog.Heading>
+            </AlertDialog.Header>
+            <AlertDialog.Body className="text-muted text-sm">
+              If you leave this editor, your changes will be lost.
+            </AlertDialog.Body>
+            <AlertDialog.Footer>
+              <Button size="sm" variant="secondary" onPress={blocker.reset}>
+                Keep editing
+              </Button>
+              <Button size="sm" variant="danger" onPress={blocker.proceed}>
+                Discard changes
+              </Button>
+            </AlertDialog.Footer>
+          </AlertDialog.Dialog>
+        </AlertDialog.Container>
+      </AlertDialog.Backdrop>
       {original !== undefined ? (
         <ConfirmDelete
           title={`Delete ${original}?`}

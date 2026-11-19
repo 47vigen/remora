@@ -8,12 +8,13 @@ import { ChartCard, LegendItem } from "./ChartCard";
 import { ChartTooltip } from "./ChartTooltip";
 
 // p50 and p95 latency per bucket over the window; gaps where a bucket had no successful request.
-function LatencyChartImpl({ rows, total, className }: { rows: SeriesRow[]; total?: string; className?: string }) {
+function LatencyChartImpl({ rows, className }: { rows: SeriesRow[]; className?: string }) {
+  const peakP95 = rows.reduce((peak, row) => Math.max(peak, row.p95 ?? -Infinity), -Infinity);
   return (
     <ChartCard
       className={className}
       title="Latency"
-      value={total}
+      value={Number.isFinite(peakP95) ? `Peak bucket p95 ${formatLatency(peakP95)}` : undefined}
       legend={
         <>
           <LegendItem className="bg-accent">p50</LegendItem>

@@ -29,10 +29,19 @@ test("Shell.Nav renders links through the given link component", () => {
   expect(screen.getAllByTestId("custom")).toHaveLength(7);
 });
 
-test("Shell.Nav monitors with Overview and Quota, and keeps Logs under Access after Keys", () => {
+test("Shell.Nav renders navigation groups and links in order", () => {
   render(<Shell.Nav current="/" />);
-  const names = screen.getAllByRole("link").map((l) => l.textContent);
-  expect(names[names.indexOf("Overview") + 1]).toBe("Quota");
-  expect(names[names.indexOf("Keys") + 1]).toBe("Logs");
+  const nav = screen.getByRole("navigation", { name: "Main" });
+  const groups = Array.from(nav.children).slice(0, 3);
+  expect(
+    groups.map((group) => ({
+      label: group.querySelector("span")?.textContent,
+      links: Array.from(group.querySelectorAll("a")).map((link) => link.textContent),
+    })),
+  ).toEqual([
+    { label: "Monitor", links: ["Overview", "Logs", "Quota"] },
+    { label: "Route", links: ["Providers", "Aliases"] },
+    { label: "Access", links: ["Keys"] },
+  ]);
   expect(screen.getByRole("link", { name: "Quota" })).toHaveAttribute("href", "/quota");
 });

@@ -1214,6 +1214,26 @@ func TestProxy_ProbesOpenAliasMember(t *testing.T) {
 	}
 }
 
+func TestProxy_UnknownProviderModelError(t *testing.T) {
+	f := newFixture(t)
+	f.upstream(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = io.WriteString(w, `{"type":"model_blocked","is_bifrost_error":false,"status_code":403,"error":{"message":"Model 'missing' is not allowed for virtual key 'remora:key:fixture'"}}`)
+	})
+	resp := f.do(t, http.MethodPost, "/v1/chat/completions", keyFull, "application/json", chatBody("up-a/missing"), nil)
+	const want = "Model `up-a/missing` is not offered by provider `up-a`"
+	var body struct {
+		Error struct{ Message string }
+	}
+	if err := json.Unmarshal(resp.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusForbidden || body.Error.Message != want || strings.Contains(string(resp.Body), "remora:key:") {
+		t.Fatalf("unexpected model error (status %d)", resp.StatusCode)
+	}
+}
+
 func TestProbeTruncatedBodyFails(t *testing.T) {
 	const partial = "data: {\"delta\":\"hello\"}\n\n"
 	const complete = partial + "data: [DONE]\n\n"

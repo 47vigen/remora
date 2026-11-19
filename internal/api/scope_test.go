@@ -14,7 +14,7 @@ func TestScopeOperations(t *testing.T) {
 			switch id {
 			case "getHealth", "getVersion", "login", "logout", "getSession":
 				want = "none"
-			case "listAudit", "streamLogs", "compileAlias", "planConfig", "testProvider":
+			case "listAudit", "streamLogs", "compileAlias", "planConfig", "testProvider", "getProviderModels":
 				want = "read"
 			case "updateAccount", "resetAccountCooldown", "refreshQuota", "startAccountLogin", "getAccountLogin",
 				"cancelAccountLogin", "completeAccountLogin":

@@ -29,4 +29,8 @@ test("shows the last day's totals and links to the key's logs", () => {
 test("no traffic reads as zero", () => {
   render(<KeyUsage isLoading={false} logsHref="/logs?keyId=k1" totals={undefined} />);
   expect(screen.getByText("No requests in the last 24 hours.")).toBeInTheDocument();
+  expect(screen.getAllByText("0")).toHaveLength(3);
+  expect(screen.getByText("$0").closest("dl")).toHaveClass("opacity-40");
+  expect(screen.getByText("$0").closest("dl")).toHaveAttribute("aria-hidden", "true");
+  expect(screen.getByRole("link", { name: "View this key's logs" })).toBeVisible();
 });

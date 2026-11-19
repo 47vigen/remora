@@ -51,7 +51,7 @@ func TestInspectListsAndShows(t *testing.T) {
 
 func TestInspectQuota(t *testing.T) {
 	f := newFakeAPI(t)
-	f.on("GET /api/quota", http.StatusOK, `[{"provider":"codex","accounts":[]},{"provider":"grok","accounts":[]}]`)
+	f.on("GET /api/quota", http.StatusOK, `{"items":[{"provider":"codex","accounts":[]},{"provider":"grok","accounts":[]}],"total":0}`)
 	cs := f.session(t)
 	if _, out := call(t, cs, "remora_inspect", map[string]any{"kind": "quota"}); len(out["items"].([]any)) != 2 {
 		t.Errorf("quota list = %v", out)

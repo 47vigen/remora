@@ -51,6 +51,8 @@ export type Session = {
 
 export type ProviderKind = 'builtin' | 'openai-compatible' | 'typesafe-compatible' | 'soniox';
 
+export type ProviderStatus = 'ok' | 'degraded' | 'down' | 'unknown';
+
 export type ProviderKey = {
     name: string;
 };
@@ -70,7 +72,7 @@ export type Provider = {
      * cooling, `unknown` before the first test.
      *
      */
-    readonly status: 'ok' | 'degraded' | 'down' | 'unknown';
+    readonly status: ProviderStatus;
     keys?: Array<ProviderKey>;
 };
 
@@ -180,6 +182,14 @@ export type QuotaProvider = {
      */
     next_reset?: string;
     accounts: Array<QuotaAccount>;
+};
+
+export type QuotaList = {
+    items: Array<QuotaProvider>;
+    /**
+     * Matching accounts before paging.
+     */
+    total: number;
 };
 
 /**
@@ -373,10 +383,18 @@ export type LogEntry = {
      * The client key id.
      */
     key?: string;
+    /**
+     * The client key name, when the key can be resolved.
+     */
+    key_name?: string;
     alias?: string;
     provider: string;
     model: string;
     status: 'success' | 'error' | 'processing' | 'cancelled';
+    /**
+     * The recorded HTTP status code, when available.
+     */
+    status_code?: number;
     latency_ms?: number;
     tokens: TokenUsage;
     cost_usd?: number;
@@ -442,7 +460,7 @@ export type StatsPoint = {
      */
     latency_p50_ms?: number | null;
     /**
-     * Over the successful attempts in the bucket, interpolated. Null when there are none.
+     * Over the successful attempts in the bucket, by nearest rank. Null when there are none.
      */
     latency_p95_ms?: number | null;
 };
@@ -825,6 +843,11 @@ export type ListProvidersData = {
          * The front door's provider type of a `builtin` provider, e.g. `openrouter`.
          */
         type?: string;
+        /**
+         * Match any of these provider kinds.
+         */
+        kinds?: Array<ProviderKind>;
+        status?: ProviderStatus;
     };
     url: '/api/providers';
 };
@@ -971,6 +994,46 @@ export type UpdateProviderResponses = {
 };
 
 export type UpdateProviderResponse = UpdateProviderResponses[keyof UpdateProviderResponses];
+
+export type GetProviderModelsData = {
+    body?: never;
+    path: {
+        /**
+         * The provider name.
+         */
+        name: string;
+    };
+    query?: never;
+    url: '/api/providers/{name}/models';
+};
+
+export type GetProviderModelsErrors = {
+    /**
+     * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     *
+     */
+    404: Error;
+    /**
+     * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     *
+     */
+    default: Error;
+};
+
+export type GetProviderModelsError = GetProviderModelsErrors[keyof GetProviderModelsErrors];
+
+export type GetProviderModelsResponses = {
+    /**
+     * The known models.
+     */
+    200: {
+        models: Array<string>;
+    };
+};
+
+export type GetProviderModelsResponse = GetProviderModelsResponses[keyof GetProviderModelsResponses];
 
 export type TestProviderData = {
     body?: never;
@@ -1148,7 +1211,24 @@ export type SetAccountStrategyResponse = SetAccountStrategyResponses[keyof SetAc
 export type GetQuotaData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * The page size.
+         */
+        limit?: number;
+        /**
+         * The number of items to skip.
+         */
+        offset?: number;
+        /**
+         * Free-text search over name-like fields.
+         */
+        q?: string;
+        /**
+         * A provider name.
+         */
+        provider?: string;
+    };
     url: '/api/quota';
 };
 
@@ -1165,9 +1245,9 @@ export type GetQuotaError = GetQuotaErrors[keyof GetQuotaErrors];
 
 export type GetQuotaResponses = {
     /**
-     * One entry per provider, sorted by name.
+     * A page of quota accounts in provider order, plus the matching account count.
      */
-    200: Array<QuotaProvider>;
+    200: QuotaList;
 };
 
 export type GetQuotaResponse = GetQuotaResponses[keyof GetQuotaResponses];

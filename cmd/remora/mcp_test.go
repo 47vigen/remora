@@ -24,7 +24,7 @@ func TestRunMCPServesTools(t *testing.T) {
 		"/api/health":         `{"status":"ok","engines":{}}`,
 		"/api/system/version": `{"remora":"dev","engines":[]}`,
 		"/api/accounts/pool":  `[]`,
-		"/api/quota":          `[]`,
+		"/api/quota":          `{"items":[],"total":0}`,
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()

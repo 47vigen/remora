@@ -84,7 +84,7 @@ function Excerpt({ label, text }: { label: string; text: string }) {
   );
 }
 
-function Overview({ log, keyName }: { log: Detail; keyName?: string }) {
+function Overview({ log }: { log: Detail }) {
   const prompt = excerpt(log.request, "request");
   const reply = excerpt(log.response, "response");
   return (
@@ -99,7 +99,7 @@ function Overview({ log, keyName }: { log: Detail; keyName?: string }) {
         <Fact label="Alias">
           <span className="font-mono">{log.alias ?? "–"}</span>
         </Fact>
-        <Fact label="Key">{keyName ?? <span className="font-mono">{log.key ?? "–"}</span>}</Fact>
+        <Fact label="Key">{log.key_name ?? <span className="font-mono">{log.key ?? "–"}</span>}</Fact>
         <Fact label="Latency">
           <span className="font-mono tabular-nums">
             {log.latency_ms !== undefined ? formatLatency(log.latency_ms) : "–"}
@@ -135,7 +135,7 @@ function FallbackPath({ attempts }: { attempts: LogEntry[] }) {
             <span className="font-mono text-[13px]">
               {a.provider}/{a.model}
             </span>
-            <StatusChip status={statusOf(a.status)} />
+            <StatusChip status={statusOf(a.status)} statusCode={a.status_code} />
             {a.latency_ms !== undefined ? (
               <span className="text-muted font-mono text-xs tabular-nums">{formatLatency(a.latency_ms)}</span>
             ) : null}
@@ -159,12 +159,10 @@ function FallbackPath({ attempts }: { attempts: LogEntry[] }) {
 /** The `?log=<id>` drawer: overview, request and response bodies, and every attempt of the request. */
 export function LogDetail({
   log,
-  keyName,
   isLoading,
   onClose,
 }: {
   log: Detail | undefined;
-  keyName?: string;
   isLoading: boolean;
   onClose(): void;
 }) {
@@ -189,7 +187,7 @@ export function LogDetail({
             </Drawer.Heading>
             {log ? (
               <div className="flex flex-wrap items-center gap-2">
-                <StatusChip status={statusOf(log.status)} />
+                <StatusChip status={statusOf(log.status)} statusCode={log.status_code} />
                 {log.attempt > 1 || log.parent_id !== undefined ? (
                   <Chip size="sm" variant="soft" color="warning">
                     <Chip.Label className="text-[11px]">fallback</Chip.Label>
@@ -245,7 +243,7 @@ export function LogDetail({
                     </Tabs.List>
                   </Tabs.ListContainer>
                   <Tabs.Panel id="overview" className="pt-4">
-                    <Overview log={log} keyName={keyName} />
+                    <Overview log={log} />
                   </Tabs.Panel>
                   <Tabs.Panel id="request" className="pt-4">
                     <Body value={log.request} streamed={false} />

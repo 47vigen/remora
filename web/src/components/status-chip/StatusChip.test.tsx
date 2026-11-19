@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { StatusChip } from "./StatusChip";
 
 test.each([
-  ["ok", "success", "Ok"],
+  ["ok", "success", "Healthy"],
   ["success", "success", "Success"],
   ["active", "success", "Active"],
   ["degraded", "warning", "Degraded"],
@@ -11,7 +11,7 @@ test.each([
   ["down", "danger", "Down"],
   ["error", "danger", "Error"],
   ["disabled", "default", "Disabled"],
-  ["unknown", "default", "Unknown"],
+  ["unknown", "default", "Not tested"],
 ] as const)("%s uses HeroUI color %s", (status, color, label) => {
   const { container } = render(<StatusChip status={status} />);
   const chip = container.querySelector('[data-slot="chip"]');

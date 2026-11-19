@@ -141,6 +141,7 @@ export function Attention({
             )),
           )}
         </div>
+        {health.fromTraffic > 0 ? <p className="text-muted text-xs">{health.fromTraffic} from traffic</p> : null}
       </div>
       {items.length === 0 ? (
         <p className="text-muted p-4 text-sm">

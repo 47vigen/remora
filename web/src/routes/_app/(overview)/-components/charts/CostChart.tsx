@@ -11,15 +11,21 @@ import { ChartTooltip } from "./ChartTooltip";
 
 // Cost per bucket over the window.
 function CostChartImpl({ rows, total, className }: { rows: SeriesRow[]; total?: string; className?: string }) {
+  const isEmpty = !rows.some((r) => r.cost > 0);
   return (
-    <ChartCard title="Cost" value={total} className={className} isEmpty={!rows.some((r) => r.cost > 0)}>
+    <ChartCard
+      title="Cost"
+      value={total ?? (isEmpty ? formatCost(0) : undefined)}
+      className={className}
+      isEmpty={isEmpty}
+    >
       <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
         <BarChart data={rows} margin={{ top: 6, right: 4, left: 4, bottom: 0 }} barCategoryGap={1}>
           <CartesianGrid vertical={false} stroke={CHART_COLORS.grid} />
           <XAxis
             dataKey="index"
             type="number"
-            domain={[-0.5, rows.length - 0.5]}
+            domain={[-0.5, Math.max(rows.length, 1) - 0.5]}
             tick={{ ...AXIS_TICK, dy: 5 }}
             tickLine={false}
             axisLine={false}

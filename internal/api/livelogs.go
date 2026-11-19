@@ -92,6 +92,7 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 			if !f.match(e) {
 				continue
 			}
+			s.fillStatusCode(ctx, l, &e)
 			b, err := json.Marshal(e)
 			if err != nil {
 				s.log().ErrorContext(ctx, "encoding a live log entry failed", "err", err)

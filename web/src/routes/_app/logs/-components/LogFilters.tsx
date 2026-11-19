@@ -50,6 +50,7 @@ function FilterCombo({
         onQuery?.(q);
         if (q === "" && value !== undefined) onChange(undefined);
       }}
+      defaultFilter={onQuery ? () => true : undefined}
       allowsEmptyCollection
     >
       <Label className="sr-only">{label}</Label>

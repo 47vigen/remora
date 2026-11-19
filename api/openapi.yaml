@@ -154,6 +154,17 @@ paths:
           description: The front door's provider type of a `builtin` provider, e.g. `openrouter`.
           schema:
             type: string
+        - name: kinds
+          in: query
+          description: Match any of these provider kinds.
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/ProviderKind"
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/ProviderStatus"
       responses:
         "200":
           description: A page of providers.
@@ -229,6 +240,31 @@ paths:
       responses:
         "204":
           description: Deleted.
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/providers/{name}/models:
+    parameters:
+      - $ref: "#/components/parameters/ProviderName"
+    get:
+      tags: [providers]
+      operationId: getProviderModels
+      x-remora-scope: read
+      summary: Get a provider's known models as provider/model references.
+      responses:
+        "200":
+          description: The known models.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [models]
+                properties:
+                  models:
+                    type: array
+                    items: { type: string }
+        "404":
+          $ref: "#/components/responses/Error"
         default:
           $ref: "#/components/responses/Error"
 
@@ -355,19 +391,24 @@ paths:
       tags: [accounts]
       operationId: getQuota
       x-remora-scope: read
-      summary: Every subscription account's quota, merged with its status and cooldowns, grouped by provider.
+      summary: List subscription account quotas, grouped by provider.
       description: >-
-        Only providers with accounts are listed. A provider whose quota remora cannot read has `supported` false and
-        its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
+        Paging and case-insensitive search by account label, id or plan apply to accounts, not provider summaries.
+        Provider summaries retain their full counts even when they have no accounts on the page. A provider whose
+        quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number
+        the provider did not report has `remaining` null.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/Query"
+        - $ref: "#/components/parameters/ProviderFilter"
       responses:
         "200":
-          description: One entry per provider, sorted by name.
+          description: A page of quota accounts in provider order, plus the matching account count.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/QuotaProvider"
+                $ref: "#/components/schemas/QuotaList"
         default:
           $ref: "#/components/responses/Error"
 
@@ -1296,6 +1337,9 @@ components:
     ProviderKind:
       type: string
       enum: [builtin, openai-compatible, typesafe-compatible, soniox]
+    ProviderStatus:
+      type: string
+      enum: [ok, degraded, down, unknown]
     ProviderKey:
       type: object
       required: [name]
@@ -1325,9 +1369,9 @@ components:
           type: integer
           readOnly: true
         status:
-          type: string
+          allOf:
+            - $ref: "#/components/schemas/ProviderStatus"
           readOnly: true
-          enum: [ok, degraded, down, unknown]
           description: |
             `down` when the last test failed or every model of the provider is cooling, `degraded` when some are
             cooling, `unknown` before the first test.
@@ -1476,6 +1520,17 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/QuotaAccount"
+    QuotaList:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuotaProvider"
+        total:
+          type: integer
+          description: Matching accounts before paging.
     QuotaRefresh:
       type: object
       description: Exactly one of account_id and provider.
@@ -1796,6 +1851,9 @@ components:
         key:
           type: string
           description: The client key id.
+        key_name:
+          type: string
+          description: The client key name, when the key can be resolved.
         alias:
           type: string
         provider:
@@ -1805,6 +1863,9 @@ components:
         status:
           type: string
           enum: [success, error, processing, cancelled]
+        status_code:
+          type: integer
+          description: The recorded HTTP status code, when available.
         latency_ms:
           type: integer
         tokens:
@@ -1905,7 +1966,7 @@ components:
         latency_p95_ms:
           type: [number, "null"]
           format: double
-          description: Over the successful attempts in the bucket, interpolated. Null when there are none.
+          description: Over the successful attempts in the bucket, by nearest rank. Null when there are none.
     StatsGroup:
       type: object
       required: [name, summary]

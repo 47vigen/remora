@@ -235,30 +235,6 @@ func (e LogEntryStatus) Valid() bool {
 	}
 }
 
-// Defines values for ProviderStatus.
-const (
-	ProviderStatusDegraded ProviderStatus = "degraded"
-	ProviderStatusDown     ProviderStatus = "down"
-	ProviderStatusOk       ProviderStatus = "ok"
-	ProviderStatusUnknown  ProviderStatus = "unknown"
-)
-
-// Valid indicates whether the value is a known member of the ProviderStatus enum.
-func (e ProviderStatus) Valid() bool {
-	switch e {
-	case ProviderStatusDegraded:
-		return true
-	case ProviderStatusDown:
-		return true
-	case ProviderStatusOk:
-		return true
-	case ProviderStatusUnknown:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for ProviderKind.
 const (
 	Builtin            ProviderKind = "builtin"
@@ -277,6 +253,30 @@ func (e ProviderKind) Valid() bool {
 	case Soniox:
 		return true
 	case TypesafeCompatible:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProviderStatus.
+const (
+	ProviderStatusDegraded ProviderStatus = "degraded"
+	ProviderStatusDown     ProviderStatus = "down"
+	ProviderStatusOk       ProviderStatus = "ok"
+	ProviderStatusUnknown  ProviderStatus = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the ProviderStatus enum.
+func (e ProviderStatus) Valid() bool {
+	switch e {
+	case ProviderStatusDegraded:
+		return true
+	case ProviderStatusDown:
+		return true
+	case ProviderStatusOk:
+		return true
+	case ProviderStatusUnknown:
 		return true
 	default:
 		return false
@@ -762,7 +762,10 @@ type LogDetail struct {
 	Id           string     `json:"id"`
 
 	// Key The client key id.
-	Key       *string `json:"key,omitempty"`
+	Key *string `json:"key,omitempty"`
+
+	// KeyName The client key name, when the key can be resolved.
+	KeyName   *string `json:"key_name,omitempty"`
 	LatencyMs *int    `json:"latency_ms,omitempty"`
 	Model     string  `json:"model"`
 
@@ -772,9 +775,12 @@ type LogDetail struct {
 	Request  *map[string]interface{} `json:"request,omitempty"`
 	Response *map[string]interface{} `json:"response,omitempty"`
 	Status   LogDetailStatus         `json:"status"`
-	Stream   bool                    `json:"stream"`
-	Time     time.Time               `json:"time"`
-	Tokens   TokenUsage              `json:"tokens"`
+
+	// StatusCode The recorded HTTP status code, when available.
+	StatusCode *int       `json:"status_code,omitempty"`
+	Stream     bool       `json:"stream"`
+	Time       time.Time  `json:"time"`
+	Tokens     TokenUsage `json:"tokens"`
 }
 
 // LogDetailStatus defines model for LogDetail.Status.
@@ -789,7 +795,10 @@ type LogEntry struct {
 	Id      string   `json:"id"`
 
 	// Key The client key id.
-	Key       *string `json:"key,omitempty"`
+	Key *string `json:"key,omitempty"`
+
+	// KeyName The client key name, when the key can be resolved.
+	KeyName   *string `json:"key_name,omitempty"`
 	LatencyMs *int    `json:"latency_ms,omitempty"`
 	Model     string  `json:"model"`
 
@@ -797,9 +806,12 @@ type LogEntry struct {
 	ParentId *string        `json:"parent_id,omitempty"`
 	Provider string         `json:"provider"`
 	Status   LogEntryStatus `json:"status"`
-	Stream   bool           `json:"stream"`
-	Time     time.Time      `json:"time"`
-	Tokens   TokenUsage     `json:"tokens"`
+
+	// StatusCode The recorded HTTP status code, when available.
+	StatusCode *int       `json:"status_code,omitempty"`
+	Stream     bool       `json:"stream"`
+	Time       time.Time  `json:"time"`
+	Tokens     TokenUsage `json:"tokens"`
 }
 
 // LogEntryStatus defines model for LogEntry.Status.
@@ -848,10 +860,6 @@ type Provider struct {
 	Type *string `json:"type,omitempty"`
 }
 
-// ProviderStatus `down` when the last test failed or every model of the provider is cooling, `degraded` when some are
-// cooling, `unknown` before the first test.
-type ProviderStatus string
-
 // ProviderKey defines model for ProviderKey.
 type ProviderKey struct {
 	Name string `json:"name"`
@@ -869,6 +877,9 @@ type ProviderList struct {
 	Total int        `json:"total"`
 }
 
+// ProviderStatus defines model for ProviderStatus.
+type ProviderStatus string
+
 // ProviderTestResult defines model for ProviderTestResult.
 type ProviderTestResult struct {
 	LatencyMs int    `json:"latency_ms"`
@@ -880,6 +891,14 @@ type ProviderTestResult struct {
 type QuotaAccount struct {
 	Account Account        `json:"account"`
 	Quota   *QuotaSnapshot `json:"quota,omitempty"`
+}
+
+// QuotaList defines model for QuotaList.
+type QuotaList struct {
+	Items []QuotaProvider `json:"items"`
+
+	// Total Matching accounts before paging.
+	Total int `json:"total"`
 }
 
 // QuotaProvider defines model for QuotaProvider.
@@ -995,7 +1014,7 @@ type StatsPoint struct {
 	// LatencyP50Ms Over the successful attempts in the bucket, by nearest rank. Null when there are none.
 	LatencyP50Ms *float64 `json:"latency_p50_ms,omitempty"`
 
-	// LatencyP95Ms Over the successful attempts in the bucket, interpolated. Null when there are none.
+	// LatencyP95Ms Over the successful attempts in the bucket, by nearest rank. Null when there are none.
 	LatencyP95Ms *float64 `json:"latency_p95_ms,omitempty"`
 	PromptTokens int      `json:"prompt_tokens"`
 	Requests     int      `json:"requests"`
@@ -1215,6 +1234,25 @@ type ListProvidersParams struct {
 
 	// Type The front door's provider type of a `builtin` provider, e.g. `openrouter`.
 	Type *string `form:"type,omitempty" json:"type,omitempty"`
+
+	// Kinds Match any of these provider kinds.
+	Kinds  *[]ProviderKind `form:"kinds,omitempty" json:"kinds,omitempty"`
+	Status *ProviderStatus `form:"status,omitempty" json:"status,omitempty"`
+}
+
+// GetQuotaParams defines parameters for GetQuota.
+type GetQuotaParams struct {
+	// Limit The page size.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset The number of items to skip.
+	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+
+	// Q Free-text search over name-like fields.
+	Q *Query `form:"q,omitempty" json:"q,omitempty"`
+
+	// Provider A provider name.
+	Provider *ProviderFilter `form:"provider,omitempty" json:"provider,omitempty"`
 }
 
 // ListApiTokensParams defines parameters for ListApiTokens.
@@ -1730,17 +1768,22 @@ type ClientInterface interface {
 	// Corresponds with PUT /api/providers/{name} (the `UpdateProvider` operationId).
 	UpdateProvider(ctx context.Context, name ProviderName, body UpdateProviderJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetProviderModels Get a provider's known models as provider/model references.
+	//
+	// Corresponds with GET /api/providers/{name}/models (the `GetProviderModels` operationId).
+	GetProviderModels(ctx context.Context, name ProviderName, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// TestProvider Send a small request to the provider and report the result.
 	//
 	// Corresponds with POST /api/providers/{name}/test (the `TestProvider` operationId).
 	TestProvider(ctx context.Context, name ProviderName, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// GetQuota Every subscription account's quota, merged with its status and cooldowns, grouped by provider.
+	// GetQuota List subscription account quotas, grouped by provider.
 	//
-	// Only providers with accounts are listed. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
+	// Paging and case-insensitive search by account label, id or plan apply to accounts, not provider summaries. Provider summaries retain their full counts even when they have no accounts on the page. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
 	//
 	// Corresponds with GET /api/quota (the `GetQuota` operationId).
-	GetQuota(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+	GetQuota(ctx context.Context, params *GetQuotaParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// RefreshQuotaWithBody Queue quota checks of one account or of every enabled account of one provider.
 	//
@@ -2715,6 +2758,21 @@ func (c *Client) UpdateProvider(ctx context.Context, name ProviderName, body Upd
 	return c.Client.Do(req)
 }
 
+// GetProviderModels Get a provider's known models as provider/model references.
+//
+// Corresponds with GET /api/providers/{name}/models (the `GetProviderModels` operationId).
+func (c *Client) GetProviderModels(ctx context.Context, name ProviderName, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetProviderModelsRequest(c.Server, name)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // TestProvider Send a small request to the provider and report the result.
 //
 // Corresponds with POST /api/providers/{name}/test (the `TestProvider` operationId).
@@ -2730,13 +2788,13 @@ func (c *Client) TestProvider(ctx context.Context, name ProviderName, reqEditors
 	return c.Client.Do(req)
 }
 
-// GetQuota Every subscription account's quota, merged with its status and cooldowns, grouped by provider.
+// GetQuota List subscription account quotas, grouped by provider.
 //
-// Only providers with accounts are listed. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
+// Paging and case-insensitive search by account label, id or plan apply to accounts, not provider summaries. Provider summaries retain their full counts even when they have no accounts on the page. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
 //
 // Corresponds with GET /api/quota (the `GetQuota` operationId).
-func (c *Client) GetQuota(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetQuotaRequest(c.Server)
+func (c *Client) GetQuota(ctx context.Context, params *GetQuotaParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetQuotaRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -4746,6 +4804,30 @@ func NewListProvidersRequest(server string, params *ListProvidersParams) (*http.
 
 		}
 
+		if params.Kinds != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "kinds", *params.Kinds, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Status != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "status", *params.Status, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
 		if encoded := queryValues.Encode(); encoded != "" {
 			rawQueryFragments = append(rawQueryFragments, encoded)
 		}
@@ -4915,6 +4997,40 @@ func NewUpdateProviderRequestWithBody(server string, name ProviderName, contentT
 	return req, nil
 }
 
+// NewGetProviderModelsRequest constructs an http.Request for the GetProviderModels method
+func NewGetProviderModelsRequest(server string, name ProviderName) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/providers/%s/models", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewTestProviderRequest constructs an http.Request for the TestProvider method
 func NewTestProviderRequest(server string, name ProviderName) (*http.Request, error) {
 	var err error
@@ -4950,7 +5066,7 @@ func NewTestProviderRequest(server string, name ProviderName) (*http.Request, er
 }
 
 // NewGetQuotaRequest constructs an http.Request for the GetQuota method
-func NewGetQuotaRequest(server string) (*http.Request, error) {
+func NewGetQuotaRequest(server string, params *GetQuotaParams) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -4966,6 +5082,69 @@ func NewGetQuotaRequest(server string) (*http.Request, error) {
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Offset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "offset", *params.Offset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Q != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "q", *params.Q, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Provider != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "provider", *params.Provider, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
@@ -5803,6 +5982,13 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with PUT /api/providers/{name} (the `UpdateProvider` operationId).
 	UpdateProviderWithResponse(ctx context.Context, name ProviderName, body UpdateProviderJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateProviderResponse, error)
 
+	// GetProviderModelsWithResponse Get a provider's known models as provider/model references.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/providers/{name}/models (the `GetProviderModels` operationId).
+	GetProviderModelsWithResponse(ctx context.Context, name ProviderName, reqEditors ...RequestEditorFn) (*GetProviderModelsResponse, error)
+
 	// TestProviderWithResponse Send a small request to the provider and report the result.
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -5810,14 +5996,14 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /api/providers/{name}/test (the `TestProvider` operationId).
 	TestProviderWithResponse(ctx context.Context, name ProviderName, reqEditors ...RequestEditorFn) (*TestProviderResponse, error)
 
-	// GetQuotaWithResponse Every subscription account's quota, merged with its status and cooldowns, grouped by provider.
+	// GetQuotaWithResponse List subscription account quotas, grouped by provider.
 	//
-	// Only providers with accounts are listed. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
+	// Paging and case-insensitive search by account label, id or plan apply to accounts, not provider summaries. Provider summaries retain their full counts even when they have no accounts on the page. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with GET /api/quota (the `GetQuota` operationId).
-	GetQuotaWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetQuotaResponse, error)
+	GetQuotaWithResponse(ctx context.Context, params *GetQuotaParams, reqEditors ...RequestEditorFn) (*GetQuotaResponse, error)
 
 	// RefreshQuotaWithBodyWithResponse Queue quota checks of one account or of every enabled account of one provider.
 	//
@@ -7827,6 +8013,65 @@ func (r UpdateProviderResponse) ContentType() string {
 	return ""
 }
 
+type GetProviderModelsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *struct {
+		Models []string `json:"models"`
+	}
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetProviderModelsResponse) GetJSON200() *struct {
+	Models []string `json:"models"`
+} {
+	return r.JSON200
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetProviderModelsResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetProviderModelsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetProviderModelsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetProviderModelsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetProviderModelsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetProviderModelsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type TestProviderResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -7879,13 +8124,13 @@ type GetQuotaResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *[]QuotaProvider
+	JSON200 *QuotaList
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *Error
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetQuotaResponse) GetJSON200() *[]QuotaProvider {
+func (r GetQuotaResponse) GetJSON200() *QuotaList {
 	return r.JSON200
 }
 
@@ -8979,6 +9224,19 @@ func (c *ClientWithResponses) UpdateProviderWithResponse(ctx context.Context, na
 	return ParseUpdateProviderResponse(rsp)
 }
 
+// GetProviderModelsWithResponse Get a provider's known models as provider/model references.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/providers/{name}/models (the `GetProviderModels` operationId).
+func (c *ClientWithResponses) GetProviderModelsWithResponse(ctx context.Context, name ProviderName, reqEditors ...RequestEditorFn) (*GetProviderModelsResponse, error) {
+	rsp, err := c.GetProviderModels(ctx, name, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetProviderModelsResponse(rsp)
+}
+
 // TestProviderWithResponse Send a small request to the provider and report the result.
 //
 // Returns a wrapper object for the known response body format(s).
@@ -8992,15 +9250,15 @@ func (c *ClientWithResponses) TestProviderWithResponse(ctx context.Context, name
 	return ParseTestProviderResponse(rsp)
 }
 
-// GetQuotaWithResponse Every subscription account's quota, merged with its status and cooldowns, grouped by provider.
+// GetQuotaWithResponse List subscription account quotas, grouped by provider.
 //
-// Only providers with accounts are listed. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
+// Paging and case-insensitive search by account label, id or plan apply to accounts, not provider summaries. Provider summaries retain their full counts even when they have no accounts on the page. A provider whose quota remora cannot read has `supported` false and its accounts carry no `quota`. A window whose number the provider did not report has `remaining` null.
 //
 // Returns a wrapper object for the known response body format(s).
 //
 // Corresponds with GET /api/quota (the `GetQuota` operationId).
-func (c *ClientWithResponses) GetQuotaWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetQuotaResponse, error) {
-	rsp, err := c.GetQuota(ctx, reqEditors...)
+func (c *ClientWithResponses) GetQuotaWithResponse(ctx context.Context, params *GetQuotaParams, reqEditors ...RequestEditorFn) (*GetQuotaResponse, error) {
+	rsp, err := c.GetQuota(ctx, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -10504,6 +10762,48 @@ func ParseUpdateProviderResponse(rsp *http.Response) (*UpdateProviderResponse, e
 	return response, nil
 }
 
+// ParseGetProviderModelsResponse parses an HTTP response from a GetProviderModelsWithResponse call
+func ParseGetProviderModelsResponse(rsp *http.Response) (*GetProviderModelsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetProviderModelsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Models []string `json:"models"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseTestProviderResponse parses an HTTP response from a TestProviderWithResponse call
 func ParseTestProviderResponse(rsp *http.Response) (*TestProviderResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -10552,7 +10852,7 @@ func ParseGetQuotaResponse(rsp *http.Response) (*GetQuotaResponse, error) {
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest []QuotaProvider
+		var dest QuotaList
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -10918,12 +11218,15 @@ type ServerInterface interface {
 	// UpdateProvider Replace a provider. Keys sent without a value keep their stored secret.
 	// (PUT /api/providers/{name})
 	UpdateProvider(w http.ResponseWriter, r *http.Request, name ProviderName)
+	// GetProviderModels Get a provider's known models as provider/model references.
+	// (GET /api/providers/{name}/models)
+	GetProviderModels(w http.ResponseWriter, r *http.Request, name ProviderName)
 	// TestProvider Send a small request to the provider and report the result.
 	// (POST /api/providers/{name}/test)
 	TestProvider(w http.ResponseWriter, r *http.Request, name ProviderName)
-	// GetQuota Every subscription account's quota, merged with its status and cooldowns, grouped by provider.
+	// GetQuota List subscription account quotas, grouped by provider.
 	// (GET /api/quota)
-	GetQuota(w http.ResponseWriter, r *http.Request)
+	GetQuota(w http.ResponseWriter, r *http.Request, params GetQuotaParams)
 	// RefreshQuota Queue quota checks of one account or of every enabled account of one provider.
 	// (POST /api/quota/refresh)
 	RefreshQuota(w http.ResponseWriter, r *http.Request)
@@ -12174,6 +12477,32 @@ func (siw *ServerInterfaceWrapper) ListProviders(w http.ResponseWriter, r *http.
 		return
 	}
 
+	// ------------- Optional query parameter "kinds" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "kinds", r.URL.Query(), &params.Kinds, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "kinds"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kinds", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListProviders(w, r, params)
 	}))
@@ -12277,6 +12606,32 @@ func (siw *ServerInterfaceWrapper) UpdateProvider(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// GetProviderModels operation middleware
+func (siw *ServerInterfaceWrapper) GetProviderModels(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name ProviderName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetProviderModels(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // TestProvider operation middleware
 func (siw *ServerInterfaceWrapper) TestProvider(w http.ResponseWriter, r *http.Request) {
 
@@ -12306,8 +12661,66 @@ func (siw *ServerInterfaceWrapper) TestProvider(w http.ResponseWriter, r *http.R
 // GetQuota operation middleware
 func (siw *ServerInterfaceWrapper) GetQuota(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetQuotaParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "q" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "q", r.URL.Query(), &params.Q, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "q"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "q", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "provider" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "provider", r.URL.Query(), &params.Provider, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "provider"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "provider", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetQuota(w, r)
+		siw.Handler.GetQuota(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12699,6 +13112,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/providers/{name}", wrapper.DeleteProvider)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/providers/{name}", wrapper.GetProvider)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/providers/{name}", wrapper.UpdateProvider)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/providers/{name}/models", wrapper.GetProviderModels)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/providers/{name}/test", wrapper.TestProvider)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/accounts", wrapper.ListAccounts)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/accounts/pool", wrapper.GetAccountPool)
@@ -14336,6 +14750,61 @@ func (response UpdateProviderdefaultJSONResponse) VisitUpdateProviderResponse(w 
 	return err
 }
 
+type GetProviderModelsRequestObject struct {
+	Name ProviderName `json:"name"`
+}
+
+type GetProviderModelsResponseObject interface {
+	VisitGetProviderModelsResponse(w http.ResponseWriter) error
+}
+
+type GetProviderModels200JSONResponse struct {
+	Models []string `json:"models"`
+}
+
+func (response GetProviderModels200JSONResponse) VisitGetProviderModelsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetProviderModels404JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetProviderModels404JSONResponse) VisitGetProviderModelsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetProviderModelsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetProviderModelsdefaultJSONResponse) VisitGetProviderModelsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type TestProviderRequestObject struct {
 	Name ProviderName `json:"name"`
 }
@@ -14376,13 +14845,14 @@ func (response TestProviderdefaultJSONResponse) VisitTestProviderResponse(w http
 }
 
 type GetQuotaRequestObject struct {
+	Params GetQuotaParams
 }
 
 type GetQuotaResponseObject interface {
 	VisitGetQuotaResponse(w http.ResponseWriter) error
 }
 
-type GetQuota200JSONResponse []QuotaProvider
+type GetQuota200JSONResponse QuotaList
 
 func (response GetQuota200JSONResponse) VisitGetQuotaResponse(w http.ResponseWriter) error {
 
@@ -14798,10 +15268,13 @@ type StrictServerInterface interface {
 	// UpdateProvider Replace a provider. Keys sent without a value keep their stored secret.
 	// (PUT /api/providers/{name})
 	UpdateProvider(ctx context.Context, request UpdateProviderRequestObject) (UpdateProviderResponseObject, error)
+	// GetProviderModels Get a provider's known models as provider/model references.
+	// (GET /api/providers/{name}/models)
+	GetProviderModels(ctx context.Context, request GetProviderModelsRequestObject) (GetProviderModelsResponseObject, error)
 	// TestProvider Send a small request to the provider and report the result.
 	// (POST /api/providers/{name}/test)
 	TestProvider(ctx context.Context, request TestProviderRequestObject) (TestProviderResponseObject, error)
-	// GetQuota Every subscription account's quota, merged with its status and cooldowns, grouped by provider.
+	// GetQuota List subscription account quotas, grouped by provider.
 	// (GET /api/quota)
 	GetQuota(ctx context.Context, request GetQuotaRequestObject) (GetQuotaResponseObject, error)
 	// RefreshQuota Queue quota checks of one account or of every enabled account of one provider.
@@ -16010,6 +16483,32 @@ func (sh *strictHandler) UpdateProvider(w http.ResponseWriter, r *http.Request, 
 	}
 }
 
+// GetProviderModels operation middleware
+func (sh *strictHandler) GetProviderModels(w http.ResponseWriter, r *http.Request, name ProviderName) {
+	var request GetProviderModelsRequestObject
+
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetProviderModels(ctx, request.(GetProviderModelsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetProviderModels")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetProviderModelsResponseObject); ok {
+		if err := validResponse.VisitGetProviderModelsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // TestProvider operation middleware
 func (sh *strictHandler) TestProvider(w http.ResponseWriter, r *http.Request, name ProviderName) {
 	var request TestProviderRequestObject
@@ -16037,8 +16536,10 @@ func (sh *strictHandler) TestProvider(w http.ResponseWriter, r *http.Request, na
 }
 
 // GetQuota operation middleware
-func (sh *strictHandler) GetQuota(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) GetQuota(w http.ResponseWriter, r *http.Request, params GetQuotaParams) {
 	var request GetQuotaRequestObject
+
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetQuota(ctx, request.(GetQuotaRequestObject))

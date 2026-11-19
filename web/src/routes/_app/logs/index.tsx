@@ -4,6 +4,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 
 import {
+  getKeyOptions,
   getLogOptions,
   listAccountsOptions,
   listAliasesOptions,
@@ -13,8 +14,9 @@ import {
 } from "../../../client/@tanstack/react-query.gen";
 import { DataList } from "../../../components/data-list/DataList";
 import { PageHeader } from "../../../components/page-header/PageHeader";
-import type { ListSearch } from "../../../lib/list-search";
+import { type ListSearch, PAGE_SIZES } from "../../../lib/list-search";
 import { invalidateOps } from "../../../lib/query";
+import { useDebouncedSearch } from "../../../lib/use-debounced-search";
 import { useNow } from "../../../lib/use-now";
 import { LogDetail } from "./-components/LogDetail";
 import { LogFilters } from "./-components/LogFilters";
@@ -63,20 +65,21 @@ function LogsPage() {
   const now = useNow(CLOCK_MS);
 
   const [keyQuery, setKeyQuery] = useState("");
-  const keys = useQuery(listKeysOptions({ query: { limit: MAX_LIMIT } }));
-  const keySearch = useQuery({
-    ...listKeysOptions({ query: { limit: MAX_LIMIT, q: keyQuery } }),
-    enabled: keyQuery !== "",
+  const keyQ = useDebouncedSearch(keyQuery);
+  const keys = useQuery(listKeysOptions({ query: { limit: PAGE_SIZES[0], q: keyQ || undefined } }));
+  const keyItems = keyQ === keyQuery.trim() ? (keys.data?.items ?? []) : [];
+  const selected = useQuery({
+    ...getKeyOptions({ path: { id: search.keyId ?? "" } }),
+    enabled: search.keyId !== undefined && !keyItems.some((k) => k.id === search.keyId),
   });
   const aliases = useQuery(listAliasesOptions({ query: { limit: MAX_LIMIT } }));
   const providers = useQuery(listProvidersOptions({ query: { limit: MAX_LIMIT } }));
   const accounts = useQuery(listAccountsOptions({ query: { limit: MAX_LIMIT } }));
 
-  const keyNames = useMemo(() => new Map((keys.data?.items ?? []).map((k) => [k.id, k.name])), [keys.data]);
-  const keyOptions = ((keyQuery !== "" ? keySearch.data : keys.data)?.items ?? []).map((k) => ({
-    id: k.id,
-    label: k.name,
-  }));
+  const keyOptions = keyItems.map((k) => ({ id: k.id, label: k.name }));
+  if (selected.data && !keyOptions.some((k) => k.id === search.keyId)) {
+    keyOptions.unshift({ id: selected.data.id, label: selected.data.name });
+  }
   const providerNames = useMemo(
     () => [
       ...new Set([
@@ -102,7 +105,7 @@ function LogsPage() {
     },
   });
   const list = useQuery(listOptions);
-  const pageRows = useMemo(() => (list.data?.items ?? []).map((e) => toLogSummary(e, keyNames)), [list.data, keyNames]);
+  const pageRows = useMemo(() => (list.data?.items ?? []).map(toLogSummary), [list.data]);
 
   // Live mode starts from page 1 and prepends what arrives, within the same filters. The rows carry the filters they
   // belong to, so a read that finishes after the filters changed cannot add its page to the new rows.
@@ -121,16 +124,14 @@ function LogsPage() {
   const { isConnected } = useLiveLogs(
     live === true,
     (batch) => {
-      const fresh = batch
-        .map((l) => (l.keyId !== undefined ? { ...l, keyName: keyNames.get(l.keyId) } : l))
-        .filter((l) => matchesLogFilters(l, search));
+      const fresh = batch.filter((l) => matchesLogFilters(l, search));
       if (fresh.length > 0) edit(filterKey, (rows) => prependLive(rows, fresh, liveCap));
     },
     async () => {
       const key = filterKey;
       try {
         const data = await queryClient.fetchQuery({ ...listOptions, staleTime: 0 });
-        const page = data.items.map((e) => toLogSummary(e, keyNames));
+        const page = data.items.map(toLogSummary);
         setLive((s) => mergeCatchUp(s, key, page, liveCap));
       } catch {
         // Filters changed under the read, or it failed: the stream carries on and the next connection reads again.
@@ -208,7 +209,6 @@ function LogsPage() {
       {search.log !== undefined ? (
         <LogDetail
           log={detail.data}
-          keyName={detail.data?.key !== undefined ? keyNames.get(detail.data.key) : undefined}
           isLoading={detail.isPending}
           onClose={() => void navigate({ search: (prev) => ({ ...prev, log: undefined }) })}
         />

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/47vigen/remora/internal/api/gen"
 	"github.com/47vigen/remora/internal/quota"
@@ -22,8 +23,8 @@ func toGenQuota(q store.AccountQuota) *gen.QuotaSnapshot {
 	return out
 }
 
-// GetQuota answers every subscription account's quota, grouped by provider.
-func (s *Server) GetQuota(ctx context.Context, _ gen.GetQuotaRequestObject) (gen.GetQuotaResponseObject, error) {
+// GetQuota returns a page of matching accounts under their full provider summaries.
+func (s *Server) GetQuota(ctx context.Context, req gen.GetQuotaRequestObject) (gen.GetQuotaResponseObject, error) {
 	if s.d.Quota == nil {
 		return nil, errNotImplemented
 	}
@@ -31,22 +32,41 @@ func (s *Server) GetQuota(ctx context.Context, _ gen.GetQuotaRequestObject) (gen
 	if err != nil {
 		return nil, err
 	}
-	resp := gen.GetQuota200JSONResponse{}
+	pr := req.Params
+	type row struct {
+		group   int
+		account quota.AccountView
+	}
+	var rows []row
+	items := make([]gen.QuotaProvider, 0, len(views))
 	for _, v := range views {
-		p := gen.QuotaProvider{
-			Provider: v.Provider, Supported: v.Supported, Available: v.Available, Exhausted: v.Exhausted,
-			Cooling: v.Cooling, SignIn: v.SignIn, Suspended: v.Suspended, NextReset: v.NextReset, Accounts: make([]gen.QuotaAccount, 0, len(v.Accounts)),
+		if pr.Provider != nil && *pr.Provider != v.Provider {
+			continue
 		}
 		for _, a := range v.Accounts {
-			qa := gen.QuotaAccount{Account: toGenAccount(toAccount(a.Account))}
+			plan := ""
 			if a.Quota != nil {
-				qa.Quota = toGenQuota(*a.Quota)
+				plan = a.Quota.Plan
 			}
-			p.Accounts = append(p.Accounts, qa)
+			if matches(pr.Q, a.Account.Label, strconv.FormatInt(a.Account.ID, 10), plan) {
+				rows = append(rows, row{len(items), a})
+			}
 		}
-		resp = append(resp, p)
+		items = append(items, gen.QuotaProvider{
+			Provider: v.Provider, Supported: v.Supported, Available: v.Available, Exhausted: v.Exhausted,
+			Cooling: v.Cooling, SignIn: v.SignIn, Suspended: v.Suspended, NextReset: v.NextReset, Accounts: []gen.QuotaAccount{},
+		})
 	}
-	return resp, nil
+	accounts, total := page(rows, pr.Limit, pr.Offset)
+	for _, r := range accounts {
+		a := r.account
+		qa := gen.QuotaAccount{Account: toGenAccount(toAccount(a.Account))}
+		if a.Quota != nil {
+			qa.Quota = toGenQuota(*a.Quota)
+		}
+		items[r.group].Accounts = append(items[r.group].Accounts, qa)
+	}
+	return gen.GetQuota200JSONResponse{Items: items, Total: total}, nil
 }
 
 // RefreshQuota queues quota checks of one account or one provider.

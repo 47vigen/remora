@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/47vigen/remora/internal/api/gen"
 	"github.com/47vigen/remora/internal/engine/bifrost"
@@ -13,6 +16,12 @@ import (
 
 // maxPathAttempts bounds how many fallback attempts of one request the detail reads.
 const maxPathAttempts = 50
+
+// statusLookups bounds the parallel detail reads a page of failed rows costs.
+const statusLookups = 8
+
+// statusLookupTimeout keeps one slow detail read from holding up a page or the live stream.
+const statusLookupTimeout = 2 * time.Second
 
 // ListLogs lists request log entries, newest first, in remora's names. A key or alias the front door does not know
 // matches nothing.
@@ -47,11 +56,30 @@ func (s *Server) ListLogs(ctx context.Context, req gen.ListLogsRequestObject) (g
 			aliases[l.ID] = s.ruleAlias(ctx, l.RoutingRuleID)
 		}
 	}
-	items := make([]gen.LogEntry, 0, len(page.Logs))
-	for _, l := range page.Logs {
-		items = append(items, s.toEntry(ctx, l, aliases[deref(l.ParentRequestID)]))
+	items := make([]gen.LogEntry, len(page.Logs))
+	var g errgroup.Group
+	g.SetLimit(statusLookups)
+	for i, l := range page.Logs {
+		items[i] = s.toEntry(ctx, l, aliases[deref(l.ParentRequestID)])
+		g.Go(func() error { s.fillStatusCode(ctx, l, &items[i]); return nil })
 	}
+	_ = g.Wait()
 	return gen.ListLogs200JSONResponse{Items: items, Total: int(page.Total)}, nil
+}
+
+// fillStatusCode enriches failed summary rows, which usually omit error details.
+func (s *Server) fillStatusCode(ctx context.Context, l bifrost.Log, e *gen.LogEntry) {
+	if (l.Status != "error" && l.Status != "cancelled") || len(l.ErrorDetails) != 0 || s.d.Logs == nil {
+		return
+	}
+	// Keep the row if its detail has expired or is unavailable.
+	ctx, cancel := context.WithTimeout(ctx, statusLookupTimeout)
+	defer cancel()
+	if full, err := s.d.Logs.GetLog(ctx, l.ID); err == nil {
+		if code, _ := full.Failure(); code != 0 {
+			e.StatusCode = &code
+		}
+	}
 }
 
 // GetLog answers one entry with its bodies and the request's whole fallback path, root first, whichever attempt
@@ -77,8 +105,8 @@ func (s *Server) GetLog(ctx context.Context, req gen.GetLogRequestObject) (gen.G
 	rootAlias := s.ruleAlias(ctx, root.RoutingRuleID)
 	e := s.toEntry(ctx, l, rootAlias)
 	d := gen.GetLog200JSONResponse{
-		Id: e.Id, ParentId: e.ParentId, Attempt: e.Attempt, Time: e.Time, Key: e.Key, Alias: e.Alias,
-		Provider: e.Provider, Model: e.Model, Status: gen.LogDetailStatus(e.Status), LatencyMs: e.LatencyMs,
+		Id: e.Id, ParentId: e.ParentId, Attempt: e.Attempt, Time: e.Time, Key: e.Key, KeyName: e.KeyName, Alias: e.Alias,
+		Provider: e.Provider, Model: e.Model, Status: gen.LogDetailStatus(e.Status), StatusCode: e.StatusCode, LatencyMs: e.LatencyMs,
 		Tokens: e.Tokens, CostUsd: e.CostUsd, Stream: e.Stream, Error: e.Error,
 		Request:      bodies(map[string]json.RawMessage{"messages": l.InputHistory, "params": l.Params}),
 		Response:     bodies(map[string]json.RawMessage{"message": l.OutputMessage}),
@@ -106,7 +134,7 @@ func (s *Server) fallbackPath(ctx context.Context, root, asked bifrost.Log) ([]b
 			continue
 		case a.ID == asked.ID:
 			a = asked
-		case a.Status == "error" && len(a.ErrorDetails) == 0:
+		case (a.Status == "error" || a.Status == "cancelled") && len(a.ErrorDetails) == 0:
 			full, err := s.d.Logs.GetLog(ctx, a.ID)
 			if err != nil && !errors.Is(err, bifrost.ErrNotFound) {
 				return nil, err

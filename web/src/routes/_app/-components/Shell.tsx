@@ -18,6 +18,7 @@ const GROUPS: readonly { label: string; items: readonly NavItem[] }[] = [
     label: "Monitor",
     items: [
       { href: "/", label: "Overview", icon: ChartColumn },
+      { href: "/logs", label: "Logs", icon: ListUl },
       { href: "/quota", label: "Quota", icon: Speedometer },
     ],
   },
@@ -30,10 +31,7 @@ const GROUPS: readonly { label: string; items: readonly NavItem[] }[] = [
   },
   {
     label: "Access",
-    items: [
-      { href: "/keys", label: "Keys", icon: Key },
-      { href: "/logs", label: "Logs", icon: ListUl },
-    ],
+    items: [{ href: "/keys", label: "Keys", icon: Key }],
   },
 ];
 

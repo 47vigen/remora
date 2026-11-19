@@ -12,6 +12,19 @@ export type Health =
   | "success"
   | "suspended";
 
+export const STATUS_LABELS: Record<Health, string> = {
+  ok: "Healthy",
+  degraded: "Degraded",
+  down: "Down",
+  unknown: "Not tested",
+  active: "Active",
+  cooling: "Cooling",
+  disabled: "Disabled",
+  error: "Error",
+  success: "Success",
+  suspended: "Suspended",
+};
+
 type ChipColor = "success" | "warning" | "danger" | "default";
 
 const COLORS: Record<Health, ChipColor> = {
@@ -36,15 +49,20 @@ const DOT: Record<ChipColor, string> = {
 
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
 
-export function StatusChip({ status, until }: { status: Health; until?: string }) {
+export function StatusChip({ status, until, statusCode }: { status: Health; until?: string; statusCode?: number }) {
   const color = COLORS[status];
-  const label = status.charAt(0).toUpperCase() + status.slice(1);
   const end = status === "cooling" && until ? new Date(until) : undefined;
   return (
     <Chip color={color} variant="soft" size="sm" data-color={color} className="gap-1.5 pl-1.5">
       <span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", DOT[color])} />
       <Chip.Label className="text-[11px]">
-        {label}
+        {STATUS_LABELS[status]}
+        {statusCode !== undefined ? (
+          <>
+            {" "}
+            <span className="tabular-nums">{statusCode}</span>
+          </>
+        ) : null}
         {end && !Number.isNaN(end.getTime()) ? (
           <>
             {" until "}

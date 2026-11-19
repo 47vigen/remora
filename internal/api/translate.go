@@ -13,6 +13,7 @@ import (
 	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/api/gen"
 	"github.com/47vigen/remora/internal/engine/bifrost"
+	"github.com/47vigen/remora/internal/proxy"
 )
 
 // LogSource reads the front door's request log; *bifrost.Client satisfies it.
@@ -23,7 +24,6 @@ type LogSource interface {
 	Histogram(ctx context.Context, f bifrost.LogFilter) ([]bifrost.HistogramBucket, error)
 	TokenHistogram(ctx context.Context, f bifrost.LogFilter) ([]bifrost.TokenBucket, error)
 	CostHistogram(ctx context.Context, f bifrost.LogFilter) ([]bifrost.CostBucket, error)
-	LatencyHistogram(ctx context.Context, f bifrost.LogFilter) ([]bifrost.LatencyBucket, error)
 	ModelUsage(ctx context.Context, f bifrost.LogFilter) ([]bifrost.ModelUsage, error)
 	LogModels(ctx context.Context, query string) ([]string, error)
 }
@@ -105,8 +105,8 @@ func (s *Server) toEntry(ctx context.Context, l bifrost.Log, rootAlias string) g
 		e.ParentId = new(*l.ParentRequestID)
 	}
 	if l.VirtualKeyID != nil && *l.VirtualKeyID != "" {
-		if id, _, ok := s.d.Names.KeyByVK(ctx, *l.VirtualKeyID); ok {
-			e.Key = &id
+		if id, name, ok := s.d.Names.KeyByVK(ctx, *l.VirtualKeyID); ok {
+			e.Key, e.KeyName = &id, &name
 		}
 	}
 	if a := s.ruleAlias(ctx, l.RoutingRuleID); a != "" {
@@ -120,8 +120,11 @@ func (s *Server) toEntry(ctx context.Context, l bifrost.Log, rootAlias string) g
 	if u := l.TokenUsage; u != nil {
 		e.Tokens = gen.TokenUsage{Prompt: int(u.PromptTokens), Completion: int(u.CompletionTokens), Total: int(u.TotalTokens)}
 	}
+	if code, _ := l.Failure(); code != 0 {
+		e.StatusCode = &code
+	}
 	if msg := errorMessage(l.ErrorDetails); msg != "" {
-		e.Error = new(Scrub(msg))
+		e.Error = new(Scrub(proxy.TranslateModelError(msg, t.Provider+"/"+t.Model)))
 	}
 	return e
 }

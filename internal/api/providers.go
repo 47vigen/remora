@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"sync"
 
 	"github.com/47vigen/remora/internal/alias"
@@ -193,7 +194,10 @@ func (s *Server) ListProviders(ctx context.Context, req gen.ListProvidersRequest
 	pr := req.Params
 	var out []gen.Provider
 	for _, p := range all {
-		if pr.Kind != nil && string(*pr.Kind) != p.Kind || pr.Type != nil && *pr.Type != p.Type || !matches(pr.Q, p.Name) {
+		if pr.Kind != nil && string(*pr.Kind) != p.Kind ||
+			pr.Kinds != nil && !slices.Contains(*pr.Kinds, gen.ProviderKind(p.Kind)) ||
+			pr.Type != nil && *pr.Type != p.Type ||
+			pr.Status != nil && *pr.Status != h.status(p.Name) || !matches(pr.Q, p.Name) {
 			continue
 		}
 		out = append(out, toGenProvider(p, h))
@@ -236,6 +240,22 @@ func (s *Server) GetProvider(ctx context.Context, req gen.GetProviderRequestObje
 		return nil, err
 	}
 	return gen.GetProvider200JSONResponse(toGenProvider(p, h)), nil
+}
+
+// GetProviderModels returns known models with the provider name used by clients.
+func (s *Server) GetProviderModels(ctx context.Context, req gen.GetProviderModelsRequestObject) (gen.GetProviderModelsResponseObject, error) {
+	if s.d.Providers == nil {
+		return nil, errNotImplemented
+	}
+	models, err := s.d.Providers.Models(ctx, req.Name)
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]string, 0, len(models))
+	for _, model := range models {
+		refs = append(refs, req.Name+"/"+model)
+	}
+	return gen.GetProviderModels200JSONResponse{Models: refs}, nil
 }
 
 // UpdateProvider replaces a provider. Keys sent without a value keep their stored secret; no keys keep them all.

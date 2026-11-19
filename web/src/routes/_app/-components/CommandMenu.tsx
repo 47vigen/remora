@@ -5,6 +5,8 @@ import { createContext, type ReactNode, use, useEffect, useState } from "react";
 import { Autocomplete } from "react-aria-components";
 
 import { listAliasesOptions, listKeysOptions, listProvidersOptions } from "../../../client/@tanstack/react-query.gen";
+import { PAGE_SIZES } from "../../../lib/list-search";
+import { useDebouncedSearch } from "../../../lib/use-debounced-search";
 
 type Entry = { id: string; label: string; hint?: string; href: string };
 
@@ -25,7 +27,6 @@ const ACTIONS: Entry[] = [
   { id: "do:live", label: "Watch live logs", href: "/logs?live=true" },
 ];
 
-const LIMIT = 200;
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
 function Section({ title, items }: { title: string; items: Entry[] }) {
@@ -67,6 +68,8 @@ function Trigger() {
 /** Jump to any page, provider, alias or key, or start a common task. Opens with ⌘K / Ctrl+K or a Trigger. */
 function Root({ children }: { children: ReactNode }) {
   const [isOpen, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const q = useDebouncedSearch(text);
   const { contains } = useFilter({ sensitivity: "base" });
 
   useEffect(() => {
@@ -80,23 +83,26 @@ function Root({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const providers = useQuery({ ...listProvidersOptions({ query: { limit: LIMIT } }), enabled: isOpen });
-  const aliases = useQuery({ ...listAliasesOptions({ query: { limit: LIMIT } }), enabled: isOpen });
-  const keys = useQuery({ ...listKeysOptions({ query: { limit: LIMIT } }), enabled: isOpen });
+  const query = { limit: PAGE_SIZES[0], q: q || undefined };
+  const enabled = isOpen && q === text.trim();
+  const providers = useQuery({ ...listProvidersOptions({ query }), enabled });
+  const aliases = useQuery({ ...listAliasesOptions({ query }), enabled });
+  const keys = useQuery({ ...listKeysOptions({ query }), enabled });
+  const local = (entries: Entry[]) => entries.filter((e) => contains(e.label, text.trim()));
 
-  const providerItems: Entry[] = (providers.data?.items ?? []).map((p) => ({
+  const providerItems: Entry[] = ((enabled ? providers.data?.items : undefined) ?? []).map((p) => ({
     id: `provider:${p.name}`,
     label: p.name,
     hint: "provider",
     href: `/providers/${encodeURIComponent(p.name)}`,
   }));
-  const aliasItems: Entry[] = (aliases.data?.items ?? []).map((a) => ({
+  const aliasItems: Entry[] = ((enabled ? aliases.data?.items : undefined) ?? []).map((a) => ({
     id: `alias:${a.name}`,
     label: a.name,
     hint: a.kind,
     href: `/aliases/${encodeURIComponent(a.name)}`,
   }));
-  const keyItems: Entry[] = (keys.data?.items ?? []).map((k) => ({
+  const keyItems: Entry[] = ((enabled ? keys.data?.items : undefined) ?? []).map((k) => ({
     id: `key:${k.id}`,
     label: k.name,
     hint: `${k.prefix}…`,
@@ -109,7 +115,7 @@ function Root({ children }: { children: ReactNode }) {
       <Modal.Backdrop isOpen={isOpen} onOpenChange={setOpen} isDismissable className="no-motion">
         <Modal.Container placement="top" size="lg" className="pt-[12vh]">
           <Modal.Dialog aria-label="Search" className="overflow-hidden p-0">
-            <Autocomplete filter={contains}>
+            <Autocomplete inputValue={text} onInputChange={setText}>
               <div className="border-border border-b p-2">
                 {/* oxlint-disable-next-line jsx-a11y/no-autofocus -- a command menu exists to be typed into at once */}
                 <SearchField aria-label="Search" autoFocus className="w-full">
@@ -126,8 +132,8 @@ function Root({ children }: { children: ReactNode }) {
                 onAction={() => setOpen(false)}
                 renderEmptyState={() => <p className="text-muted px-3 py-8 text-center text-sm">Nothing matches.</p>}
               >
-                <Section title="Go to" items={PAGES} />
-                <Section title="Actions" items={ACTIONS} />
+                <Section title="Go to" items={local(PAGES)} />
+                <Section title="Actions" items={local(ACTIONS)} />
                 <Section title="Providers" items={providerItems} />
                 <Section title="Aliases" items={aliasItems} />
                 <Section title="Keys" items={keyItems} />

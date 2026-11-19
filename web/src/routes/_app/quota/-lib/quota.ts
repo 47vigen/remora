@@ -1,4 +1,4 @@
-import type { QuotaAccount, QuotaProvider, QuotaWindow } from "../../../../client/types.gen";
+import type { QuotaProvider, QuotaWindow } from "../../../../client/types.gen";
 
 export type Level = "ok" | "warn" | "critical" | "unknown";
 
@@ -29,27 +29,12 @@ export function windowLabel(w: QuotaWindow): string {
   return `${SCOPES[w.scope] ?? w.scope} · ${length}`;
 }
 
-export type QuotaRow = { provider: string; item: QuotaAccount };
-
-/** Every account as one row, in provider order, matched by label or plan and kept to one provider when given. */
-export function quotaRows(providers: QuotaProvider[], q?: string, provider?: string): QuotaRow[] {
-  const needle = q?.trim().toLowerCase() ?? "";
-  return providers
-    .filter((p) => !provider || p.provider === provider)
-    .flatMap((p) => p.accounts.map((item) => ({ provider: p.provider, item })))
-    .filter(
-      ({ item }) =>
-        needle === "" ||
-        (item.account.email ?? item.account.id).toLowerCase().includes(needle) ||
-        (item.quota?.plan ?? "").toLowerCase().includes(needle),
-    );
-}
-
-/** Whether every queued account was checked at or after since. */
+/** Whether every visible queued account was checked at or after since. */
 export function refreshSettled(providers: QuotaProvider[], queued: string[], since: Date): boolean {
-  const checked = new Map(providers.flatMap((p) => p.accounts.map((a) => [a.account.id, a.quota?.checked_at])));
-  return queued.every((id) => {
-    const at = checked.get(id);
-    return at !== undefined && Date.parse(at) >= since.getTime();
-  });
+  const waiting = new Set(queued);
+  return providers.every((p) =>
+    p.accounts.every(
+      (a) => !waiting.has(a.account.id) || (a.quota !== undefined && Date.parse(a.quota.checked_at) >= since.getTime()),
+    ),
+  );
 }

@@ -30,12 +30,23 @@ export function summarize(t: StatsSummary): Summary {
   };
 }
 
-export type HealthCounts = Record<Provider["status"], number>;
+export type HealthCounts = Record<Provider["status"], number> & { fromTraffic: number };
 
-/** Counts providers by status. */
-export function healthCounts(items: Provider[]): HealthCounts {
-  const counts: HealthCounts = { ok: 0, degraded: 0, down: 0, unknown: 0 };
-  for (const p of items) counts[p.status] = (counts[p.status] ?? 0) + 1;
+const TRAFFIC_HEALTH_MAX_ERROR_RATE = 0.05;
+
+/** Counts providers by status; fromTraffic is the subset of ok inferred from the selected window. */
+export function healthCounts(items: Provider[], groups: StatsGroup[] = []): HealthCounts {
+  const byProvider = new Map(groups.map(({ name, summary }) => [name, summary]));
+  const counts: HealthCounts = { ok: 0, degraded: 0, down: 0, unknown: 0, fromTraffic: 0 };
+  for (const { name, status } of items) {
+    const traffic = status === "unknown" ? byProvider.get(name) : undefined;
+    if (traffic && traffic.requests > 0 && traffic.errors / traffic.requests < TRAFFIC_HEALTH_MAX_ERROR_RATE) {
+      counts.ok++;
+      counts.fromTraffic++;
+    } else {
+      counts[status]++;
+    }
+  }
   return counts;
 }
 
