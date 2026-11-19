@@ -252,6 +252,30 @@ func TestAccountsAdapterList(t *testing.T) {
 	}
 }
 
+func TestAccountsAdapterModelCooldownCase(t *testing.T) {
+	acc, fake, st := newAccountsAdapter(t)
+	retry := time.Date(2026, 10, 14, 13, 0, 0, 0, time.UTC)
+	fake.AddCredential(cliproxyapi.Credential{
+		Name: "codex-a.json", Provider: "codex",
+		Cooldowns: []cliproxyapi.Cooldown{
+			{Scope: "model", ModelKey: "GPT-X", Reason: "transient_error", RetryAt: retry.Add(-time.Second), HTTPStatus: 503},
+			{Scope: "model", ModelKey: "CODEX/gpt-x", Reason: "quota", RetryAt: retry, HTTPStatus: 429},
+		},
+	})
+	fake.SetModels("codex-a.json", "Gpt-X")
+	addAccountRow(t, st, "codex", "", "codex-a.json", true)
+
+	got, err := acc.List(t.Context(), "codex")
+	if err != nil || len(got) != 1 {
+		t.Fatalf("List(codex) = %+v, %v", got, err)
+	}
+	quota := got[0].Quota
+	if len(quota) != 1 || quota[0].Model != "codex/Gpt-X" || quota[0].RemainingFraction == nil ||
+		*quota[0].RemainingFraction != 0 || quota[0].ResetAt == nil || !quota[0].ResetAt.Equal(retry) {
+		t.Errorf("Quota = %+v, want one entry for codex/Gpt-X resetting at %v", quota, retry)
+	}
+}
+
 func TestAccountsAdapterIDs(t *testing.T) {
 	ctx := context.Background()
 	acc, fake, st := newAccountsAdapter(t)

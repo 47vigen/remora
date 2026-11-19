@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -81,14 +82,21 @@ type Reconciler struct {
 	Also []func(ctx context.Context) error
 	// Publish, when set, receives the live chains of every spreading alias after a pass commits; never inside Batch's
 	// nested calls, never after a rollback.
-	Publish  func(chains map[string]alias.Chain)
-	Interval time.Duration // 0 = 60s
-	MaxDepth int           // 0 = alias.DefaultMaxDepth
+	Publish    func(chains map[string]alias.Chain)
+	Interval   time.Duration // 0 = 60s
+	ForceEvery time.Duration // 0 = 1h between full syncs
+	MaxDepth   int           // 0 = alias.DefaultMaxDepth
+	// RestartCount, when set, reports the total engine restarts this process has seen.
+	RestartCount func() int
 	// SonioxURL is the speech adapter's base URL, e.g. "http://127.0.0.1:18090"; "" = a soniox provider is invalid.
 	SonioxURL string
 	// SonioxDeadline is the adapter's deadline; 0 = 30m. The front door waits 60 s longer.
 	SonioxDeadline time.Duration
 	Log            *slog.Logger
+
+	syncMu       sync.Mutex // serializes sync transactions with their post-commit full-push bookkeeping
+	lastForce    time.Time
+	lastRestarts int
 
 	synced     atomic.Bool // a Sync has completed
 	alsoSynced atomic.Bool // a SyncAll has run every Also step without an error
@@ -118,25 +126,44 @@ func (r *Reconciler) Synced() bool {
 	return r.synced.Load() && (len(r.Also) == 0 || r.alsoSynced.Load())
 }
 
-// sync runs one non-strict pass; objects in force are pushed even when their MAC matches. A pass that fails after
-// it changed the engine leaves it partly reconciled, so Synced reports false until a pass succeeds again.
+// sync runs a non-strict pass, ignoring matching MACs for objects in force or when a full push is due.
+// A pass that fails after changing the engine clears Synced until a pass succeeds again.
 func (r *Reconciler) sync(ctx context.Context, force map[string]bool) error {
-	touched := map[string]bool{}
-	var chains map[string]alias.Chain
-	err := r.Store.Write(ctx, func(tx *store.Tx) error {
-		p := &pass{r: r, tx: tx, force: force, touched: touched}
-		err := p.run(ctx)
-		chains = p.chains
-		return err
-	})
-	if err != nil {
-		if len(touched) > 0 {
+	p := &pass{r: r, force: force, touched: map[string]bool{}}
+	if err := r.commitSync(ctx, p); err != nil {
+		if len(p.touched) > 0 {
 			r.synced.Store(false)
 		}
 		return fmt.Errorf("reconcile: sync: %w", err)
 	}
-	r.publish(chains)
+	r.publish(p.chains)
 	return nil
+}
+
+func (r *Reconciler) commitSync(ctx context.Context, p *pass) error {
+	r.syncMu.Lock()
+	defer r.syncMu.Unlock()
+
+	every := r.ForceEvery
+	if every <= 0 {
+		every = time.Hour
+	}
+	var now time.Time
+	var restarts int
+	err := r.Store.Write(ctx, func(tx *store.Tx) error {
+		now = time.Now()
+		if r.RestartCount != nil {
+			restarts = r.RestartCount()
+		}
+		p.tx = tx
+		p.forceAll = r.lastForce.IsZero() || restarts != r.lastRestarts || now.Sub(r.lastForce) >= every
+		return p.run(ctx)
+	})
+	// A failed full push leaves its trigger pending for the next sync.
+	if err == nil && p.forceAll {
+		r.lastForce, r.lastRestarts = now, restarts
+	}
+	return err
 }
 
 // Change runs fn and a strict pass in one store.Write, so a change the engine refuses is not committed. When the pass
@@ -223,13 +250,14 @@ func (r *Reconciler) Run(ctx context.Context) {
 
 // pass is one reconcile pass inside a store transaction.
 type pass struct {
-	r       *Reconciler
-	tx      *store.Tx
-	strict  bool
-	force   map[string]bool // objects to push even when their MAC matches
-	touched map[string]bool // objects this pass sent a mutating call for; survives a rollback
-	macs    map[string]string
-	chains  map[string]alias.Chain // the desired state's live chains, set once it is built
+	r        *Reconciler
+	tx       *store.Tx
+	strict   bool
+	forceAll bool
+	force    map[string]bool // objects to push even when their MAC matches
+	touched  map[string]bool // objects this pass sent a mutating call for; survives a rollback
+	macs     map[string]string
+	chains   map[string]alias.Chain // the desired state's live chains, set once it is built
 }
 
 // stale is an engine object to delete after the pushes.
@@ -341,7 +369,7 @@ func (p *pass) mac(v any) (string, error) {
 
 // changed reports whether obj must be pushed although it exists in the engine.
 func (p *pass) changed(obj, mac string) bool {
-	return p.force[obj] || p.macs[obj] != mac
+	return p.forceAll || p.force[obj] || p.macs[obj] != mac
 }
 
 func (p *pass) pushProviders(ctx context.Context, d *desiredState, eng []bifrost.Provider) ([]stale, error) {

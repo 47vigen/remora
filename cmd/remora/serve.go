@@ -155,7 +155,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	// Cooling leaves failing alias members out of the compiled rules; a change recompiles through Sync.
 	accts := accounts.New(accountsEngine(cfg, creds), st, logger)
 	fd := frontDoor(cfg, creds)
-	rec := newReconciler(cfg, st, fd, logger)
+	rec := newReconciler(cfg, st, fd, logger, sup)
 	withOAuth(rec, cfg, creds.CLIProxyAPIKey)
 	rec.Also = []func(context.Context) error{accts.Reconcile}
 	cooler := cooling.New(cooling.Config{
@@ -271,14 +271,24 @@ func selfMemoryLimit(limit int64, getenv func(string) string) int64 {
 }
 
 // newReconciler is serve's reconciler: the store, the front door and the speech adapter it registers.
-func newReconciler(cfg config.Config, st *store.Store, engine reconcile.Engine, logger *slog.Logger) *reconcile.Reconciler {
-	return &reconcile.Reconciler{
+func newReconciler(cfg config.Config, st *store.Store, engine reconcile.Engine, logger *slog.Logger, status ...api.StatusSource) *reconcile.Reconciler {
+	r := &reconcile.Reconciler{
 		Store:          st,
 		Engine:         engine,
 		Log:            logger,
 		SonioxURL:      "http://" + cfg.SonioxAddr,
 		SonioxDeadline: cfg.SonioxDeadline,
 	}
+	if len(status) > 0 {
+		r.RestartCount = func() int {
+			var total int
+			for _, e := range status[0].Status() {
+				total += e.Restarts
+			}
+			return total
+		}
+	}
+	return r
 }
 
 // startSpeech serves the speech-to-text adapter on its loopback address and runs the sweeper of leftover upstream

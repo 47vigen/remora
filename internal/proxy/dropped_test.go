@@ -14,11 +14,41 @@ func TestCodexDroppedParams(t *testing.T) {
 		want             []string
 	}{
 		{
-			name: "chat drops sampling, limits and stop",
+			name: "chat drops sampling and stop but keeps the limit",
 			path: "/v1/chat/completions",
 			body: `{"model":"codex/gpt-x","messages":[],"temperature":0.5,"top_p":0.9,"max_tokens":10,` +
 				`"parallel_tool_calls":false,"stop":["x"]}`,
-			want: []string{"max_tokens", "stop", "temperature", "top_p"},
+			want: []string{"stop", "temperature", "top_p"},
+		},
+		{
+			name: "chat prefers max completion tokens",
+			path: "/v1/chat/completions",
+			body: `{"max_completion_tokens":10,"max_tokens":20,"max_output_tokens":30}`,
+			want: []string{"max_output_tokens", "max_tokens"},
+		},
+		{
+			name: "chat falls back to max tokens before max output tokens",
+			path: "/v1/chat/completions",
+			body: `{"max_completion_tokens":"10","max_tokens":20,"max_output_tokens":30}`,
+			want: []string{"max_completion_tokens", "max_output_tokens"},
+		},
+		{
+			name: "chat falls back to max output tokens",
+			path: "/v1/chat/completions",
+			body: `{"max_completion_tokens":null,"max_tokens":false,"max_output_tokens":30}`,
+			want: []string{"max_completion_tokens", "max_tokens"},
+		},
+		{
+			name: "chat keeps zero before another numeric limit",
+			path: "/v1/chat/completions",
+			body: `{"max_completion_tokens":0,"max_tokens":20}`,
+			want: []string{"max_tokens"},
+		},
+		{
+			name: "chat drops nonnumeric output limit",
+			path: "/v1/chat/completions",
+			body: `{"max_output_tokens":"30"}`,
+			want: []string{"max_output_tokens"},
 		},
 		{
 			name: "chat keeps what the translator carries",
@@ -38,10 +68,34 @@ func TestCodexDroppedParams(t *testing.T) {
 			want: []string{"n", "service_tier", "user"},
 		},
 		{
-			name: "responses drops limits, user, store and tier",
+			name: "responses keeps explicit output limit over legacy limits",
 			path: "/v1/responses",
-			body: `{"model":"m","input":"hi","max_output_tokens":10,"user":"u","store":true,"service_tier":"flex"}`,
-			want: []string{"max_output_tokens", "service_tier", "store", "user"},
+			body: `{"model":"m","input":"hi","max_output_tokens":10,"max_tokens":20,"user":"u","store":true,"service_tier":"flex"}`,
+			want: []string{"max_tokens", "service_tier", "store", "user"},
+		},
+		{
+			name: "responses falls back to a numeric legacy limit",
+			path: "/v1/responses",
+			body: `{"max_output_tokens":null,"max_completion_tokens":"10","max_tokens":20}`,
+			want: []string{"max_completion_tokens", "max_output_tokens"},
+		},
+		{
+			name: "responses prefers max completion tokens when output limit is absent",
+			path: "/v1/responses",
+			body: `{"max_completion_tokens":10,"max_tokens":20}`,
+			want: []string{"max_tokens"},
+		},
+		{
+			name: "responses preserves nonnumeric explicit output limit",
+			path: "/v1/responses",
+			body: `{"max_output_tokens":"30","max_completion_tokens":10,"max_tokens":20}`,
+			want: []string{"max_completion_tokens", "max_tokens"},
+		},
+		{
+			name: "responses preserves null output limit without numeric fallback",
+			path: "/v1/responses",
+			body: `{"max_output_tokens":null,"max_tokens":true}`,
+			want: []string{"max_tokens"},
 		},
 		{
 			name: "responses keeps priority tier and store false",
@@ -51,7 +105,7 @@ func TestCodexDroppedParams(t *testing.T) {
 		{
 			name: "responses drops the rest of its list",
 			path: "/v1/responses",
-			body: `{"model":"m","input":"hi","temperature":1,"top_p":1,"max_completion_tokens":5,"truncation":"auto",` +
+			body: `{"model":"m","input":"hi","temperature":1,"top_p":1,"max_completion_tokens":"5","truncation":"auto",` +
 				`"prompt_cache_options":{},"prompt_cache_retention":"24h","context_management":[],` +
 				`"parallel_tool_calls":"no","service_tier":7,"metadata":{}}`,
 			want: []string{
@@ -60,10 +114,16 @@ func TestCodexDroppedParams(t *testing.T) {
 			},
 		},
 		{
-			name: "messages",
+			name: "messages keeps a positive max tokens limit",
 			path: "/v1/messages",
-			body: `{"model":"m","messages":[],"max_tokens":10,"temperature":0.2}`,
-			want: []string{"max_tokens", "temperature"},
+			body: `{"model":"m","messages":[],"max_tokens":100,"temperature":0.2}`,
+			want: []string{"temperature"},
+		},
+		{
+			name: "messages omits a zero max tokens limit",
+			path: "/v1/messages",
+			body: `{"model":"m","messages":[],"max_tokens":0}`,
+			want: []string{"max_tokens"},
 		},
 		{
 			name: "messages keeps the rest",
@@ -124,11 +184,11 @@ func TestDroppedParamsHeader(t *testing.T) {
 		},
 		{
 			name: "codex responses", provider: "codex", model: "gpt-x", path: "/v1/responses",
-			body: `{"model":"codex/gpt-x","input":"hi","max_output_tokens":5,"user":"u"}`, want: "max_output_tokens,user",
+			body: `{"model":"codex/gpt-x","input":"hi","max_output_tokens":100,"user":"u"}`, want: "user",
 		},
 		{
 			name: "codex messages", provider: "codex", model: "gpt-x", path: "/v1/messages",
-			body: `{"model":"codex/gpt-x","messages":[],"max_tokens":5}`, want: "max_tokens",
+			body: `{"model":"codex/gpt-x","messages":[],"max_tokens":100}`,
 		},
 		{
 			name: "other provider", provider: "openrouter", model: "m", path: "/v1/chat/completions",

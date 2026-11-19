@@ -122,14 +122,48 @@ func TestAliasNamedLikeProviderModel(t *testing.T) {
 	}
 }
 
-// TestReconcileAfterEngineRestart kills the front door inside the container; the supervisor restarts it, and the
-// aliases and keys work again without another apply.
+// TestReconcileAfterEngineRestart edits the front door directly and checks that a supervised restart repairs it
+// without another apply.
 func TestReconcileAfterEngineRestart(t *testing.T) {
 	resetFakes(t)
+	// Use the engine's loopback management API without exposing its port or returning its credentials to the host.
+	const editFrontDoor = `
+set -eo pipefail
+request() {
+    local method=$1 path=$2 body=$3 auth=$4
+    exec 3<>/dev/tcp/127.0.0.1/18080
+    printf '%s %s HTTP/1.1\r\nHost: 127.0.0.1:18080\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: %s\r\n%s\r\n%s' \
+        "$method" "$path" "${#body}" "$auth" "$body" >&3
+    cat <&3
+    exec 3>&-
+}
+password=$(sed -n 's/.*"admin_password": "\([A-Za-z0-9_-]*\)".*/\1/p' "$REMORA_DATA/bifrost/config.json")
+[ -n "$password" ]
+login=$(printf '{"username":"remora","password":"%s"}' "$password")
+session=$(request POST /api/session/login "$login" '' | sed -n 's/^Set-Cookie: token=\([^;]*\);.*/\1/ip')
+[ -n "$session" ]
+request PUT /api/providers/up-a "$1" "Authorization: Bearer $session"$'\r\n' | awk 'NR == 1 && $2 ~ /^[0-9][0-9][0-9]$/ {print $2}'
+`
+	const driftedProvider = `{"network_config":{"base_url":"http://fakes:9090/u/c","allow_private_network":true,` +
+		`"default_request_timeout_in_seconds":600,"stream_idle_timeout_in_seconds":300},` +
+		`"concurrency_and_buffer_size":{"concurrency":1000,"buffer_size":5000},` +
+		`"custom_provider_config":{"base_provider_type":"openai"}}`
+	out, code := execIn(t, "remora", "timeout", "30s", "bash", "-c", editFrontDoor, "edit-provider", driftedProvider)
+	if code != 0 || strings.TrimSpace(out) != "200" {
+		t.Fatalf("edit provider directly: exit %d, HTTP status %q", code, strings.TrimSpace(out))
+	}
+	rep := chat(t, chatBody("fast", false))
+	wantStatus(t, rep, http.StatusOK)
+	wantHeader(t, rep, "X-Remora-Served-By", "up-a/m1")
+	if n := len(received(t, "c", control.RouteOpenAIChat)); n != 1 {
+		t.Fatalf("direct engine edit sent %d requests to up-c, want 1", n)
+	}
+	resetFakes(t)
+
 	const killFrontDoor = `n=0; for d in /proc/[0-9]*; do ` +
 		`if [ "$(readlink "$d/exe" 2>/dev/null)" = /usr/local/lib/remora/engines/bifrost ]; then ` +
 		`kill "${d#/proc/}" && n=$((n+1)); fi; done; echo "$n"`
-	out, code := execIn(t, "remora", "sh", "-c", killFrontDoor)
+	out, code = execIn(t, "remora", "sh", "-c", killFrontDoor)
 	if code != 0 || strings.TrimSpace(out) != "1" {
 		t.Fatalf("kill front door: exit %d, killed %q processes, want 1", code, strings.TrimSpace(out))
 	}
@@ -144,15 +178,15 @@ func TestReconcileAfterEngineRestart(t *testing.T) {
 	}
 	waitHealthy(t, 120*time.Second)
 
-	deadline = time.Now().Add(30 * time.Second)
+	// The full pass runs on the normal reconcile timer (60 s), not on the health transition.
+	deadline = time.Now().Add(90 * time.Second)
 	for {
 		rep := chat(t, chatBody("fast", false))
-		if rep.Status == http.StatusOK {
-			wantHeader(t, rep, "X-Remora-Served-By", "up-a/m1")
+		if served(rep, "up-a/m1", false) && len(received(t, "a", control.RouteOpenAIChat)) > 0 {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("fast after restart: status %d, body %s", rep.Status, rep.Body)
+			t.Fatalf("fast did not reach up-a's original upstream after restart: last status %d", rep.Status)
 		}
 		time.Sleep(time.Second)
 	}

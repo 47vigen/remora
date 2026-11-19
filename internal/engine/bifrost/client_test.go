@@ -301,6 +301,29 @@ func TestClient_CreateVirtualKeyReturnsIDAndValue(t *testing.T) {
 	}
 }
 
+func TestClient_VirtualKeyValidation(t *testing.T) {
+	for _, status := range []int{http.StatusBadRequest, http.StatusConflict, http.StatusInternalServerError} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			_, c := newFakeEngine(t, map[string]answer{
+				"POST /api/governance/virtual-keys":    {status, `{"error":"private engine detail"}`},
+				"PUT /api/governance/virtual-keys/vk1": {status, `{"error":"private engine detail"}`},
+			})
+			v := VirtualKey{ID: "vk1", Name: "remora:key:c1", Active: true}
+			_, createErr := c.CreateVirtualKey(t.Context(), v)
+			for op, err := range map[string]error{"create": createErr, "update": c.UpdateVirtualKey(t.Context(), v)} {
+				wantValidation := status != http.StatusInternalServerError
+				if errors.Is(err, ErrInvalidVirtualKey) != wantValidation {
+					t.Errorf("%s: validation = %t, want %t", op, !wantValidation, wantValidation)
+				}
+				var upstream *APIError
+				if !errors.As(err, &upstream) || upstream.Status != status {
+					t.Errorf("%s: error does not preserve upstream status %d", op, status)
+				}
+			}
+		})
+	}
+}
+
 func TestClient_EmptyIDsNeverReachTheEngine(t *testing.T) {
 	f, c := newFakeEngine(t, nil)
 	ctx := context.Background()

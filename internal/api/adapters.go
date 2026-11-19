@@ -593,8 +593,8 @@ func (a accountsAdapter) Pool(ctx context.Context) ([]accounts.PoolStatus, error
 }
 
 // toAccount maps an account. CooldownUntil is the latest restriction on the whole credential (the engine's next
-// retry time or a credential cooldown); each model cooldown becomes a quota entry that resets when it ends, with
-// nothing remaining when its reason is quota. The engine's other quota signals are opaque and not shown.
+// retry time or a credential cooldown); each model gets one quota entry for its latest cooldown, with nothing
+// remaining when its reason is quota. The engine's other quota signals are opaque and not shown.
 func toAccount(a accounts.Account) Account {
 	out := Account{
 		ID: strconv.FormatInt(a.ID, 10), Provider: a.Provider, Email: a.Label, Status: a.Status,
@@ -614,13 +614,23 @@ func toAccount(a accounts.Account) Account {
 			continue
 		}
 		q := Quota{Model: c.ModelKey, ResetAt: &c.RetryAt}
-		if q.Model != "" && !strings.HasPrefix(q.Model, a.Provider+"/") {
+		provider, model, qualified := strings.Cut(q.Model, "/")
+		if qualified && strings.EqualFold(provider, a.Provider) {
+			q.Model = a.Provider + "/" + model
+		} else if q.Model != "" {
 			q.Model = a.Provider + "/" + q.Model
+		}
+		if i := slices.IndexFunc(a.Models, func(m string) bool { return strings.EqualFold(m, q.Model) }); i >= 0 {
+			q.Model = a.Models[i]
 		}
 		if strings.Contains(strings.ToLower(c.Reason), "quota") {
 			q.RemainingFraction = new(float64)
 		}
-		out.Quota = append(out.Quota, q)
+		if i := slices.IndexFunc(out.Quota, func(prev Quota) bool { return strings.EqualFold(prev.Model, q.Model) }); i < 0 {
+			out.Quota = append(out.Quota, q)
+		} else if c.RetryAt.After(*out.Quota[i].ResetAt) {
+			out.Quota[i] = q
+		}
 	}
 	return out
 }

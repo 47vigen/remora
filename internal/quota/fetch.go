@@ -25,9 +25,9 @@ type Engine interface {
 // The engine's own user agents and Antigravity version source; enginepin_test.go keeps them equal to the engine's.
 const (
 	codexUserAgent          = "codex-tui/0.154.0 (Mac OS 26.5.2; arm64) iTerm.app/3.6.11 (codex-tui; 0.154.0)"
-	claudeUserAgent         = "claude-cli/2.1.280 (external, cli)"
+	claudeUserAgent         = "claude-cli/2.1.321 (external, cli)"
 	antigravityManifestURL  = "https://antigravity-hub-auto-updater-974169037036.us-central1.run.app/manifest/latest-arm64-mac.yml"
-	antigravityVersionFloor = "2.24.0"
+	antigravityVersionFloor = "2.29.0"
 	antigravityPlatform     = "os_type=darwin; arch=arm64"
 	antigravityVersionTTL   = 3 * time.Hour
 	planTTL                 = 24 * time.Hour

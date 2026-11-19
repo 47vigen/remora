@@ -66,6 +66,8 @@ func toAPIError(err error) apiError {
 		return apiError{http.StatusBadRequest, typeInvalidRequest, "invalid_request", "Invalid request: " + re.Error()}
 	case errors.Is(err, store.ErrNotFound), errors.Is(err, bifrost.ErrNotFound):
 		return apiError{http.StatusNotFound, typeNotFound, "not_found", "Not found."}
+	case errors.Is(err, bifrost.ErrInvalidVirtualKey):
+		return apiError{http.StatusBadRequest, typeInvalidRequest, "invalid_request", "The client key was rejected."}
 	case errors.Is(err, store.ErrDuplicate):
 		return apiError{http.StatusConflict, typeInvalidRequest, "conflict", "Already exists."}
 	case errors.Is(err, auth.ErrWeakPassword):
