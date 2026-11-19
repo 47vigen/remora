@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.7.0](https://github.com/47vigen/remora/compare/v0.6.1...v0.7.0) (2026-11-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* **web:** panel review fixes; paged quota list ([#96](https://github.com/47vigen/remora/issues/96))
+
+### Features
+
+* **api:** scoped, expiring API tokens and an audit log ([#95](https://github.com/47vigen/remora/issues/95)) ([f569f54](https://github.com/47vigen/remora/commit/f569f54c1e8293bbc70c329c4c1f4bcec658fdfa))
+
+
+### Bug Fixes
+
+* harden auth, supervision, cooling, drain and the store ([#94](https://github.com/47vigen/remora/issues/94)) ([a993d48](https://github.com/47vigen/remora/commit/a993d48882820833da0539be1967dd6f4bc76c25))
+* **web:** panel review fixes; paged quota list ([#96](https://github.com/47vigen/remora/issues/96)) ([a90a072](https://github.com/47vigen/remora/commit/a90a072b98ee0adef3a031b566ae6d63c79e133a))
+
+
+### Dependencies and engines
+
+* bump the toolchain, modules, web packages, images and CI ([#92](https://github.com/47vigen/remora/issues/92)) ([ab7a905](https://github.com/47vigen/remora/commit/ab7a90598f1d7f41f54d9300ff5918b58a54fe44))
+* **engines:** bifrost transports/v2.5.1 and cliproxyapi v8.0.77 ([#93](https://github.com/47vigen/remora/issues/93)) ([0a81400](https://github.com/47vigen/remora/commit/0a814006c8775cd8fd71aa8966d2aab10d971bce))
+
 ## [0.6.1](https://github.com/47vigen/remora/compare/v0.6.0...v0.6.1) (2026-11-02)
 
 
