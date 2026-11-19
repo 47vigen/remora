@@ -147,6 +147,12 @@ func (p *PendingWrite) Undo(ctx context.Context) error {
 	})
 }
 
+// Abandon ends a change whose compensation failed and will not be retried: the committed rows, unaccepted by the
+// engine, are published so later writes and changes are not held back; the next full sync pushes them.
+func (p *PendingWrite) Abandon(ctx context.Context) {
+	p.store.finishPending(ctx)
+}
+
 func (tx *Tx) captureUndo(ctx context.Context, table string) error {
 	rows, err := tx.tx.QueryContext(ctx, "SELECT name FROM pragma_table_info(?, 'main') ORDER BY cid", table)
 	if err != nil {

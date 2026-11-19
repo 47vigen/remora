@@ -215,6 +215,7 @@ func (r *Reconciler) Change(ctx context.Context, fn func(ctx context.Context, tx
 		}
 		recovery := context.WithoutCancel(ctx)
 		if undoErr := change.Undo(recovery); undoErr != nil {
+			change.Abandon(recovery)
 			r.synced.Store(false)
 			return fmt.Errorf("reconcile: change: %w", errors.Join(err, fmt.Errorf("compensate store change: %w", undoErr)))
 		}
