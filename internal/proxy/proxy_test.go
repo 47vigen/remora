@@ -1280,29 +1280,45 @@ func TestProbeClientCancelLeavesBreaker(t *testing.T) {
 	now = now.Add(30 * time.Second)
 	before := f.px.Cooler.Snapshot()
 
-	ctx, cancel := context.WithCancel(context.WithValue(t.Context(), http.ServerContextKey, f.srv.Config))
-	defer cancel()
-	var reached atomic.Bool
+	const first = "data: {\"delta\":\"hello\"}\n\n"
 	f.upstream(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, "data: {\"delta\":\"hello\"}\n\n")
+		_, _ = io.WriteString(w, first)
 		w.(http.Flusher).Flush()
-		reached.Store(true)
-		cancel() // the client goes away while a healthy stream is still running
 		<-r.Context().Done()
 	})
-	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/chat/completions", bytes.NewReader(chatBody("up-a/m1")))
+	finished := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer close(finished)
+		f.px.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	deadline, stop := context.WithTimeout(t.Context(), 5*time.Second)
+	defer stop()
+	ctx, cancel := context.WithCancel(deadline)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+"/v1/chat/completions", bytes.NewReader(chatBody("up-a/m1")))
+	if err != nil {
+		t.Fatal(err)
+	}
 	req.Header.Set("Authorization", "Bearer "+keyFull)
 	req.Header.Set("Content-Type", "application/json")
-	func() {
-		defer func() { _ = recover() }()
-		f.px.ServeHTTP(httptest.NewRecorder(), req)
-	}()
-	after := f.px.Cooler.Snapshot()
-	if !reached.Load() {
-		t.Fatal("the probe never reached the upstream")
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(before) != 1 || len(after) != 1 || after[0].Until != before[0].Until || after[0].Reason != before[0].Reason {
+	defer func() { _ = resp.Body.Close() }()
+	if got, err := io.ReadFull(resp.Body, make([]byte, len(first))); err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("probe response = %d, read %d bytes: %v", resp.StatusCode, got, err)
+	}
+	cancel()
+	select {
+	case <-finished:
+	case <-deadline.Done():
+		t.Fatal("proxy did not finish after client cancellation")
+	}
+	after := f.px.Cooler.Snapshot()
+	if len(before) != 1 || len(after) != 1 || after[0] != before[0] {
 		t.Fatalf("cooling after a client cancel = %+v, want unchanged %+v", after, before)
 	}
 	// The probe slot is released, so the next request can probe.
