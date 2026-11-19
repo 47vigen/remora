@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -90,7 +89,7 @@ func New(upstream *url.URL, st *store.Store, log *slog.Logger) *Proxy {
 		ErrorHandler:   p.errorHandler,
 		ErrorLog:       slog.NewLogLogger(log.Handler(), slog.LevelWarn),
 	}
-	// The front door sets longer deadlines for subscription and transcription requests.
+	// The front door owns the deadlines when a single API-key attempt cannot bound the request.
 	transport := p.transport.Clone()
 	transport.ResponseHeaderTimeout = 0
 	uncapped := *p.rp
@@ -333,15 +332,12 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt route, sh sha
 	out.Body = &dropReader{b: body}
 	out.ContentLength = int64(len(body))
 	out.TransferEncoding = nil
-	// Use the longest limit in the chain: any subscription member leaves the deadline to the front door.
-	if transcription || (isAlias && len(chain) == 0) || slices.ContainsFunc(chain, func(t alias.Target) bool {
-		return cliproxyapi.IsSubscription(t.Provider)
-	}) {
+	// Sequential fallbacks need the front door's per-attempt deadlines, not one shared cap.
+	if transcription || len(chain) != 1 || cliproxyapi.IsSubscription(chain[0].Provider) {
 		p.uncapped.ServeHTTP(w, out)
 		return
 	}
-	// With fallbacks and no response headers, there is no reliable way to identify the failed member.
-	if p.Cooler != nil && len(chain) == 1 {
+	if p.Cooler != nil {
 		info.headerTimeout = cooling.Event{At: time.Now(), Target: chain[0], StatusCode: http.StatusGatewayTimeout}
 	}
 	p.rp.ServeHTTP(w, out)

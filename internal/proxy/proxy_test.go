@@ -801,7 +801,7 @@ func TestProxy_UpstreamDown(t *testing.T) {
 	}
 }
 
-func TestProxy_ResponseHeaderTimeout(t *testing.T) {
+func TestHeaderCapSingleTargetOnly(t *testing.T) {
 	apiKey := alias.Target{Provider: "up-a", Model: "m1"}
 	subscription := alias.Target{Provider: "grok", Model: "m1"}
 	for _, tc := range []struct {
@@ -810,7 +810,7 @@ func TestProxy_ResponseHeaderTimeout(t *testing.T) {
 		wantCooling       bool
 	}{
 		{"api_key", "up-a/m1", "/v1/chat/completions", http.StatusOK, http.StatusBadGateway, true},
-		{"api_key_alias", "fast", "/v1/chat/completions", http.StatusOK, http.StatusBadGateway, false},
+		{"api_key_fallback", "fast", "/v1/chat/completions", http.StatusOK, http.StatusOK, false},
 		{"subscription", "grok/m1", "/v1/chat/completions", http.StatusOK, http.StatusOK, false},
 		{"subscription_fallback", "mixed", "/v1/chat/completions", http.StatusOK, http.StatusOK, false},
 		{"engine_timeout", "grok/m1", "/v1/chat/completions", http.StatusGatewayTimeout, http.StatusGatewayTimeout, false},
@@ -853,6 +853,12 @@ func TestProxy_ResponseHeaderTimeout(t *testing.T) {
 					_, _ = io.WriteString(w, `{"error":{"type":"request_timed_out","message":"deadline exceeded"}}`)
 					return
 				}
+				if tc.name == "api_key_fallback" {
+					// The primary timed out without headers; the engine is now returning the fallback.
+					w.Header().Set(headerRoutingProvider, "up-b")
+					w.Header().Set(headerRoutingModel, "m1")
+					w.Header().Set(headerRoutingIsFallback, "true")
+				}
 				okJSON(w, r)
 			})
 			body, ct := chatBody(tc.model), "application/json"
@@ -861,7 +867,11 @@ func TestProxy_ResponseHeaderTimeout(t *testing.T) {
 			}
 			resp := f.do(t, http.MethodPost, tc.path, keyFull, ct, body, nil)
 			if resp.StatusCode != tc.want {
-				t.Errorf("status = %d, want %d", resp.StatusCode, tc.want)
+				t.Fatalf("status = %d, want %d", resp.StatusCode, tc.want)
+			}
+			if tc.name == "api_key_fallback" && (resp.Header.Get(headerServedBy) != "up-b/m1" ||
+				resp.Header.Get(headerFallback) != "true" || !bytes.Contains(resp.Body, []byte(`"object":"chat.completion"`))) {
+				t.Fatalf("fallback answer missing: headers = %v, body = %s", resp.Header, resp.Body)
 			}
 			rows := f.px.Cooler.Snapshot()
 			if tc.wantCooling {
