@@ -27,6 +27,8 @@ type Deps struct {
 	Tail      *bifrost.Tail // the one poller following it, fanned out to live log viewers
 	Auth      *auth.Service
 	Log       *slog.Logger
+
+	liveBuffer, liveBacklog int // a positive buffer overrides both live log queue sizes
 }
 
 // Server implements the management API's strict server interface.
@@ -41,6 +43,9 @@ var _ gen.StrictServerInterface = (*Server)(nil)
 
 // New returns a Server over d.
 func New(d Deps) *Server {
+	if d.liveBuffer <= 0 {
+		d.liveBuffer, d.liveBacklog = liveBuffer, liveBacklog
+	}
 	s := &Server{d: d, now: time.Now}
 	if d.Providers != nil && d.Aliases != nil && d.Keys != nil && d.Batch != nil {
 		var as config.AccountStrategies

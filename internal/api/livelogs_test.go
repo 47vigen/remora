@@ -1,11 +1,14 @@
 package api
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
-	"fmt"
+	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"sync"
@@ -22,27 +25,18 @@ import (
 type tailSource struct {
 	mu   sync.Mutex
 	rows []bifrost.Log
-	n    int
 }
 
-// add appends rows stamped now, each with a fresh id.
-func (s *tailSource) add(rows ...bifrost.Log) []string {
+func (s *tailSource) add(rows ...bifrost.Log) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var ids []string
 	for _, l := range rows {
-		s.n++
-		if l.ID == "" {
-			l.ID = fmt.Sprintf("row-%d", s.n)
-		}
 		l.Timestamp = time.Now()
 		if l.Status == "" {
 			l.Status = "success"
 		}
 		s.rows = append(s.rows, l)
-		ids = append(ids, l.ID)
 	}
-	return ids
 }
 
 func (s *tailSource) GetLog(_ context.Context, id string) (bifrost.Log, error) {
@@ -93,7 +87,7 @@ type liveEnv struct {
 	drop *dropSignal
 }
 
-func newLiveEnv(t *testing.T) *liveEnv {
+func newLiveEnv(t *testing.T, buffer, backlog int) *liveEnv {
 	t.Helper()
 	src := &tailSource{}
 	drop := &dropSignal{dropped: make(chan struct{})}
@@ -102,7 +96,7 @@ func newLiveEnv(t *testing.T) *liveEnv {
 	done := make(chan struct{})
 	go func() { defer close(done); tail.Run(ctx) }()
 	t.Cleanup(func() { cancel(); <-done })
-	env := newTestEnvTail(t, tail)
+	env := newTestEnvTail(t, tail, buffer, backlog)
 	env.names.keys = map[string]string{"k1": "vk1"}
 	env.names.rules = map[string]string{"fast": "r1", "smart": "r2"}
 	return &liveEnv{testEnv: env, src: src, drop: drop}
@@ -156,7 +150,7 @@ func readEntry(t *testing.T, c *websocket.Conn) gen.LogEntry {
 }
 
 func TestStreamLogsSessionAuth(t *testing.T) {
-	env := newLiveEnv(t)
+	env := newLiveEnv(t, 0, 0)
 	if _, code, err := dialWS(env.wsURL(""), nil); err == nil || code != http.StatusUnauthorized {
 		t.Fatalf("anonymous dial = %d, %v", code, err)
 	}
@@ -193,7 +187,7 @@ func TestStreamLogsSessionAuth(t *testing.T) {
 }
 
 func TestStreamLogsFilter(t *testing.T) {
-	env := newLiveEnv(t)
+	env := newLiveEnv(t, 0, 0)
 	c := env.dial(t, "?alias=fast")
 	env.src.add(
 		bifrost.Log{ID: "f1", Provider: "or", Model: "a", RoutingRuleID: ptr("r1")},
@@ -223,7 +217,7 @@ func TestStreamLogsFilter(t *testing.T) {
 }
 
 func TestStreamLogsIgnoresPing(t *testing.T) {
-	env := newLiveEnv(t)
+	env := newLiveEnv(t, 0, 0)
 	c := env.dial(t, "")
 	ctx := context.Background()
 	for range 10 {
@@ -245,78 +239,92 @@ func TestStreamLogsIgnoresPing(t *testing.T) {
 	}
 }
 
-func TestStreamLogsSlowClientClosed(t *testing.T) {
-	env := newLiveEnv(t)
-	slow := env.dial(t, "")
-	fast := env.dial(t, "")
+// pausedLiveWriter blocks the first frame after the upgrade, independent of TCP buffering.
+type pausedLiveWriter struct {
+	io.Writer
+	ctx     context.Context
+	writing chan struct{}
+	resume  chan struct{}
+	once    sync.Once
+}
 
-	got := make(chan string, 4096)
-	go func() {
-		for {
-			_, b, err := fast.Read(context.Background())
-			if err != nil {
-				close(got)
-				return
-			}
-			var e gen.LogEntry
-			_ = json.Unmarshal(b, &e)
-			got <- e.Id
-		}
-	}()
-	var fed, received []string
-	waitFast := func() {
-		t.Helper()
-		deadline := time.After(10 * time.Second)
-		for len(received) < len(fed) {
-			select {
-			case id, ok := <-got:
-				if !ok {
-					t.Fatalf("fast client closed after %d of %d entries", len(received), len(fed))
-				}
-				received = append(received, id)
-			case <-deadline:
-				t.Fatalf("fast client got %d of %d entries", len(received), len(fed))
-			}
-		}
-	}
-
-	// Rows with a large model fill the slow socket's buffers, then its 64-row subscription.
-	big := strings.Repeat("m", 64<<10)
-	for dropped := false; !dropped; {
-		if len(fed) > 1500 {
-			t.Fatal("the slow client was never dropped")
-		}
-		for range 8 {
-			fed = append(fed, env.src.add(bifrost.Log{Provider: "or", Model: big})...)
-		}
-		waitFast()
-		select {
-		case <-env.drop.dropped:
-			dropped = true
-		default:
-		}
-	}
-
-	// The slow client now reads what was buffered, then the close.
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	var err error
-	for err == nil {
-		_, _, err = slow.Read(ctx)
-	}
-	if st := websocket.CloseStatus(err); st != websocket.StatusTryAgainLater {
-		t.Fatalf("slow client closed with %v (%v), want 1013", st, err)
-	}
-
-	fed = append(fed, env.src.add(bifrost.Log{ID: "after", Provider: "or", Model: "a"})...)
-	waitFast()
-	if !slices.Equal(received, fed) {
-		t.Fatalf("fast client got %d entries out of order or missing, want %d", len(received), len(fed))
+func (w *pausedLiveWriter) Write(p []byte) (int, error) {
+	w.once.Do(func() { close(w.writing) })
+	select {
+	case <-w.resume:
+		return w.Writer.Write(p)
+	case <-w.ctx.Done():
+		return 0, w.ctx.Err()
 	}
 }
 
+type pausedLiveUpgrade struct {
+	http.ResponseWriter
+	writer *pausedLiveWriter
+}
+
+func (w pausedLiveUpgrade) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	conn, rw, err := http.NewResponseController(w.ResponseWriter).Hijack()
+	if err == nil {
+		w.writer.Writer = conn
+		rw.Writer.Reset(w.writer)
+	}
+	return conn, rw, err
+}
+
+func TestStreamLogsSlowClientClosed(t *testing.T) {
+	env := newLiveEnv(t, 1, 2)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	writer := &pausedLiveWriter{ctx: ctx, writing: make(chan struct{}), resume: make(chan struct{})}
+	h := env.server.Handler()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.ServeHTTP(pausedLiveUpgrade{w, writer}, r)
+	}))
+	t.Cleanup(srv.Close)
+	slow, code, err := dialWS("ws"+strings.TrimPrefix(srv.URL, "http")+"/api/logs/live", &websocket.DialOptions{HTTPClient: env.client})
+	if err != nil {
+		t.Fatalf("dial slow viewer: %v (%d)", err, code)
+	}
+	t.Cleanup(func() { _ = slow.CloseNow() })
+	fast := env.dial(t, "")
+
+	publish := func(id string) {
+		t.Helper()
+		env.src.add(bifrost.Log{ID: id, Provider: "or", Model: "a"})
+		if got := readEntry(t, fast).Id; got != id {
+			t.Fatalf("fast viewer got %q, want %q", got, id)
+		}
+	}
+	publish("in-flight")
+	select {
+	case <-writer.writing:
+	case <-ctx.Done():
+		t.Fatal("slow viewer did not start writing its first frame")
+	}
+	for _, id := range []string{"buffered", "backlog-1", "backlog-2", "overflow"} {
+		publish(id)
+	}
+	select {
+	case <-env.drop.dropped:
+	case <-ctx.Done():
+		t.Fatal("slow viewer was not dropped at one in-flight, one buffered, and three backlogged rows")
+	}
+
+	close(writer.resume)
+	for _, want := range []string{"in-flight", "buffered"} {
+		if got := readEntry(t, slow).Id; got != want {
+			t.Fatalf("slow viewer got %q, want %q", got, want)
+		}
+	}
+	if _, _, err := slow.Read(ctx); websocket.CloseStatus(err) != websocket.StatusTryAgainLater {
+		t.Fatalf("slow viewer closed with %v, want 1013", err)
+	}
+	publish("after")
+}
+
 func TestStreamLogsRejectsForeignOrigin(t *testing.T) {
-	env := newLiveEnv(t)
+	env := newLiveEnv(t, 0, 0)
 	_, code, err := dialWS(env.wsURL(""), &websocket.DialOptions{
 		HTTPClient: env.client, HTTPHeader: http.Header{"Origin": {"https://evil.example"}},
 	})

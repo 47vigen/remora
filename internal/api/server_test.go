@@ -38,11 +38,11 @@ type testEnv struct {
 // newTestEnv starts the management server over in-memory fakes and a real auth service, and logs a client in.
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
-	return newTestEnvTail(t, nil)
+	return newTestEnvTail(t, nil, 0, 0)
 }
 
-// newTestEnvTail is newTestEnv with tail as the live log feed.
-func newTestEnvTail(t *testing.T, tail *bifrost.Tail) *testEnv {
+// newTestEnvTail is newTestEnv with a live log feed and optional queue sizes.
+func newTestEnvTail(t *testing.T, tail *bifrost.Tail, buffer, backlog int) *testEnv {
 	t.Helper()
 	ctx := context.Background()
 	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "remora.db"))
@@ -69,6 +69,9 @@ func newTestEnvTail(t *testing.T, tail *bifrost.Tail) *testEnv {
 		Quota:     env.quota,
 		Tail:      tail,
 		Auth:      auth.NewService(st, nil),
+
+		liveBuffer:  buffer,
+		liveBacklog: backlog,
 	})
 	env.server = s
 	env.srv = httptest.NewServer(s.Handler())

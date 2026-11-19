@@ -21,10 +21,11 @@ image:
 		--build-arg CLIPROXYAPI_VERSION=$(CLIPROXYAPI_VERSION) \
 		--build-arg REMORA_VERSION=$(REMORA_VERSION) \
 		--build-arg REMORA_COMMIT=$(REMORA_COMMIT) \
+		--build-arg GOPROXY=$(GOPROXY) \
 		.
 
 fakes-image:
-	docker buildx build --load -f test/fakes/Dockerfile -t $(FAKES_IMAGE) .
+	docker buildx build --load --build-arg GOPROXY=$(GOPROXY) -f test/fakes/Dockerfile -t $(FAKES_IMAGE) .
 
 check-pins:
 	scripts/check-engine-pins.sh
