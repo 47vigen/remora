@@ -1267,6 +1267,54 @@ func TestProbeTruncatedBodyFails(t *testing.T) {
 	}
 }
 
+func TestProbeSSEErrorFails(t *testing.T) {
+	for _, tc := range []struct {
+		name, event, wantReason string
+	}{
+		{"native_status", `{"error":{"is_bifrost_error":true,"status_code":429,"error":{"message":"busy"}}}`, "429"},
+		{"client_status_in_stream", `{"status_code":422,"error":{"message":"failed"}}`, "422"},
+		{"no_status", `{"type":"error","error":{"message":"failed"}}`, "502"},
+		{"oversized", `{"error":{"message":"` + strings.Repeat("x", maxSSELine+(64<<10)) + `"}}`, "502"},
+		{"complete", `[DONE]`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			target := alias.Target{Provider: "up-a", Model: "m1"}
+			now := time.Now()
+			f.px.Cooler = cooling.New(cooling.Config{}, nil, func() time.Time { return now }, nil)
+			for range 5 {
+				if err := f.px.Cooler.Observe(t.Context(), cooling.Event{Target: target, At: now, StatusCode: 503}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			now = now.Add(30 * time.Second)
+			const first = "data: {\"delta\":\"error\"}\n\n"
+			f.upstream(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, first)
+				w.(http.Flusher).Flush()
+				_, _ = io.WriteString(w, "data: "+tc.event+"\n\n")
+			})
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", bytes.NewReader(chatBody("up-a/m1")))
+			req.Header.Set("Authorization", "Bearer "+keyFull)
+			req.Header.Set("Content-Type", "application/json")
+			resp := httptest.NewRecorder()
+			f.px.ServeHTTP(resp, req)
+			if resp.Code != http.StatusOK || !strings.HasPrefix(resp.Body.String(), first) {
+				t.Fatalf("probe response = %d %q, want 200 and a streamed chunk", resp.Code, resp.Body)
+			}
+			rows := f.px.Cooler.Snapshot()
+			if tc.wantReason == "" {
+				if len(rows) != 0 {
+					t.Fatalf("cooling = %+v, want breaker closed after complete stream", rows)
+				}
+			} else if len(rows) != 1 || rows[0].Target != target || rows[0].Reason != tc.wantReason || !rows[0].Until.After(now) {
+				t.Fatalf("cooling = %+v, want member tripped again by %s", rows, tc.wantReason)
+			}
+		})
+	}
+}
+
 func TestProbeClientCancelLeavesBreaker(t *testing.T) {
 	f := newFixture(t)
 	target := alias.Target{Provider: "up-a", Model: "m1"}
