@@ -441,9 +441,11 @@ func setUpstreamHeaders(h http.Header, vk string) {
 // scrubbed, SSE error events rewritten as they pass. The body itself is never buffered on success.
 func (p *Proxy) modifyResponse(resp *http.Response) error {
 	info := infoFrom(resp.Request.Context())
-	if info.probe != (alias.Target{}) {
-		info.probeStatus = resp.StatusCode
-		info.probeRetry = cooling.RetryAfter(resp.Header.Get("Retry-After"), time.Now())
+	var probe *probeBody
+	if info.probe != (alias.Target{}) && resp.StatusCode != http.StatusSwitchingProtocols {
+		// A body-copy error bypasses ErrorHandler and may unwind the handler.
+		info.probeStatus = http.StatusBadGateway
+		probe = &probeBody{info: info, status: resp.StatusCode, retry: cooling.RetryAfter(resp.Header.Get("Retry-After"), time.Now())}
 	}
 	setRemoraHeaders(resp.Header, info)
 	switch {
@@ -472,7 +474,35 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 	}
 	// Nothing reads the request body past this point; a stream may run for minutes.
 	info.body, info.spans = nil, bodySpans{}
+	if probe != nil {
+		probe.ReadCloser = resp.Body
+		resp.Body = probe
+	}
 	return nil
+}
+
+type probeBody struct {
+	io.ReadCloser
+	info   *reqInfo
+	status int
+	retry  time.Duration
+	eof    bool
+}
+
+func (b *probeBody) Read(p []byte) (int, error) {
+	n, err := 0, io.EOF
+	if !b.eof {
+		n, err = b.ReadCloser.Read(p)
+	}
+	if err == io.EOF {
+		if n > 0 {
+			// Wait until the proxy has written these last bytes before crediting the probe.
+			b.eof = true
+			return n, nil
+		}
+		b.info.probeStatus, b.info.probeRetry = b.status, b.retry
+	}
+	return n, err
 }
 
 // errorHandler answers when the front door cannot be reached or its answer cannot be read. The cause, which names

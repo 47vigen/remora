@@ -1213,3 +1213,56 @@ func TestProxy_ProbesOpenAliasMember(t *testing.T) {
 		t.Fatalf("request routed to %q after closing the breaker", got)
 	}
 }
+
+func TestProbeTruncatedBodyFails(t *testing.T) {
+	const partial = "data: {\"delta\":\"hello\"}\n\n"
+	const complete = partial + "data: [DONE]\n\n"
+	for _, tc := range []struct {
+		name, body string
+		wantAbort  any
+	}{
+		{"truncated", partial, http.ErrAbortHandler},
+		{"complete", complete, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			target := alias.Target{Provider: "up-a", Model: "m1"}
+			now := time.Now()
+			f.px.Cooler = cooling.New(cooling.Config{}, nil, func() time.Time { return now }, nil)
+			for range 5 {
+				if err := f.px.Cooler.Observe(t.Context(), cooling.Event{Target: target, At: now, StatusCode: 503}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			now = now.Add(30 * time.Second)
+			f.upstream(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.Header().Set("Content-Length", strconv.Itoa(len(complete)))
+				_, _ = io.WriteString(w, tc.body)
+			})
+
+			// Exercise the server's abort path without racing the handler's deferred bookkeeping.
+			ctx := context.WithValue(t.Context(), http.ServerContextKey, f.srv.Config)
+			req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/chat/completions", bytes.NewReader(chatBody("up-a/m1")))
+			req.Header.Set("Authorization", "Bearer "+keyFull)
+			req.Header.Set("Content-Type", "application/json")
+			resp := httptest.NewRecorder()
+			var aborted any
+			func() {
+				defer func() { aborted = recover() }()
+				f.px.ServeHTTP(resp, req)
+			}()
+			if aborted != tc.wantAbort || resp.Code != http.StatusOK || resp.Body.String() != tc.body {
+				t.Fatalf("response = %d %q, panic = %v; want 200 %q, panic = %v", resp.Code, resp.Body, aborted, tc.body, tc.wantAbort)
+			}
+			rows := f.px.Cooler.Snapshot()
+			if tc.wantAbort != nil {
+				if len(rows) != 1 || rows[0].Target != target || rows[0].Reason != "502" || !rows[0].Until.After(now) {
+					t.Fatalf("cooling = %+v, want member tripped again by a 502", rows)
+				}
+			} else if len(rows) != 0 {
+				t.Fatalf("cooling = %+v, want breaker closed after complete stream", rows)
+			}
+		})
+	}
+}
