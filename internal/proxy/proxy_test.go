@@ -1266,3 +1266,47 @@ func TestProbeTruncatedBodyFails(t *testing.T) {
 		})
 	}
 }
+
+func TestProbeClientCancelLeavesBreaker(t *testing.T) {
+	f := newFixture(t)
+	target := alias.Target{Provider: "up-a", Model: "m1"}
+	now := time.Now()
+	f.px.Cooler = cooling.New(cooling.Config{}, nil, func() time.Time { return now }, nil)
+	for range 5 {
+		if err := f.px.Cooler.Observe(t.Context(), cooling.Event{Target: target, At: now, StatusCode: 503}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now = now.Add(30 * time.Second)
+	before := f.px.Cooler.Snapshot()
+
+	ctx, cancel := context.WithCancel(context.WithValue(t.Context(), http.ServerContextKey, f.srv.Config))
+	defer cancel()
+	var reached atomic.Bool
+	f.upstream(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"delta\":\"hello\"}\n\n")
+		w.(http.Flusher).Flush()
+		reached.Store(true)
+		cancel() // the client goes away while a healthy stream is still running
+		<-r.Context().Done()
+	})
+	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/chat/completions", bytes.NewReader(chatBody("up-a/m1")))
+	req.Header.Set("Authorization", "Bearer "+keyFull)
+	req.Header.Set("Content-Type", "application/json")
+	func() {
+		defer func() { _ = recover() }()
+		f.px.ServeHTTP(httptest.NewRecorder(), req)
+	}()
+	after := f.px.Cooler.Snapshot()
+	if !reached.Load() {
+		t.Fatal("the probe never reached the upstream")
+	}
+	if len(before) != 1 || len(after) != 1 || after[0].Until != before[0].Until || after[0].Reason != before[0].Reason {
+		t.Fatalf("cooling after a client cancel = %+v, want unchanged %+v", after, before)
+	}
+	// The probe slot is released, so the next request can probe.
+	if _, ok := f.px.Cooler.Admit([]alias.Target{target}); !ok {
+		t.Fatal("no probe admitted after the cancelled one")
+	}
+}
