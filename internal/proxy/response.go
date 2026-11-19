@@ -276,11 +276,11 @@ func orNull(r json.RawMessage) json.RawMessage {
 	return r
 }
 
-// rewriteSSELine returns line (with its line ending) unchanged, unless it is a data line carrying an error or the
-// front door's "extra_fields": the front door's native error envelope becomes the route's error shape s, any other
+// rewriteLine returns line (with its line ending) unchanged, unless it is a data line carrying an error or the
+// front door's "extra_fields": the front door's native error envelope becomes the route's error shape, any other
 // error event (a top-level "error" key or "type":"error") is scrubbed, and a top-level "extra_fields" is removed.
 // Content is never touched.
-func rewriteSSELine(line []byte, s shape) []byte {
+func (s *sseScrubber) rewriteLine(line []byte) []byte {
 	isErr := mayBeSSEError(line)
 	extra := bytes.HasPrefix(line, []byte("data:")) && bytes.Contains(line, []byte(extraFieldsProbe))
 	if !isErr && !extra {
@@ -299,12 +299,14 @@ func rewriteSSELine(line []byte, s shape) []byte {
 		mapped bool
 	)
 	if isErr {
-		out, mapped = mapNativeError(body, s, "")
+		out, mapped = mapNativeError(body, s.shape, "")
 	}
 	switch {
-	case mapped:
-	case isErr && isErrorEvent(body):
-		out = stripExtraFields(scrub(body))
+	case mapped || isErr && isErrorEvent(body):
+		s.recordProbeError(body)
+		if !mapped {
+			out = stripExtraFields(scrub(body))
+		}
 	case extra:
 		if out = stripExtraFields(body); len(out) == len(body) {
 			return line
@@ -326,7 +328,7 @@ func mayBeSSEErrorPart(b []byte) bool {
 	return bytes.Contains(b, []byte(`"error"`)) || bytes.Contains(b, []byte(nativeErrorKey))
 }
 
-// mayBeSSEError reports whether an SSE line is one rewriteSSELine could treat as an error event.
+// mayBeSSEError reports whether an SSE line is one rewriteLine could treat as an error event.
 func mayBeSSEError(line []byte) bool {
 	return bytes.HasPrefix(line, []byte("data:")) &&
 		(bytes.Contains(line, []byte(`"error"`)) || bytes.Contains(line, []byte(nativeErrorKey)))
@@ -346,10 +348,11 @@ func isErrorEvent(body []byte) bool {
 }
 
 // sseScrubber forwards an SSE body line by line as each line arrives, rewriting only error events
-// (rewriteSSELine). Nothing is held beyond the current line.
+// and extra fields. Nothing is held beyond the current line.
 type sseScrubber struct {
 	src         io.ReadCloser
 	shape       shape
+	probeError  *int // first error status, collected only for a half-open probe
 	br          *bufio.Reader
 	line        []byte // the current line, being assembled
 	pending     []byte // bytes ready for the caller
@@ -402,7 +405,7 @@ func (s *sseScrubber) fill() {
 	if !full && !s.passthrough && !s.discard && len(s.line) == 0 {
 		// A whole line in one piece: forward it without a copy. chunk stays valid until the next read, and the next
 		// read happens only once pending is drained.
-		s.pending = rewriteSSELine(chunk, s.shape)
+		s.pending = s.rewriteLine(chunk)
 		return
 	}
 	s.line = append(s.line, chunk...) // chunk is only valid until the next read
@@ -436,12 +439,35 @@ func (s *sseScrubber) fill() {
 	case full:
 		// keep assembling the line
 	default:
-		s.pending, s.line = rewriteSSELine(s.line, s.shape), s.line[:0]
+		s.pending, s.line = s.rewriteLine(s.line), s.line[:0]
 	}
+}
+
+func (s *sseScrubber) recordProbeError(body []byte) {
+	if s.probeError == nil || *s.probeError != 0 {
+		return
+	}
+	var event struct {
+		Status int `json:"status_code"`
+		Error  struct {
+			Status int `json:"status_code"`
+		} `json:"error"`
+	}
+	if body != nil {
+		_ = json.Unmarshal(body, &event)
+	}
+	for _, status := range []int{event.Status, event.Error.Status} {
+		if status >= 400 && status < 600 {
+			*s.probeError = status
+			return
+		}
+	}
+	*s.probeError = http.StatusBadGateway
 }
 
 // sseError is remora's own error event, replacing a line too long to inspect.
 func (s *sseScrubber) sseError() []byte {
+	s.recordProbeError(nil)
 	return append(append([]byte("data: "), errUpstreamBody(http.StatusBadGateway).body(s.shape)...), '\n')
 }
 

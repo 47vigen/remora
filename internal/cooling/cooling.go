@@ -185,6 +185,15 @@ func (c *Cooler) Admit(chain []alias.Target) (probe alias.Target, allowed bool) 
 // CompleteProbe closes the breaker on success, or reopens it with backoff on an upstream failure. A canceled
 // request or client-side error is inconclusive and lets the next request probe.
 func (c *Cooler) CompleteProbe(ctx context.Context, t alias.Target, code int, retry time.Duration) error {
+	return c.completeProbe(ctx, t, code, retry, false)
+}
+
+// FailProbe reopens the breaker for an explicit upstream failure in an otherwise successful response.
+func (c *Cooler) FailProbe(ctx context.Context, t alias.Target, code int, retry time.Duration) error {
+	return c.completeProbe(ctx, t, code, retry, true)
+}
+
+func (c *Cooler) completeProbe(ctx context.Context, t alias.Target, code int, retry time.Duration, failed bool) error {
 	c.mu.Lock()
 	if !c.probing[t] {
 		c.mu.Unlock()
@@ -193,9 +202,9 @@ func (c *Cooler) CompleteProbe(ctx context.Context, t alias.Target, code int, re
 	delete(c.probing, t)
 	row := c.cooling[t]
 	switch {
-	case code >= 200 && code < 300 && !c.now().Before(row.Until):
+	case !failed && code >= 200 && code < 300 && !c.now().Before(row.Until):
 		c.removeLocked(ctx, t, row)
-	case transient(code) || code == http.StatusPaymentRequired || code == http.StatusTooManyRequests:
+	case failed || transient(code) || code == http.StatusPaymentRequired || code == http.StatusTooManyRequests:
 		backoff := min(row.Backoff*2, maxCooldown)
 		c.coolLocked(Event{Target: t, StatusCode: code, RetryAfter: max(retry, backoff)}, backoff)
 	}
