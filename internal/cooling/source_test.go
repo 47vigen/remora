@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"testing"
 	"time"
 
@@ -40,7 +41,25 @@ func TestEventFrom(t *testing.T) {
 			want: Event{ID: "r3", At: t0, Target: alias.Target{Provider: "openrouter", Model: "vendor/m"}, StatusCode: 402}, ok: true,
 		},
 		{name: "success", in: bifrost.Log{ID: "r4", Provider: "openrouter", Model: "a", Status: "success"}},
-		{name: "500", in: bifrost.Log{ID: "r5", Provider: "openrouter", Model: "a", Status: "error", ErrorDetails: failure(500, 0)}},
+		{
+			name: "503 with retry hint and no provider body",
+			in:   bifrost.Log{Provider: "remora-oauth", Model: "codex/gpt-x", Status: "error", ErrorDetails: failure(503, 2500)},
+			want: Event{Target: alias.Target{Provider: "codex", Model: "gpt-x"}, StatusCode: 503, RetryAfter: 2500 * time.Millisecond, Subscription: true}, ok: true,
+		},
+		{
+			name: "provider timeout",
+			in:   bifrost.Log{Provider: "or", Model: "a", Status: "error", ErrorDetails: json.RawMessage(`{"status_code":504,"error":{"type":"request_timed_out"}}`)},
+			want: Event{Target: a, StatusCode: 504}, ok: true,
+		},
+		{
+			name: "provider connection failure",
+			in:   bifrost.Log{Provider: "or", Model: "a", Status: "error", ErrorDetails: json.RawMessage(`{"status_code":502,"error":{"type":"provider_connection_failed"}}`)},
+			want: Event{Target: a, StatusCode: 502}, ok: true,
+		},
+		{
+			name: "client canceled",
+			in:   bifrost.Log{Provider: "or", Model: "a", Status: "error", ErrorDetails: json.RawMessage(`{"error":{"type":"request_cancelled"}}`)},
+		},
 		{name: "no details", in: bifrost.Log{ID: "r6", Provider: "openrouter", Model: "a", Status: "error"}},
 		{name: "no provider", in: bifrost.Log{ID: "r7", Model: "a", Status: "error", ErrorDetails: failure(402, 0)}},
 		{name: "OAuth model without prefix", in: bifrost.Log{ID: "r8", Provider: "remora-oauth", Model: "gpt-x", Status: "error", ErrorDetails: failure(402, 0)}},
@@ -159,5 +178,23 @@ func TestRunEndsWhenFeedCloses(t *testing.T) {
 	err := cl.Run(context.Background(), rows, d.get, time.Second)
 	if !errors.Is(err, ErrFeedClosed) {
 		t.Fatalf("Run = %v, want ErrFeedClosed", err)
+	}
+}
+
+func TestRetryAfterHeader(t *testing.T) {
+	for _, tc := range []struct {
+		header string
+		want   time.Duration
+	}{
+		{"12", 12 * time.Second},
+		{"2592000", 24 * time.Hour},
+		{"99999999999999999999999", 24 * time.Hour},
+		{t0.Add(time.Minute).Format(http.TimeFormat), time.Minute},
+		{t0.Add(-time.Second).Format(http.TimeFormat), 0},
+		{"invalid", 0},
+	} {
+		if got := RetryAfter(tc.header, t0); got != tc.want {
+			t.Errorf("RetryAfter(%q) = %v, want %v", tc.header, got, tc.want)
+		}
 	}
 }

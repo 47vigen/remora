@@ -1,7 +1,7 @@
 #!/bin/bash
 # The image's entrypoint under tini. `serve` runs nginx and remora side by side; when either exits, the other is
-# stopped and the container exits with the first one's code. On SIGTERM both stop, and the exit code is remora's
-# after it drains. Any other command runs remora alone.
+# stopped and the container exits with the first one's code. On SIGTERM nginx stays up while remora drains,
+# then quits gracefully; the exit code is remora's. Any other command runs remora alone.
 set -u
 if [ "${1:-}" != serve ]; then
 	exec /usr/local/bin/remora "$@"
@@ -15,28 +15,43 @@ if [ "$port" = 8080 ]; then
 	echo "start: REMORA_LISTEN=$listen takes port 8080, which nginx serves in this image; pick another port" >&2
 	exit 2
 fi
-mkdir -p /tmp/nginx
-sed "s/127\.0\.0\.1:8081/$host:$port/" /etc/remora/nginx.conf >/tmp/nginx/nginx.conf
+mkdir -p /tmp/nginx || exit 2
+trusted="${REMORA_TRUSTED_PROXIES-127.0.0.0/8,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7}"
+if [[ ! $trusted =~ ^[[:blank:],0-9a-fA-F:./]*$ ]]; then
+	echo "start: REMORA_TRUSTED_PROXIES must list IP addresses or CIDR ranges" >&2
+	exit 2
+fi
+IFS=$' \t' read -ra ranges <<<"${trusted//,/ }"
+: >/tmp/nginx/realip.conf && : >/tmp/nginx/trusted-proxies.conf || exit 2
+for range in "${ranges[@]}"; do
+	if [[ ! $range =~ ^([0-9]+(\.[0-9]+){3}|[0-9a-fA-F.]*:[0-9a-fA-F:.]*)(/[0-9]+)?$ ]]; then
+		echo "start: REMORA_TRUSTED_PROXIES must list IP addresses or CIDR ranges" >&2
+		exit 2
+	fi
+	printf 'set_real_ip_from %s;\n' "$range" >>/tmp/nginx/realip.conf || exit 2
+	printf '%s 1;\n' "$range" >>/tmp/nginx/trusted-proxies.conf || exit 2
+done
+sed "s/127\.0\.0\.1:8081/$host:$port/" /etc/remora/nginx.conf >/tmp/nginx/nginx.conf || exit 2
 nginx -e stderr -c /tmp/nginx/nginx.conf -g 'daemon off;' &
 web=$!
 /usr/local/bin/remora "$@" &
 app=$!
 stopping=0
 stop() {
+	trap '' TERM INT
 	stopping=1
 	kill -TERM "$app" 2>/dev/null
-	kill -QUIT "$web" 2>/dev/null
 }
 trap stop TERM INT
 wait -n "$web" "$app"
 code=$?
-if [ "$stopping" = 0 ]; then
-	stop
+if [ "$stopping" = 1 ]; then
+	wait "$app"
+	code=$?
+else
+	kill -TERM "$app" 2>/dev/null
+	wait "$app"
 fi
-wait "$app"
-app_code=$?
+kill -QUIT "$web" 2>/dev/null
 wait "$web"
-if [ "$code" -gt 128 ] && [ "$stopping" = 1 ]; then
-	code=$app_code
-fi
 exit "$code"

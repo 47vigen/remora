@@ -7,7 +7,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/47vigen/remora/internal/store"
 )
@@ -54,10 +57,74 @@ func (s *Service) validToken(ctx context.Context, value string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("auth: token: %w", err)
 	}
-	if err := s.st.TouchAPIToken(ctx, t.ID, s.now().UTC()); err != nil && !errors.Is(err, store.ErrNotFound) {
-		return false, fmt.Errorf("auth: token: %w", err)
+	if v, ok := activeTokenTouches.Load(s); ok {
+		uses := v.(*tokenTouches)
+		at := s.now()
+		uses.mu.Lock()
+		if at.After(uses.pending[t.ID]) {
+			uses.pending[t.ID] = at
+		}
+		uses.mu.Unlock()
 	}
 	return true, nil
+}
+
+// Buffers are scoped to a running auth service and removed when it stops.
+var activeTokenTouches sync.Map // *Service -> *tokenTouches
+
+type tokenTouches struct {
+	mu      sync.Mutex
+	pending map[string]time.Time
+}
+
+// StartTokenTouches starts one last-used flusher for the service. Call the returned stop after draining requests
+// and before closing the store. ctx bounds database writes, including the final flush.
+func (s *Service) StartTokenTouches(ctx context.Context, logger *slog.Logger) func() {
+	uses := &tokenTouches{pending: make(map[string]time.Time)}
+	activeTokenTouches.Store(s, uses)
+	stopping, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		timer := time.NewTimer(time.Minute)
+		defer timer.Stop()
+		for {
+			select {
+			case <-timer.C:
+				uses.flush(ctx, s.st, logger)
+				timer.Reset(time.Minute)
+			case <-stopping:
+				uses.flush(ctx, s.st, logger)
+				return
+			}
+		}
+	}()
+	return sync.OnceFunc(func() {
+		activeTokenTouches.Delete(s)
+		close(stopping)
+		<-done
+	})
+}
+
+func (u *tokenTouches) flush(ctx context.Context, st *store.Store, logger *slog.Logger) {
+	u.mu.Lock()
+	batch := u.pending
+	if len(batch) > 0 {
+		u.pending = make(map[string]time.Time)
+	}
+	u.mu.Unlock()
+	if len(batch) == 0 {
+		return
+	}
+	if err := st.TouchAPITokens(ctx, batch); err != nil {
+		logger.WarnContext(ctx, "could not record API token use", "err", err)
+		u.mu.Lock()
+		for id, at := range batch {
+			if at.After(u.pending[id]) {
+				u.pending[id] = at
+			}
+		}
+		u.mu.Unlock()
+	}
 }
 
 // ListTokens lists the API tokens, oldest first. Values are never kept, so none is returned.
@@ -65,6 +132,17 @@ func (s *Service) ListTokens(ctx context.Context) ([]store.APIToken, error) {
 	ts, err := s.st.ListAPITokens(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("auth: list tokens: %w", err)
+	}
+	// Uses not flushed yet still show, so the list is current between flushes.
+	if v, ok := activeTokenTouches.Load(s); ok {
+		uses := v.(*tokenTouches)
+		uses.mu.Lock()
+		for i := range ts {
+			if at, ok := uses.pending[ts[i].ID]; ok && (ts[i].LastUsedAt == nil || at.After(*ts[i].LastUsedAt)) {
+				ts[i].LastUsedAt = &at
+			}
+		}
+		uses.mu.Unlock()
 	}
 	return ts, nil
 }

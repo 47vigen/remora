@@ -94,10 +94,8 @@ func fakeEngineDir(t *testing.T) string {
 	return dir
 }
 
-// TestServe_StopsWithinGrace is the upgrade path: SIGTERM arrives while a request is still in flight (a stream
-// that would outlive Docker's grace period), and serve must still drain, stop the engines and return nil before
-// stopTimeout, which the compose example's stop_grace_period covers.
-func TestServe_StopsWithinGrace(t *testing.T) {
+// TestDrainStopsWithinGrace holds a request past the configured drain so shutdown must eventually cut it off.
+func TestDrainStopsWithinGrace(t *testing.T) {
 	if testing.Short() {
 		t.Skip("starts fake engines and waits out the drain")
 	}
@@ -113,6 +111,7 @@ func TestServe_StopsWithinGrace(t *testing.T) {
 		config.EnvSonioxBaseURL:       "http://127.0.0.1:1",
 		config.EnvSonioxSweepInterval: "1h",
 		config.EnvQuotaInterval:       "1h",
+		"REMORA_DRAIN_TIMEOUT":        "2s",
 	}
 	cfg, err := config.Load(func(k string) string { return env[k] })
 	if err != nil {
@@ -154,15 +153,33 @@ func TestServe_StopsWithinGrace(t *testing.T) {
 
 	start := time.Now()
 	signal()
+	dctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	for {
+		req, err := http.NewRequestWithContext(dctx, http.MethodGet, "http://"+listen+"/v1/models", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Errorf("new request during drain: %v", err)
+			break
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusServiceUnavailable && resp.Header.Get("Retry-After") == "1" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	select {
 	case err := <-served:
 		if err != nil {
 			t.Errorf("serve = %v, want nil after the signal", err)
 		}
-		if took := time.Since(start); took > stopTimeout {
-			t.Errorf("serve took %v after the signal, want under %v", took, stopTimeout)
+		if took := time.Since(start); took < cfg.DrainTimeout || took > cfg.StopTimeout() {
+			t.Errorf("serve took %v after the signal, want between %v and %v", took, cfg.DrainTimeout, cfg.StopTimeout())
 		}
-	case <-time.After(stopTimeout + 5*time.Second):
-		t.Fatalf("serve still running %v after the signal", stopTimeout+5*time.Second)
+	case <-time.After(cfg.StopTimeout() + 5*time.Second):
+		t.Fatalf("serve still running %v after the signal", cfg.StopTimeout()+5*time.Second)
 	}
 }

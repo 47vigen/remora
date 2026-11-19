@@ -1836,6 +1836,10 @@ components:
       properties:
         name:
           type: string
+          description: Group identifier; for key groups, the key ID.
+        label:
+          type: string
+          description: Display name for key groups.
         summary:
           $ref: "#/components/schemas/StatsSummary"
     Stats:

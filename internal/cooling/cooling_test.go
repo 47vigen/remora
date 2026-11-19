@@ -317,3 +317,91 @@ func TestSubscriptionDefaultCooldown(t *testing.T) {
 		t.Errorf("DefaultSubscriptionCooldown = %v, want 30s", DefaultSubscriptionCooldown)
 	}
 }
+
+func TestBreakerHalfOpen(t *testing.T) {
+	cl, k, p := newCooler(t)
+	ctx := t.Context()
+	chain := []alias.Target{a, b}
+	for i, code := range []int{503, 504, 502, 500, 503} {
+		at := t0.Add(time.Duration(i) * time.Second)
+		k.Set(at)
+		if err := cl.Observe(ctx, ev(a, code, at)); err != nil {
+			t.Fatal(err)
+		}
+		if i < 4 && len(cl.Snapshot()) != 0 {
+			t.Fatal("breaker opened before the fifth failure")
+		}
+	}
+	until := t0.Add(34 * time.Second)
+	if got := cl.Snapshot(); len(got) != 1 || got[0].Until != until || p.count() != 1 {
+		t.Fatalf("open: snapshot %v, apply calls %d", got, p.count())
+	}
+	if target, allowed := cl.Admit(chain); target != (alias.Target{}) || !allowed {
+		t.Fatalf("open: admitted %v, %v", target, allowed)
+	}
+	if target, allowed := cl.Admit([]alias.Target{a}); target != (alias.Target{}) || allowed {
+		t.Fatalf("only member is open: admitted %v, %v", target, allowed)
+	}
+
+	k.Set(until)
+	if err := cl.Expire(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := cl.Filter(chain); !reflect.DeepEqual(got, []alias.Target{b}) {
+		t.Fatalf("half-open target restored before probe: %v", got)
+	}
+	var contenders sync.WaitGroup
+	winners := make(chan alias.Target, 16)
+	for range 16 {
+		contenders.Go(func() {
+			if target, _ := cl.Admit(chain); target != (alias.Target{}) {
+				winners <- target
+			}
+		})
+	}
+	contenders.Wait()
+	if len(winners) != 1 || <-winners != a {
+		t.Fatal("expected exactly one probe")
+	}
+	if err := cl.CompleteProbe(ctx, a, 503, 0); err != nil {
+		t.Fatal(err)
+	}
+	until = until.Add(time.Minute)
+	if got := cl.Snapshot(); len(got) != 1 || got[0].Until != until || p.count() != 1 {
+		t.Fatalf("failed probe: snapshot %v, apply calls %d", got, p.count())
+	}
+	k.Set(until)
+	if target, allowed := cl.Admit(chain); target != a || !allowed {
+		t.Fatalf("second probe: admitted %v, %v", target, allowed)
+	}
+	if err := cl.CompleteProbe(ctx, a, 200, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := cl.Filter(chain); !reflect.DeepEqual(got, chain) || p.count() != 2 {
+		t.Fatalf("successful probe: chain %v, apply calls %d", got, p.count())
+	}
+}
+
+func TestBreakerWindow(t *testing.T) {
+	cl, _, _ := newCooler(t)
+	for _, off := range []time.Duration{0, 10, 20, 30, 61} {
+		if err := cl.Observe(t.Context(), ev(a, 503, t0.Add(off*time.Second))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := cl.Snapshot(); len(got) != 0 {
+		t.Fatalf("five failures outside one window opened the breaker: %v", got)
+	}
+}
+
+func TestRetryAfterCapped(t *testing.T) {
+	cl, _, _ := newCooler(t)
+	e := ev(a, 402, t0)
+	e.RetryAfter = 30 * 24 * time.Hour
+	if err := cl.Observe(t.Context(), e); err != nil {
+		t.Fatal(err)
+	}
+	if got := cl.Snapshot(); len(got) != 1 || got[0].Until != t0.Add(24*time.Hour) {
+		t.Fatalf("snapshot %v, want a 24h cooldown", got)
+	}
+}

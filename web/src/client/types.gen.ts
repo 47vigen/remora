@@ -448,7 +448,14 @@ export type StatsPoint = {
 };
 
 export type StatsGroup = {
+    /**
+     * Group identifier; for key groups, the key ID.
+     */
     name: string;
+    /**
+     * Display name for key groups.
+     */
+    label?: string;
     summary: StatsSummary;
 };
 

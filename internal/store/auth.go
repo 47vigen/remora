@@ -49,6 +49,14 @@ func (s *Store) DeleteSession(ctx context.Context, hash []byte) error {
 	return nil
 }
 
+// DeleteExpiredSessions deletes sessions that have expired at or before now.
+func (s *Store) DeleteExpiredSessions(ctx context.Context, now time.Time) error {
+	if _, err := s.db.ExecContext(ctx, "DELETE FROM sessions WHERE expires_at <= ?", now.UnixNano()); err != nil {
+		return fmt.Errorf("store: delete expired sessions: %w", err)
+	}
+	return nil
+}
+
 // DeleteSessionsExcept deletes every session but the one with hash keep (nil keeps none).
 func (s *Store) DeleteSessionsExcept(ctx context.Context, keep []byte) error {
 	if _, err := s.db.ExecContext(ctx, "DELETE FROM sessions WHERE hash IS NOT ?", keep); err != nil {
@@ -136,6 +144,26 @@ func (s *Store) TouchAPIToken(ctx context.Context, id string, at time.Time) erro
 		return fmt.Errorf("store: touch api token %s: %w", id, err)
 	}
 	return mustAffect(res, "api token "+id)
+}
+
+// TouchAPITokens records last use in a single transaction. Deleted tokens are ignored.
+func (s *Store) TouchAPITokens(ctx context.Context, batch map[string]time.Time) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: begin API token touch batch: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for id, at := range batch {
+		ns := at.UnixNano()
+		if _, err := tx.ExecContext(ctx, `UPDATE api_tokens SET last_used_at = ? WHERE id = ?
+			AND (last_used_at IS NULL OR last_used_at < ?)`, ns, id, ns); err != nil {
+			return fmt.Errorf("store: touch API token batch: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: commit API token touch batch: %w", err)
+	}
+	return nil
 }
 
 func nanos(t *time.Time) any {

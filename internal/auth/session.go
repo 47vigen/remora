@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -44,12 +45,19 @@ func hashToken(v string) []byte {
 	return h[:]
 }
 
-// Login checks the admin password and opens a session. Five failures from one IP within 15 minutes lock that IP out
-// with ErrTooManyAttempts until the window ends.
+// Login checks the admin password and opens a session. Recent failures from the same IP delay the check but never
+// prevent a sign-in.
 func (s *Service) Login(ctx context.Context, remoteIP, password string) (token string, expires time.Time, err error) {
 	now := s.now()
-	if !s.limiter.allow(remoteIP, now) {
-		return "", time.Time{}, ErrTooManyAttempts
+	if delay := s.limiter.delay(remoteIP, now); delay > 0 {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return "", time.Time{}, ctx.Err()
+		case <-timer.C:
+		}
+		now = s.now()
 	}
 	ok, err := CheckAdminPassword(ctx, s.st, password)
 	if err != nil {
@@ -61,6 +69,9 @@ func (s *Service) Login(ctx context.Context, remoteIP, password string) (token s
 	}
 	s.limiter.succeed(remoteIP)
 
+	if err := s.st.DeleteExpiredSessions(ctx, now); err != nil {
+		return "", time.Time{}, fmt.Errorf("auth: login: %w", err)
+	}
 	buf := make([]byte, sessionBytes)
 	_, _ = rand.Read(buf) // crypto/rand.Read never fails (it aborts the program instead)
 	token = base64.RawURLEncoding.EncodeToString(buf)
@@ -173,9 +184,13 @@ func bearer(r *http.Request) (string, bool) {
 	return v, v != ""
 }
 
-// isHTTPS reports whether the client reached remora over TLS, directly or through a proxy that says so.
+// isHTTPS reports direct TLS or HTTPS reported by the image's loopback proxy.
 func isHTTPS(r *http.Request) bool {
-	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+	if r.TLS != nil {
+		return true
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	return err == nil && net.ParseIP(host).IsLoopback() && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
 // SessionCookie returns the session cookie for token. It is Secure unless the request is plain HTTP, so an admin

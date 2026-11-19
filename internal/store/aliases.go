@@ -10,7 +10,9 @@ import (
 
 // Aliases returns every alias by name, members in order.
 func (s *Store) Aliases(ctx context.Context) (map[string]alias.Alias, error) {
-	if snap := s.snap.Load(); snap != nil {
+	snap, unlock := s.snapshotForRead()
+	defer unlock()
+	if snap != nil {
 		return snap.cloneAliases(), nil
 	}
 	return loadAliases(ctx, s.db)

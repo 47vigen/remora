@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/47vigen/remora/internal/alias"
+	"github.com/47vigen/remora/internal/cooling"
 	"github.com/47vigen/remora/internal/engine/bifrost"
 	"github.com/47vigen/remora/internal/reconcile/reconciletest"
 	"github.com/47vigen/remora/internal/store"
@@ -299,6 +300,210 @@ func TestForceAllHourly(t *testing.T) {
 		h.sync(t)
 		wantBaseURL(t, h, "http://up-a.test")
 	})
+}
+
+type hookedEngine struct {
+	Engine
+	beforeListProviders func(context.Context) error
+	beforeCreateRule    func(context.Context, bifrost.RoutingRule) error
+}
+
+func (e hookedEngine) ListProviders(ctx context.Context) ([]bifrost.Provider, error) {
+	if e.beforeListProviders != nil {
+		if err := e.beforeListProviders(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return e.Engine.ListProviders(ctx)
+}
+
+func (e hookedEngine) CreateRoutingRule(ctx context.Context, r bifrost.RoutingRule) (bifrost.RoutingRule, error) {
+	if e.beforeCreateRule != nil {
+		if err := e.beforeCreateRule(ctx, r); err != nil {
+			return bifrost.RoutingRule{}, err
+		}
+	}
+	return e.Engine.CreateRoutingRule(ctx, r)
+}
+
+func TestSync_SlowEngineDoesNotBlockStoreWrites(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	ctx := t.Context()
+	now := time.Now()
+	a, err := h.st.CreateAccount(ctx, store.Account{Provider: "subscription", Credential: "test-account"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	passes := 0
+	h.rec.Engine = hookedEngine{Engine: h.eng, beforeListProviders: func(context.Context) error {
+		passes++
+		if passes == 1 {
+			close(started)
+			time.Sleep(5 * time.Second)
+		}
+		return nil
+	}}
+	done := make(chan error, 1)
+	go func() { done <- h.rec.Sync(ctx) }()
+	<-started
+	writeCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	for _, fn := range []func() error{
+		func() error { return h.st.CreateSession(writeCtx, []byte{1}, now.Add(time.Hour)) },
+		func() error {
+			return h.st.PutAccountQuota(writeCtx, store.AccountQuota{AccountID: a.ID, CheckedAt: now})
+		},
+		func() error {
+			return h.st.CreateAPIToken(writeCtx, store.APIToken{ID: "test", Name: "test", Hash: []byte{2}, CreatedAt: now})
+		},
+		func() error { return h.st.TouchAPIToken(writeCtx, "test", now) },
+		func() error {
+			return h.st.SaveCooling(writeCtx, []cooling.Cooling{
+				{Target: alias.Target{Provider: "up-a", Model: "m1"}, Until: now.Add(time.Minute)},
+			})
+		},
+	} {
+		if err := fn(); err != nil {
+			t.Errorf("write during engine call: %v", err)
+		}
+	}
+	if err := writeCtx.Err(); err != nil {
+		t.Errorf("writes did not finish within one second: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if passes != 1 {
+		t.Errorf("non-input writes invalidated the pass: ran %d passes, want 1", passes)
+	}
+}
+
+func TestSync_DiscardsMACsOnGenerationChange(t *testing.T) {
+	h := newHarness(t)
+	p := custom("up-a")
+	h.write(t, putAll([]store.Provider{p}))
+	h.sync(t)
+	mac := func(ctx context.Context) (string, error) {
+		var got string
+		err := h.st.DB().QueryRowContext(ctx, "SELECT mac FROM engine_sync WHERE object = 'provider:up-a'").Scan(&got)
+		return got, err
+	}
+	before, err := mac(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := p
+	changed.BaseURL = "http://up-a.test/v2"
+	h.write(t, putAll([]store.Provider{changed}))
+	h.eng.Mutations()
+	lists := 0
+	h.rec.Engine = hookedEngine{Engine: h.eng, beforeListProviders: func(ctx context.Context) error {
+		lists++
+		switch lists {
+		case 1:
+			writeCtx, cancel := context.WithTimeout(ctx, time.Second)
+			defer cancel()
+			return h.st.Write(writeCtx, func(tx *store.Tx) error { return tx.PutProvider(writeCtx, p) })
+		case 2:
+			got, err := mac(ctx)
+			if err != nil {
+				return err
+			}
+			if got != before {
+				t.Error("stale MAC was committed before retry")
+			}
+		}
+		return nil
+	}}
+	h.sync(t)
+	wantBaseURL(t, h, "http://up-a.test")
+	if got := ops(h.eng.Mutations()); !slices.Equal(got, []string{"UpdateProvider up-a", "UpdateProvider up-a"}) {
+		t.Errorf("mutations = %v, want a push for each of the two passes", got)
+	}
+	if lists != 2 {
+		t.Errorf("passes = %d, want 2", lists)
+	}
+}
+
+func TestChange_RefusalRestoresStoreAndEngine(t *testing.T) {
+	h := newHarness(t)
+	h.base(t)
+	h.sync(t)
+	refused := errors.New("refused")
+	h.rec.Engine = hookedEngine{Engine: h.eng, beforeCreateRule: func(ctx context.Context, _ bifrost.RoutingRule) error {
+		writeCtx, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		if err := h.st.CreateSession(writeCtx, []byte{1}, time.Now().Add(time.Hour)); err != nil {
+			return err
+		}
+		return refused
+	}}
+	changed := custom("up-a")
+	changed.BaseURL = "http://up-a.test/v2"
+	err := h.rec.Change(t.Context(), putAll([]store.Provider{changed}, chat("new", "up-a/m2")))
+	if !errors.Is(err, refused) {
+		t.Errorf("Change = %v, want the engine refusal", err)
+	}
+	var baseURL string
+	if err := h.st.DB().QueryRowContext(t.Context(), "SELECT base_url FROM providers WHERE name = 'up-a'").Scan(&baseURL); err != nil || baseURL != "http://up-a.test/v1" {
+		t.Fatal("provider change was not rolled back")
+	}
+	as, err := h.st.Aliases(t.Context())
+	if err != nil || len(as) != 1 || as["fast"].Name == "" {
+		t.Fatal("alias change was not rolled back")
+	}
+	if _, err := h.st.SessionExpiry(t.Context(), []byte{1}); err != nil {
+		t.Errorf("rollback lost the concurrent session: %v", err)
+	}
+	wantBaseURL(t, h, "http://up-a.test")
+	if !h.rec.Synced() {
+		t.Error("not Synced after recovery")
+	}
+}
+
+func TestBatch_SecondEngineRefusalRollsBackBothChanges(t *testing.T) {
+	h := newHarness(t)
+	h.base(t)
+	h.sync(t)
+	refused := errors.New("refused")
+	h.rec.Engine = hookedEngine{Engine: h.eng, beforeCreateRule: func(ctx context.Context, r bifrost.RoutingRule) error {
+		if r.Name != RuleName("second") {
+			return nil
+		}
+		if len(h.eng.RulesNamed(RuleName("first"))) != 1 {
+			t.Error("the first engine change did not precede the refusal")
+		}
+		// Write another reconcile input while the batch is in flight; compensation must not undo it.
+		writeCtx, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		if _, err := h.st.CreateAccount(writeCtx, store.Account{Provider: "subscription", Credential: "test-account"}); err != nil {
+			return err
+		}
+		return refused
+	}}
+	err := h.rec.Batch(t.Context(), func(ctx context.Context) error {
+		if err := h.rec.Change(ctx, putAll(nil, chat("first", "up-a/m2"))); err != nil {
+			return err
+		}
+		return h.rec.Change(ctx, putAll(nil, chat("second", "up-b/m2")))
+	})
+	if !errors.Is(err, refused) {
+		t.Errorf("Batch = %v, want the engine refusal", err)
+	}
+	as, err := h.st.Aliases(t.Context())
+	if err != nil || len(as) != 1 || as["fast"].Name == "" {
+		t.Fatal("batch changes were not rolled back")
+	}
+	for _, name := range []string{"first", "second"} {
+		if len(h.eng.RulesNamed(RuleName(name))) != 0 {
+			t.Errorf("engine retained rule %s", name)
+		}
+	}
+	if rows, err := h.st.Accounts(t.Context()); err != nil || len(rows) != 1 {
+		t.Errorf("rollback lost the concurrent account: %v", err)
+	}
 }
 
 func TestSync_StoreWins(t *testing.T) {

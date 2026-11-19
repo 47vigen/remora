@@ -60,6 +60,80 @@ func TestSnapshotSeesWriteAtCommit(t *testing.T) {
 	}
 }
 
+func TestPendingWriteKeepsSnapshotUntilCompensationSucceeds(t *testing.T) {
+	ctx := t.Context()
+	s := openSealed(t)
+	// Seed SQLite without a cached snapshot, as on startup before Refresh.
+	if err := s.write(ctx, func(tx *Tx) error {
+		return tx.PutAlias(ctx, alias.Alias{Name: "a", Kind: alias.KindChat, Members: []alias.Member{{Ref: "p/m"}}})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	change, err := s.WriteWithUndo(ctx, func(tx *Tx) error { return tx.DeleteAlias(ctx, "a") })
+	if err != nil {
+		t.Fatal(err)
+	}
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := change.Undo(canceled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Undo with canceled context: %v, want context.Canceled", err)
+	}
+	if err := s.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := s.Alias(ctx, "a"); !ok || err != nil {
+		t.Fatalf("pending delete reached the snapshot: present = %v, err = %v", ok, err)
+	}
+	if err := change.Undo(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Write(ctx, func(tx *Tx) error { return tx.DeleteAlias(ctx, "a") }); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := s.Alias(ctx, "a"); ok || err != nil {
+		t.Fatalf("compensation did not resume publication: present = %v, err = %v", ok, err)
+	}
+}
+
+func TestAbandonedPendingWriteResumesPublication(t *testing.T) {
+	ctx := t.Context()
+	s := openSealed(t)
+	if err := s.Write(ctx, func(tx *Tx) error {
+		return tx.PutAlias(ctx, alias.Alias{Name: "a", Kind: alias.KindChat, Members: []alias.Member{{Ref: "p/m"}}})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	change, err := s.WriteWithUndo(ctx, func(tx *Tx) error { return tx.DeleteAlias(ctx, "a") })
+	if err != nil {
+		t.Fatal(err)
+	}
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := change.Undo(canceled); err == nil {
+		t.Fatal("Undo with a canceled context succeeded")
+	}
+	// Compensation failed and nobody will retry it: the store must not stay frozen.
+	change.Abandon(ctx)
+	if _, ok, err := s.Alias(ctx, "a"); ok || err != nil {
+		t.Fatalf("abandoned change not published: present = %v, err = %v", ok, err)
+	}
+	if err := s.Write(ctx, func(tx *Tx) error {
+		return tx.PutAlias(ctx, alias.Alias{Name: "b", Kind: alias.KindChat, Members: []alias.Member{{Ref: "p/m"}}})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := s.Alias(ctx, "b"); !ok || err != nil {
+		t.Fatalf("a later write stayed hidden: present = %v, err = %v", ok, err)
+	}
+	next, err := s.WriteWithUndo(ctx, func(tx *Tx) error { return tx.DeleteAlias(ctx, "b") })
+	if err != nil {
+		t.Fatalf("a new change after Abandon: %v", err)
+	}
+	if err := next.Undo(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSnapshotRolledBackWriteChangesNothing(t *testing.T) {
 	ctx := context.Background()
 	s := openSealed(t)
@@ -159,5 +233,41 @@ func TestAliasesReturnsACopy(t *testing.T) {
 	delete(got, "a")
 	if again, _ := s.Aliases(ctx); len(again) != 1 {
 		t.Fatal("deleting from the returned map changed the store's")
+	}
+}
+
+func TestRedactSecretsAfterSnapshotRebuild(t *testing.T) {
+	const (
+		oldProvider = "fake-provider"
+		newProvider = "fake-rotated-provider"
+		oldVirtual  = "fake-provider-longer-virtual-tail"
+		newVirtual  = "fake-rotated-virtual"
+		engineValue = "fake-engine-credential"
+	)
+	ctx := t.Context()
+	s := openSealed(t)
+	k := putKey(t, s, ClientKey{Name: "test key"}, "fake-client-key")
+	if err := s.SetEngineValue(ctx, "fake-engine", "api_key", engineValue); err != nil {
+		t.Fatal(err)
+	}
+	update := func(provider, virtual string) {
+		t.Helper()
+		write(t, s, func(ctx context.Context, tx *Tx) error {
+			if err := tx.PutProvider(ctx, Provider{Name: "test", Kind: KindOpenAICompatible}); err != nil {
+				return err
+			}
+			if err := tx.PutProviderKey(ctx, ProviderKey{ID: "test", Provider: "test", Name: "test", Secret: provider}); err != nil {
+				return err
+			}
+			return tx.SetClientKeyVK(ctx, k.ID, "test-vk", virtual)
+		})
+	}
+	update(oldProvider, oldVirtual)
+	if s.RedactSecrets(oldProvider+" "+oldVirtual+" "+engineValue) != "[redacted] [redacted] [redacted]" {
+		t.Fatal("snapshot did not redact all stored credentials")
+	}
+	update(newProvider, newVirtual)
+	if s.RedactSecrets(newProvider+" "+newVirtual+" "+oldVirtual) != "[redacted] [redacted] "+oldVirtual {
+		t.Fatal("snapshot did not replace the matcher after rotation")
 	}
 }

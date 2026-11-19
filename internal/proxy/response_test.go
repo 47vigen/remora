@@ -2,7 +2,9 @@ package proxy
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
@@ -163,5 +165,42 @@ func TestSSEStripsExtraFields(t *testing.T) {
 		"data: {\"error\":{\"message\":\"remora down\"}}\n\ndata: [DONE]\n\n"
 	if string(got) != want {
 		t.Fatalf("stream = %q, want %q", got, want)
+	}
+}
+
+func TestScrubEngineDebugOutput(t *testing.T) {
+	const (
+		providerKey = `fake-provider-"key"\value`
+		virtualKey  = "fake-virtual-key"
+	)
+	redact := strings.NewReplacer(providerKey, "[redacted]", virtualKey, "[redacted]").Replace
+	for _, tc := range []struct{ name, input string }{
+		{"provider", providerKey},
+		{"virtual", virtualKey},
+		{"bearer", "bEaReR\tfake.bearer+token=="},
+		{"bearer with stored substring", "Bearer fake-prefix-" + virtualKey + "-suffix"},
+		{"common key", "sk-fake_generic-key"},
+		{"common key with stored substring", "sk-" + virtualKey + "-suffix"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var output bytes.Buffer
+			handler := slog.NewJSONHandler(&output, &slog.HandlerOptions{Level: slog.LevelDebug})
+			logger := slog.New(RedactEngineLogs(handler, redact)).With("engine", "fake-engine")
+			logger.Debug("engine output", "line", "bifrost "+tc.input+` said "no"`)
+			var record struct {
+				Line   string `json:"line"`
+				Level  string `json:"level"`
+				Engine string `json:"engine"`
+			}
+			if json.Unmarshal(output.Bytes(), &record) != nil {
+				t.Fatal("debug record is not valid JSON")
+			}
+			if record.Line != `remora [redacted] said "no"` {
+				t.Fatal("debug line was not redacted or adjacent text changed")
+			}
+			if record.Level != "DEBUG" || record.Engine != "fake-engine" {
+				t.Fatal("debug record lost its level or bound attributes")
+			}
+		})
 	}
 }

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/47vigen/remora/internal/alias"
+	"github.com/47vigen/remora/internal/cooling"
 	"github.com/47vigen/remora/internal/store"
 )
 
@@ -800,22 +801,116 @@ func TestProxy_UpstreamDown(t *testing.T) {
 	}
 }
 
-func TestProxy_NoResponseTimeout(t *testing.T) {
+func TestHeaderCapSingleTargetOnly(t *testing.T) {
+	apiKey := alias.Target{Provider: "up-a", Model: "m1"}
+	subscription := alias.Target{Provider: "grok", Model: "m1"}
+	for _, tc := range []struct {
+		name, model, path string
+		upstream, want    int
+		wantCooling       bool
+	}{
+		{"api_key", "up-a/m1", "/v1/chat/completions", http.StatusOK, http.StatusBadGateway, true},
+		{"api_key_fallback", "fast", "/v1/chat/completions", http.StatusOK, http.StatusOK, false},
+		{"subscription", "grok/m1", "/v1/chat/completions", http.StatusOK, http.StatusOK, false},
+		{"subscription_fallback", "mixed", "/v1/chat/completions", http.StatusOK, http.StatusOK, false},
+		{"engine_timeout", "grok/m1", "/v1/chat/completions", http.StatusGatewayTimeout, http.StatusGatewayTimeout, false},
+		{"transcription", "up-a/m1", "/v1/audio/transcriptions", http.StatusOK, http.StatusOK, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			if got := f.px.transport.ResponseHeaderTimeout; got != 610*time.Second {
+				t.Fatalf("ResponseHeaderTimeout = %v, want 610s", got)
+			}
+			f.px.transport.ResponseHeaderTimeout = 100 * time.Millisecond
+			f.px.Cooler = cooling.New(cooling.Config{}, nil, nil, nil)
+			now := time.Now()
+			for _, target := range []alias.Target{apiKey, {Provider: "up-b", Model: "m1"}, subscription} {
+				for range 4 { // One proxy failure is enough to open a seeded breaker's circuit.
+					if err := f.px.Cooler.Observe(t.Context(), cooling.Event{Target: target, At: now, StatusCode: 503}); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if tc.model == "mixed" {
+				if err := f.st.Write(t.Context(), func(tx *store.Tx) error {
+					if err := tx.PutAlias(t.Context(), alias.Alias{Name: "subscription", Kind: alias.KindChat, Members: []alias.Member{{Ref: "grok/m1"}}}); err != nil {
+						return err
+					}
+					return tx.PutAlias(t.Context(), alias.Alias{Name: "mixed", Kind: alias.KindChat, Members: []alias.Member{{Ref: "up-a/m1"}, {Ref: "subscription"}}})
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			f.upstream(func(w http.ResponseWriter, r *http.Request) {
+				select {
+				case <-r.Context().Done():
+					return
+				case <-time.After(250 * time.Millisecond):
+				}
+				if tc.upstream == http.StatusGatewayTimeout {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(tc.upstream)
+					_, _ = io.WriteString(w, `{"error":{"type":"request_timed_out","message":"deadline exceeded"}}`)
+					return
+				}
+				if tc.name == "api_key_fallback" {
+					// The primary timed out without headers; the engine is now returning the fallback.
+					w.Header().Set(headerRoutingProvider, "up-b")
+					w.Header().Set(headerRoutingModel, "m1")
+					w.Header().Set(headerRoutingIsFallback, "true")
+				}
+				okJSON(w, r)
+			})
+			body, ct := chatBody(tc.model), "application/json"
+			if tc.name == "transcription" {
+				body, ct = multipartBody(t, []field{{name: "file", filename: "a.wav", value: []byte("RIFF")}, {name: "model", value: []byte(tc.model)}})
+			}
+			resp := f.do(t, http.MethodPost, tc.path, keyFull, ct, body, nil)
+			if resp.StatusCode != tc.want {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, tc.want)
+			}
+			if tc.name == "api_key_fallback" && (resp.Header.Get(headerServedBy) != "up-b/m1" ||
+				resp.Header.Get(headerFallback) != "true" || !bytes.Contains(resp.Body, []byte(`"object":"chat.completion"`))) {
+				t.Fatalf("fallback answer missing: headers = %v, body = %s", resp.Header, resp.Body)
+			}
+			rows := f.px.Cooler.Snapshot()
+			if tc.wantCooling {
+				if len(rows) != 1 || rows[0].Target != apiKey || rows[0].Reason != "504" || rows[0].Backoff == 0 {
+					t.Errorf("cooling = %+v, want one breaker opened by the header timeout", rows)
+				}
+			} else if len(rows) != 0 {
+				t.Errorf("cooling = %+v, want no local breaker failure", rows)
+			}
+		})
+	}
+}
+
+func TestProxy_HeaderTimeoutIgnoresClientCancellation(t *testing.T) {
 	f := newFixture(t)
-	if f.px.transport.ResponseHeaderTimeout != 0 {
-		t.Fatalf("ResponseHeaderTimeout = %v, want 0", f.px.transport.ResponseHeaderTimeout)
+	f.px.transport.ResponseHeaderTimeout = time.Second
+	f.px.Cooler = cooling.New(cooling.Config{}, nil, nil, nil)
+	e := cooling.Event{Target: alias.Target{Provider: "up-a", Model: "m1"}, At: time.Now(), StatusCode: 503}
+	for range 4 {
+		if err := f.px.Cooler.Observe(t.Context(), e); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if f.srv.Config.WriteTimeout != 0 {
-		t.Fatalf("server WriteTimeout = %v, want 0", f.srv.Config.WriteTimeout)
-	}
-	f.upstream(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(3 * time.Second)
-		okJSON(w, r)
+	ctx, cancel := context.WithCancelCause(t.Context())
+	defer cancel(nil)
+	f.upstream(func(_ http.ResponseWriter, r *http.Request) {
+		cancel(context.DeadlineExceeded) // A client deadline must not be mistaken for the proxy cap.
+		<-r.Context().Done()
 	})
-	body, ct := multipartBody(t, []field{{name: "file", filename: "a.wav", value: []byte("RIFF")}, {name: "model", value: []byte("up-a/m1")}})
-	resp := f.do(t, http.MethodPost, "/v1/audio/transcriptions", keyFull, ct, body, nil)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d", resp.StatusCode)
+	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/chat/completions", bytes.NewReader(chatBody("up-a/m1")))
+	req.Header.Set("Authorization", "Bearer "+keyFull)
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	f.px.ServeHTTP(resp, req)
+	if !errors.Is(context.Cause(ctx), context.DeadlineExceeded) || resp.Code != http.StatusBadGateway {
+		t.Fatalf("client cancellation not exercised: cause = %v, status = %d", context.Cause(ctx), resp.Code)
+	}
+	if rows := f.px.Cooler.Snapshot(); len(rows) != 0 {
+		t.Fatalf("cooling = %+v, want no breaker failure", rows)
 	}
 }
 
@@ -1072,5 +1167,210 @@ func TestStartedCountsServedBy(t *testing.T) {
 	serve("remora-oauth", "codex/m") // the renamed served-by value is what counts
 	if got := p.starts("codex/m"); got != 1 {
 		t.Errorf("starts(codex/m) = %d, want 1", got)
+	}
+}
+
+func TestProxy_ProbesOpenAliasMember(t *testing.T) {
+	f := newFixture(t)
+	target := alias.Target{Provider: "up-a", Model: "m1"}
+	var now atomic.Int64
+	now.Store(time.Now().UnixNano())
+	clock := func() time.Time { return time.Unix(0, now.Load()) }
+	f.px.Cooler = cooling.New(cooling.Config{}, nil, clock, nil)
+	for range 5 {
+		if err := f.px.Cooler.Observe(t.Context(), cooling.Event{Target: target, At: clock(), StatusCode: 503}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	send := func() string {
+		t.Helper()
+		resp := f.do(t, http.MethodPost, "/v1/chat/completions", keyLimited, "application/json", chatBody("fast"), nil)
+		if resp.StatusCode != http.StatusOK || resp.Header.Get("X-Remora-Alias") != "fast" {
+			t.Fatalf("probe response = %d %s, headers %v", resp.StatusCode, resp.Body, resp.Header)
+		}
+		var request struct{ Model string }
+		if err := json.Unmarshal(f.seen().body, &request); err != nil {
+			t.Fatal(err)
+		}
+		return request.Model
+	}
+	if got := send(); got != alias.EngineModel("fast") {
+		t.Fatalf("request routed to %q while breaker was open", got)
+	}
+	now.Add(int64(30 * time.Second))
+	if got := send(); got != "up-a/m1" {
+		t.Fatalf("probe routed to %q, want up-a/m1", got)
+	}
+	// The response can reach the client before the handler's deferred probe bookkeeping.
+	deadline := time.Now().Add(time.Second)
+	for f.px.Cooler.HasBreakers() && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if f.px.Cooler.HasBreakers() {
+		t.Fatal("successful probe did not restore the member")
+	}
+	if got := send(); got != alias.EngineModel("fast") {
+		t.Fatalf("request routed to %q after closing the breaker", got)
+	}
+}
+
+func TestProbeTruncatedBodyFails(t *testing.T) {
+	const partial = "data: {\"delta\":\"hello\"}\n\n"
+	const complete = partial + "data: [DONE]\n\n"
+	for _, tc := range []struct {
+		name, body string
+		wantAbort  any
+	}{
+		{"truncated", partial, http.ErrAbortHandler},
+		{"complete", complete, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			target := alias.Target{Provider: "up-a", Model: "m1"}
+			now := time.Now()
+			f.px.Cooler = cooling.New(cooling.Config{}, nil, func() time.Time { return now }, nil)
+			for range 5 {
+				if err := f.px.Cooler.Observe(t.Context(), cooling.Event{Target: target, At: now, StatusCode: 503}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			now = now.Add(30 * time.Second)
+			f.upstream(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.Header().Set("Content-Length", strconv.Itoa(len(complete)))
+				_, _ = io.WriteString(w, tc.body)
+			})
+
+			// Exercise the server's abort path without racing the handler's deferred bookkeeping.
+			ctx := context.WithValue(t.Context(), http.ServerContextKey, f.srv.Config)
+			req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/chat/completions", bytes.NewReader(chatBody("up-a/m1")))
+			req.Header.Set("Authorization", "Bearer "+keyFull)
+			req.Header.Set("Content-Type", "application/json")
+			resp := httptest.NewRecorder()
+			var aborted any
+			func() {
+				defer func() { aborted = recover() }()
+				f.px.ServeHTTP(resp, req)
+			}()
+			if aborted != tc.wantAbort || resp.Code != http.StatusOK || resp.Body.String() != tc.body {
+				t.Fatalf("response = %d %q, panic = %v; want 200 %q, panic = %v", resp.Code, resp.Body, aborted, tc.body, tc.wantAbort)
+			}
+			rows := f.px.Cooler.Snapshot()
+			if tc.wantAbort != nil {
+				if len(rows) != 1 || rows[0].Target != target || rows[0].Reason != "502" || !rows[0].Until.After(now) {
+					t.Fatalf("cooling = %+v, want member tripped again by a 502", rows)
+				}
+			} else if len(rows) != 0 {
+				t.Fatalf("cooling = %+v, want breaker closed after complete stream", rows)
+			}
+		})
+	}
+}
+
+func TestProbeSSEErrorFails(t *testing.T) {
+	for _, tc := range []struct {
+		name, event, wantReason string
+	}{
+		{"native_status", `{"error":{"is_bifrost_error":true,"status_code":429,"error":{"message":"busy"}}}`, "429"},
+		{"client_status_in_stream", `{"status_code":422,"error":{"message":"failed"}}`, "422"},
+		{"no_status", `{"type":"error","error":{"message":"failed"}}`, "502"},
+		{"oversized", `{"error":{"message":"` + strings.Repeat("x", maxSSELine+(64<<10)) + `"}}`, "502"},
+		{"complete", `[DONE]`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			target := alias.Target{Provider: "up-a", Model: "m1"}
+			now := time.Now()
+			f.px.Cooler = cooling.New(cooling.Config{}, nil, func() time.Time { return now }, nil)
+			for range 5 {
+				if err := f.px.Cooler.Observe(t.Context(), cooling.Event{Target: target, At: now, StatusCode: 503}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			now = now.Add(30 * time.Second)
+			const first = "data: {\"delta\":\"error\"}\n\n"
+			f.upstream(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, first)
+				w.(http.Flusher).Flush()
+				_, _ = io.WriteString(w, "data: "+tc.event+"\n\n")
+			})
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", bytes.NewReader(chatBody("up-a/m1")))
+			req.Header.Set("Authorization", "Bearer "+keyFull)
+			req.Header.Set("Content-Type", "application/json")
+			resp := httptest.NewRecorder()
+			f.px.ServeHTTP(resp, req)
+			if resp.Code != http.StatusOK || !strings.HasPrefix(resp.Body.String(), first) {
+				t.Fatalf("probe response = %d %q, want 200 and a streamed chunk", resp.Code, resp.Body)
+			}
+			rows := f.px.Cooler.Snapshot()
+			if tc.wantReason == "" {
+				if len(rows) != 0 {
+					t.Fatalf("cooling = %+v, want breaker closed after complete stream", rows)
+				}
+			} else if len(rows) != 1 || rows[0].Target != target || rows[0].Reason != tc.wantReason || !rows[0].Until.After(now) {
+				t.Fatalf("cooling = %+v, want member tripped again by %s", rows, tc.wantReason)
+			}
+		})
+	}
+}
+
+func TestProbeClientCancelLeavesBreaker(t *testing.T) {
+	f := newFixture(t)
+	target := alias.Target{Provider: "up-a", Model: "m1"}
+	now := time.Now()
+	f.px.Cooler = cooling.New(cooling.Config{}, nil, func() time.Time { return now }, nil)
+	for range 5 {
+		if err := f.px.Cooler.Observe(t.Context(), cooling.Event{Target: target, At: now, StatusCode: 503}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now = now.Add(30 * time.Second)
+	before := f.px.Cooler.Snapshot()
+
+	const first = "data: {\"delta\":\"hello\"}\n\n"
+	f.upstream(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, first)
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	})
+	finished := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer close(finished)
+		f.px.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	deadline, stop := context.WithTimeout(t.Context(), 5*time.Second)
+	defer stop()
+	ctx, cancel := context.WithCancel(deadline)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+"/v1/chat/completions", bytes.NewReader(chatBody("up-a/m1")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+keyFull)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if got, err := io.ReadFull(resp.Body, make([]byte, len(first))); err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("probe response = %d, read %d bytes: %v", resp.StatusCode, got, err)
+	}
+	cancel()
+	select {
+	case <-finished:
+	case <-deadline.Done():
+		t.Fatal("proxy did not finish after client cancellation")
+	}
+	after := f.px.Cooler.Snapshot()
+	if len(before) != 1 || len(after) != 1 || after[0] != before[0] {
+		t.Fatalf("cooling after a client cancel = %+v, want unchanged %+v", after, before)
+	}
+	// The probe slot is released, so the next request can probe.
+	if _, ok := f.px.Cooler.Admit([]alias.Target{target}); !ok {
+		t.Fatal("no probe admitted after the cancelled one")
 	}
 }

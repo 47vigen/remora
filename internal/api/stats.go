@@ -81,6 +81,7 @@ const groupReads = 8
 type group struct {
 	name   string
 	narrow func(*bifrost.LogFilter) bool // false when the member cannot match the base filter
+	label  *string
 }
 
 // stats answers the stats over f's range: the summary, the series and, with group_by, one summary per member of
@@ -121,7 +122,7 @@ func (s *Server) stats(ctx context.Context, f bifrost.LogFilter, groupBy string,
 	}
 	for i, m := range members {
 		if sums[i].Requests > 0 {
-			out.Groups = append(out.Groups, gen.StatsGroup{Name: m.name, Summary: sums[i]})
+			out.Groups = append(out.Groups, gen.StatsGroup{Name: m.name, Label: m.label, Summary: sums[i]})
 		}
 	}
 	return out, nil
@@ -223,7 +224,7 @@ func (s *Server) groups(ctx context.Context, f bifrost.LogFilter, groupBy string
 		}
 		for _, k := range keys {
 			if vk, ok := s.d.Names.VKByKey(ctx, k.ID); ok {
-				out = append(out, group{k.ID, func(f *bifrost.LogFilter) bool { return narrowTo(&f.VirtualKeyIDs, vk) }})
+				out = append(out, group{k.ID, func(f *bifrost.LogFilter) bool { return narrowTo(&f.VirtualKeyIDs, vk) }, &k.Name})
 			}
 		}
 	case gen.GetStatsParamsGroupByAlias:
@@ -236,7 +237,7 @@ func (s *Server) groups(ctx context.Context, f bifrost.LogFilter, groupBy string
 		}
 		for _, a := range aliases {
 			if rule, ok := s.d.Names.RuleByAlias(ctx, a.Name); ok {
-				out = append(out, group{a.Name, func(f *bifrost.LogFilter) bool { return narrowTo(&f.RoutingRuleIDs, rule) }})
+				out = append(out, group{a.Name, func(f *bifrost.LogFilter) bool { return narrowTo(&f.RoutingRuleIDs, rule) }, nil})
 			}
 		}
 	case gen.GetStatsParamsGroupByProvider:
@@ -270,7 +271,7 @@ func (s *Server) groups(ctx context.Context, f bifrost.LogFilter, groupBy string
 					f.Models = ms
 				}
 				return true
-			}})
+			}, nil})
 		}
 	case gen.GetStatsParamsGroupByModel:
 		used, err := s.d.Logs.ModelUsage(ctx, f)
@@ -283,7 +284,7 @@ func (s *Server) groups(ctx context.Context, f bifrost.LogFilter, groupBy string
 			out = append(out, group{t.Provider + "/" + t.Model, func(f *bifrost.LogFilter) bool {
 				f.Providers, f.Models = []string{u.Provider}, []string{u.Model}
 				return true
-			}})
+			}, nil})
 		}
 	case gen.GetStatsParamsGroupByNone, "":
 	default:

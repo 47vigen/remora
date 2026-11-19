@@ -25,7 +25,7 @@ services:
       REMORA_COOLING_DEFAULT: 1s
       REMORA_COOLING_429_COUNT: "1000"
       # Quota checks go to the fakes through the real engine; no background polling keeps runs deterministic.
-      REMORA_QUOTA_BASE_URL: http://fakes:9090/u/quota
+      REMORA_TEST_QUOTA_BASE_URL: http://fakes:9090/u/quota
       REMORA_QUOTA_INTERVAL: "0"
     # Whatever the engine does on its own with a fixture token (a model probe, a token refresh) is refused locally
     # and never reaches a provider.

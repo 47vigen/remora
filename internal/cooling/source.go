@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,14 +21,14 @@ const DefaultTick = 5 * time.Second
 var ErrFeedClosed = errors.New("cooling: log feed closed")
 
 // EventFrom turns a front-door log row, with its error details, into an Event. It reports false unless the row is an
-// error whose upstream status is 402 or 429. The target is in user names: a row of the OAuth engine's internal
-// provider carries the "<name>/<model>" the user wrote.
+// upstream error: 402, 429, or 5xx (including request_timed_out/504 and provider_connection_failed/502).
+// The front door records Retry-After separately from the error body, including for timed 503s and OAuth pool 429s.
 func EventFrom(l bifrost.Log) (Event, bool) {
 	if l.Status != "error" || l.Provider == "" || l.Model == "" {
 		return Event{}, false
 	}
 	code, retryAfter := l.Failure()
-	if code != http.StatusPaymentRequired && code != http.StatusTooManyRequests {
+	if code != http.StatusPaymentRequired && code != http.StatusTooManyRequests && !transient(code) {
 		return Event{}, false
 	}
 	provider, model, ok := strings.Cut(cliproxyapi.UserRef(l.Provider, l.Model), "/")
@@ -38,6 +39,18 @@ func EventFrom(l bifrost.Log) (Event, bool) {
 		ID: l.ID, At: l.Timestamp, Target: alias.Target{Provider: provider, Model: model},
 		StatusCode: code, RetryAfter: retryAfter, Subscription: l.Provider == bifrost.OAuthProvider,
 	}, true
+}
+
+// RetryAfter parses a probe response's Retry-After, as delta-seconds or an HTTP date.
+func RetryAfter(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if seconds, err := strconv.ParseUint(value, 10, 64); err == nil || errors.Is(err, strconv.ErrRange) {
+		return time.Duration(min(seconds, uint64(maxCooldown/time.Second))) * time.Second
+	}
+	if deadline, err := http.ParseTime(value); err == nil {
+		return min(maxCooldown, max(0, deadline.Sub(now)))
+	}
+	return 0
 }
 
 // Run follows the front door's log rows until ctx is done or rows is closed. For each error row it fetches the row's
@@ -103,6 +116,6 @@ func (c *Cooler) handle(ctx context.Context, row bifrost.Log, detail func(contex
 		return
 	}
 	if err := c.Observe(ctx, e); err != nil && ctx.Err() == nil {
-		c.log.WarnContext(ctx, "cooling: recompile aliases", "err", err)
+		c.log.WarnContext(ctx, "cooling: observe failure", "err", err)
 	}
 }

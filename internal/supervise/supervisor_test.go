@@ -214,6 +214,51 @@ func TestRestartsCrashedEngine(t *testing.T) {
 	assertGone(t, first)
 }
 
+func TestRestartsAfterFailedProbes(t *testing.T) {
+	for _, tc := range []struct{ name, mode string }{
+		{"Hung", "hung"},
+		{"Unhealthy503", "unhealthy"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, versions := helperEngine(t, "bifrost", tc.mode)
+			const interval, backoff = 250 * time.Millisecond, 500 * time.Millisecond
+			s := New(testLogger(t), versions, Options{HealthInterval: interval, BackoffMin: backoff})
+			stopAtCleanup(t, s)
+			if err := s.Start(t.Context(), e); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			first := s.pids()[0]
+			deadline := time.Now().Add(3*interval + 50*time.Millisecond) // Allow for scheduling the test goroutine.
+			for s.Status()[0].Up {
+				if time.Now().After(deadline) {
+					t.Fatal("engine still up after three failed probes")
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+			if st := s.Status()[0]; st.Restarts != 0 {
+				t.Fatalf("engine skipped the down state before restart: %+v", st)
+			}
+
+			deadline = time.Now().Add(5 * time.Second)
+			for {
+				st := s.Status()[0]
+				if st.Restarts == 1 && st.Up {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("engine did not recover: %+v", st)
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+			if pid := s.pids()[0]; pid == first {
+				t.Fatalf("pid unchanged after restart: %d", pid)
+			}
+			stopTime(t, e) // The original process stayed alive until the supervisor sent SIGTERM.
+			assertGone(t, first)
+		})
+	}
+}
+
 func TestStopReverseOrder(t *testing.T) {
 	a, va := helperEngine(t, "a", "healthy")
 	b, vb := helperEngine(t, "b", "healthy")

@@ -6,7 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"testing/synctest"
 	"time"
+
+	"github.com/47vigen/remora/internal/store"
 )
 
 func TestChangedPasswordSurvivesEnv(t *testing.T) {
@@ -77,24 +80,73 @@ func TestSessionExpires(t *testing.T) {
 	}
 }
 
-func TestLoginLimiter(t *testing.T) {
+func TestSessionPurgeOnSuccessfulLogin(t *testing.T) {
 	ctx := context.Background()
-	s, _, c := newService(t)
-	for i := range 5 {
-		if _, _, err := s.Login(ctx, "192.0.2.1", "wrong-password-1"); !errors.Is(err, ErrBadPassword) {
-			t.Fatalf("attempt %d err = %v, want ErrBadPassword", i+1, err)
+	s, st, c := newService(t)
+	expired := login(t, s, testPassword)
+	c.add(SessionTTL)
+	activeHash := []byte("active-session-hash")
+	if err := st.CreateSession(ctx, activeHash, c.now().Add(time.Nanosecond)); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if _, _, err := s.Login(ctx, "192.0.2.1", "wrong-password-1"); !errors.Is(err, ErrBadPassword) {
+		t.Fatalf("failed login: %v", err)
+	}
+	if _, err := st.SessionExpiry(ctx, hashToken(expired)); err != nil {
+		t.Fatalf("failed login removed expired session: %v", err)
+	}
+	fresh := login(t, s, testPassword)
+	if _, err := st.SessionExpiry(ctx, hashToken(expired)); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("expired session after login: %v, want ErrNotFound", err)
+	}
+	for _, hash := range [][]byte{activeHash, hashToken(fresh)} {
+		if _, err := st.SessionExpiry(ctx, hash); err != nil {
+			t.Errorf("active session after login: %v", err)
 		}
 	}
-	if _, _, err := s.Login(ctx, "192.0.2.1", testPassword); !errors.Is(err, ErrTooManyAttempts) {
-		t.Fatalf("6th attempt err = %v, want ErrTooManyAttempts", err)
-	}
-	if _, _, err := s.Login(ctx, "192.0.2.2", testPassword); err != nil {
-		t.Errorf("other IP: %v", err)
-	}
-	c.add(15 * time.Minute)
-	if _, _, err := s.Login(ctx, "192.0.2.1", testPassword); err != nil {
-		t.Errorf("after the window: %v", err)
-	}
+}
+
+func TestLoginLimiter(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx := t.Context()
+		s, _, _ := newService(t)
+		const ip = "192.0.2.1"
+		for range 5 {
+			if _, _, err := s.Login(ctx, ip, "wrong-password-1"); !errors.Is(err, ErrBadPassword) {
+				t.Fatalf("failed login = %v, want ErrBadPassword", err)
+			}
+		}
+
+		start := time.Now()
+		if _, _, err := s.Login(ctx, ip, "wrong-password-1"); !errors.Is(err, ErrBadPassword) {
+			t.Fatalf("delayed failure = %v, want ErrBadPassword", err)
+		}
+		if got := time.Since(start); got != time.Second {
+			t.Errorf("failed login delay = %v, want 1s", got)
+		}
+
+		canceled, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		if _, _, err := s.Login(canceled, ip, testPassword); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("canceled login = %v, want context deadline exceeded", err)
+		}
+
+		start = time.Now()
+		if _, _, err := s.Login(ctx, ip, testPassword); err != nil {
+			t.Fatalf("delayed correct login: %v", err)
+		}
+		if got := time.Since(start); got != 2*time.Second {
+			t.Errorf("correct login delay = %v, want 2s", got)
+		}
+
+		start = time.Now()
+		if _, _, err := s.Login(ctx, ip, testPassword); err != nil {
+			t.Fatalf("next login: %v", err)
+		}
+		if got := time.Since(start); got != 0 {
+			t.Errorf("delay after success = %v, want none", got)
+		}
+	})
 }
 
 func TestChangePasswordRevokesOtherSessions(t *testing.T) {
@@ -113,6 +165,29 @@ func TestChangePasswordRevokesOtherSessions(t *testing.T) {
 	}
 }
 
+func TestHTTPS(t *testing.T) {
+	for _, tc := range []struct {
+		name, scheme, peer, forwarded string
+		wantSecure                    bool
+	}{
+		{"direct TLS", "https", "192.0.2.1:4000", "http", true},
+		{"IPv4 loopback", "http", "127.0.0.1:4000", "https", true},
+		{"IPv6 loopback", "http", "[::1]:4000", "HTTPS", true},
+		{"untrusted peer", "http", "192.0.2.1:4000", "https", false},
+		{"malformed peer", "http", "127.0.0.1", "https", false},
+		{"plain HTTP", "http", "127.0.0.1:4000", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, tc.scheme+"://remora.test/api/auth/login", http.NoBody)
+			r.RemoteAddr = tc.peer
+			r.Header.Set("X-Forwarded-Proto", tc.forwarded)
+			if got := isHTTPS(r); got != tc.wantSecure {
+				t.Errorf("isHTTPS = %t, want %t", got, tc.wantSecure)
+			}
+		})
+	}
+}
+
 func TestSessionCookieFlags(t *testing.T) {
 	exp := newClock().now().Add(SessionTTL)
 	for _, tc := range []struct {
@@ -126,6 +201,7 @@ func TestSessionCookieFlags(t *testing.T) {
 		{"forwarded https", func() *http.Request {
 			r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "http://remora.test/api/auth/login", http.NoBody)
 			r.Header.Set("X-Forwarded-Proto", "https")
+			r.RemoteAddr = "127.0.0.1:4000"
 			return r
 		}, true},
 		{"plain http", func() *http.Request {

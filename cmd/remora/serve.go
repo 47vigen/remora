@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,11 +36,6 @@ import (
 const (
 	readHeaderTimeout = 10 * time.Second
 	idleTimeout       = 120 * time.Second // closes a client's idle keep-alive connection
-	// stopTimeout bounds the whole shutdown after the signal, under Docker's 10s grace (deploy/compose.yaml); the
-	// engines are killed when it ends.
-	stopTimeout = 8 * time.Second
-	// drainTimeout is how long in-flight requests get to finish before their connections are closed.
-	drainTimeout = 5 * time.Second
 	// sweepMargin keeps the speech sweeper off a job a live request still waits on.
 	sweepMargin = 10 * time.Minute
 )
@@ -72,10 +68,15 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	if n := selfMemoryLimit(cfg.MemoryLimit, os.Getenv); n > 0 {
 		debug.SetMemoryLimit(n)
 	}
-	// stopCtx ends stopTimeout after ctx does, and bounds every step of the shutdown.
+	// The stop budget starts on the signal, not while remora is serving.
 	stopCtx, stopCancel := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopCancel()
-	context.AfterFunc(ctx, func() { time.AfterFunc(stopTimeout, stopCancel) })
+	stopTimer := context.AfterFunc(ctx, func() {
+		timer := time.AfterFunc(cfg.StopTimeout(), stopCancel)
+		<-stopCtx.Done()
+		timer.Stop()
+	})
+	defer stopTimer()
 
 	if err := prepareDataDir(cfg.DataDir); err != nil {
 		return fmt.Errorf("prepare data dir: %w", err)
@@ -103,13 +104,12 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	if err := setSealer(st, cfg); err != nil {
 		return fmt.Errorf("master key: %w", err)
 	}
-	if err := st.Refresh(ctx); err != nil {
-		logger.Error("store: build the key and alias snapshot; reads use the database", "err", err)
-	}
-
 	creds, err := supervise.EnsureCredentials(ctx, st)
 	if err != nil {
 		return fmt.Errorf("ensure engine credentials: %w", err)
+	}
+	if err := st.Refresh(ctx); err != nil {
+		logger.Error("store: build the key and alias snapshot; reads use the database", "err", err)
 	}
 	stored, err := st.AccountStrategies(ctx)
 	if err != nil {
@@ -137,7 +137,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	}
 	defer stopSpeech(stopCtx)
 
-	sup := supervise.New(logger, versions, supervise.Options{})
+	sup := supervise.New(slog.New(proxy.RedactEngineLogs(logger.Handler(), st.RedactSecrets)), versions, supervise.Options{})
 	defer func() {
 		if serr := sup.Stop(stopCtx); serr != nil {
 			err = errors.Join(err, fmt.Errorf("stop engines: %w", serr))
@@ -162,6 +162,9 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		Threshold: cfg.Cooling.Count429, Window: cfg.Cooling.Window429, Default: cfg.Cooling.Default,
 		SubscriptionDefault: cfg.Cooling.SubscriptionDefault,
 	}, rec.Sync, nil, logger)
+	if err := cooler.Restore(ctx, st); err != nil {
+		return err
+	}
 	rec.Filter = cooler.Filter
 	// Every committed pass hands the spreading aliases' live chains to the proxy, so it never names a member
 	// without a rule.
@@ -201,6 +204,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	mux := http.NewServeMux()
 	api.RegisterHealthz(mux, sup, accts)
 	authSvc := auth.NewService(st, nil)
+	defer authSvc.StartTokenTouches(stopCtx, logger)()
 	mgmt := api.New(api.Deps{
 		Providers: api.NewProviders(st, rec, fd, soniox.NewClient(cfg.SonioxBaseURL, &http.Client{})),
 		Accounts:  api.NewAccounts(accts),
@@ -228,6 +232,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	px := proxy.New(upstream, st, logger)
 	px.Ready = rec.Synced
 	px.Picker = picker
+	px.Cooler, px.MaxAliasDepth = cooler, rec.MaxDepth
 	// The OAuth engine's members are served as "remora-oauth/<name>/<model>"; clients see "<name>/<model>".
 	px.OnResponse(proxy.ServedByHook(cliproxyapi.UserRef))
 	mux.Handle("/v1/", px)
@@ -236,7 +241,8 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		return err
 	}
 	defer stopPprof()
-	srv := newServer(ctx, cfg.Listen, mux)
+	var drain requestDrain
+	srv := newServer(ctx, cfg.Listen, drain.wrap(mux))
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.Listen)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", cfg.Listen, err)
@@ -251,14 +257,67 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		return fmt.Errorf("serve http: %w", err)
 	case <-ctx.Done():
 	}
+	drained := drain.begin()
 	logger.Info("shutting down")
-	dctx, cancel := context.WithTimeout(stopCtx, drainTimeout)
+	dctx, cancel := context.WithTimeout(stopCtx, cfg.DrainTimeout)
 	defer cancel()
+	// Shutdown closes listeners first, so wait with nginx still able to reach the drain response.
+	select {
+	case <-drained:
+	case <-dctx.Done():
+	}
 	if err := srv.Shutdown(dctx); err != nil {
 		logger.Warn("requests still in flight after the drain; closing them", "err", err)
 		_ = srv.Close()
 	}
 	return nil
+}
+
+// requestDrain tracks handlers admitted before shutdown. Reserving a slot and beginning the drain share a lock.
+type requestDrain struct {
+	mu     sync.Mutex
+	active int
+	done   chan struct{} // non-nil once draining
+}
+
+func (d *requestDrain) begin() <-chan struct{} {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.done = make(chan struct{})
+	if d.active == 0 {
+		close(d.done)
+	}
+	return d.done
+}
+
+func (d *requestDrain) wrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		d.mu.Lock()
+		draining := d.done != nil
+		if !draining {
+			d.active++
+		}
+		d.mu.Unlock()
+		if !draining {
+			defer func() {
+				d.mu.Lock()
+				d.active--
+				if d.active == 0 && d.done != nil {
+					close(d.done)
+				}
+				d.mu.Unlock()
+			}()
+		} else if r.URL.Path == "/v1" || strings.HasPrefix(r.URL.Path, "/v1/") {
+			// Don't wait for an unread upload before sending the drain response.
+			w.Header().Set("Connection", "close")
+			w.Header().Set("Retry-After", "1")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, `{"error":{"type":"api_error","code":"draining","message":"remora is shutting down; retry shortly."}}`)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // selfMemoryLimit is the soft memory limit remora sets for itself: its share of the container's limit, or 0 when
@@ -292,8 +351,8 @@ func newReconciler(cfg config.Config, st *store.Store, engine reconcile.Engine, 
 }
 
 // startSpeech serves the speech-to-text adapter on its loopback address and runs the sweeper of leftover upstream
-// files and transcriptions. The returned stop shuts the listener down (waiting up to drainTimeout, or until its ctx
-// ends, for running jobs, then closing it) and waits for the sweeper to end.
+// files and transcriptions. The returned stop shuts the listener down within the remaining stop budget and waits
+// for the sweeper to end.
 func startSpeech(ctx context.Context, cfg config.Config, st *store.Store, logger *slog.Logger) (stop func(context.Context), err error) {
 	log := logger.With("component", "speech")
 	srv := newServer(ctx, cfg.SonioxAddr, soniox.New(soniox.Config{
@@ -332,7 +391,7 @@ func startSpeech(ctx context.Context, cfg config.Config, st *store.Store, logger
 	return func(stopCtx context.Context) {
 		scancel()
 		<-swept
-		dctx, cancel := context.WithTimeout(stopCtx, drainTimeout)
+		dctx, cancel := context.WithTimeout(stopCtx, cfg.DrainTimeout)
 		defer cancel()
 		if err := srv.Shutdown(dctx); err != nil {
 			log.Warn("speech adapter did not drain; closing it", "err", err)

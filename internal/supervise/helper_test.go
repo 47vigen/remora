@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -49,8 +50,30 @@ func runHelper(mode string) int {
 	if strings.HasPrefix(mode, "never-healthy") {
 		status = http.StatusInternalServerError
 	}
+	var failAfterStartup bool
+	if mode == "hung" || mode == "unhealthy" {
+		marker := filepath.Join(dir, "started")
+		f, err := os.OpenFile(marker, os.O_CREATE|os.O_EXCL, 0o600) // #nosec G304 G703 -- test-owned temp dir
+		switch {
+		case err == nil:
+			_ = f.Close()
+			failAfterStartup = true
+		case !errors.Is(err, fs.ErrExist):
+			fmt.Fprintln(os.Stderr, "helper marker:", err)
+			return 2
+		}
+	}
+	var requests atomic.Int32
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		if failAfterStartup && requests.Add(1) > 1 {
+			if mode == "hung" {
+				<-r.Context().Done()
+				return
+			}
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		w.WriteHeader(status)
 	})
 	ln, err := net.Listen("tcp", addr) //nolint:noctx // test helper process

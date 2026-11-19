@@ -77,6 +77,8 @@ store and is managed in the UI, through the management API, or with `remora.yaml
 | Variable | Default | What it does |
 |---|---|---|
 | `REMORA_LISTEN` | `:8080`, in the image `127.0.0.1:8081` | The address of remora's listener: `/v1`, `/api`, `/mcp` and `/healthz`. In the image, nginx owns port 8080, serves the UI and proxies those paths here. |
+| `REMORA_TRUSTED_PROXIES` | `127.0.0.0/8,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7` | IP addresses or CIDR ranges the image's nginx trusts for forwarded client IP and scheme, separated by commas or spaces; set to an empty string to trust none. |
+| `REMORA_DRAIN_TIMEOUT` | `5s` | Maximum time for in-flight requests to finish after shutdown starts. A positive duration such as `30s` or `5m`. New `/v1` requests receive `503` with `Retry-After` during the drain. |
 | `REMORA_DATA` | `/data` | The data directory. Mount a volume here. |
 | `REMORA_ADMIN_PASSWORD` | unset | The admin password, used only while no admin exists. After the first boot the stored password wins; change it in Settings. When unset at first boot, a password is generated and written to the log once. |
 | `REMORA_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. |
@@ -95,9 +97,16 @@ store and is managed in the UI, through the management API, or with `remora.yaml
 | `REMORA_COOLING_POLL` | `1s` | How often remora reads the request log for failures. |
 | `REMORA_COOLING_SUBSCRIPTION_DEFAULT` | `30s` | How long a subscription account member cools when the upstream gave no retry hint. A retry hint always wins. |
 | `REMORA_QUOTA_INTERVAL` | `15m` | How often each subscription account's quota is checked. At least `5m`; `0` turns background checks off, and the Refresh buttons still work. |
-| `REMORA_QUOTA_BASE_URL` | unset | Sends every quota check here instead of to the providers. For tests only: the checks carry the accounts' tokens. |
 | `REMORA_LOG_CONTENT` | `false` | Keep request and response bodies in the request log. Off by default: the log keeps 7 days of metadata and errors only. |
 | `REMORA_PPROF_ADDR` | unset | A loopback `host:port`, such as `127.0.0.1:6060`, that serves Go profiling (`net/http/pprof`) on its own listener. Off when unset; any other host is refused. |
+
+Behind a reverse proxy, restrict `REMORA_TRUSTED_PROXIES` to proxy hops you control, append the actual peer address to `X-Forwarded-For` at each hop, and set `X-Forwarded-Proto` at the TLS terminator.
+
+When changing `REMORA_DRAIN_TIMEOUT`, set Compose `stop_grace_period` (or `docker stop -t` in seconds) to at least
+the drain timeout plus 5 seconds. remora allows 3 extra seconds for its own shutdown; the remaining time lets nginx
+finish gracefully. While nginx is still listening after the remora listener closes, nginx returns `503` with
+`Retry-After: 1` instead of `502`. The same fallback applies to nginx-generated `502` responses outside shutdown;
+HTTP errors returned by remora itself pass through unchanged.
 
 The internal ports are bound to `127.0.0.1` inside the container and are never published. Change them only when
 they collide with something else in the container.
@@ -122,7 +131,11 @@ In the last two names, letters are upper-cased and every other character that is
 /data/<engine>/     one directory per engine: its configuration, request logs and subscription account credentials
 ```
 
-Back up the whole volume, including `master.key`.
+**The data volume is the secret.** Remora seals engine credentials in `remora.db`, but the volume can also
+contain `master.key`, an engine configuration with its own encryption key, and OAuth credential files. Restrict
+access to the volume and encrypt its backups. Keep the master key separate from the volume backup: if you use
+`master.key`, back it up separately; for new installations, supply `REMORA_MASTER_KEY` from a separate secret
+store to avoid writing the key to the volume. You need that same key to restore `remora.db`.
 
 ## Architecture
 

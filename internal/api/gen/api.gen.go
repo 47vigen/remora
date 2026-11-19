@@ -902,6 +902,10 @@ type Stats struct {
 
 // StatsGroup defines model for StatsGroup.
 type StatsGroup struct {
+	// Label Display name for key groups.
+	Label *string `json:"label,omitempty"`
+
+	// Name Group identifier; for key groups, the key ID.
 	Name    string       `json:"name"`
 	Summary StatsSummary `json:"summary"`
 }

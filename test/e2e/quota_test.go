@@ -13,7 +13,7 @@ import (
 	"github.com/47vigen/remora/test/fakes/control"
 )
 
-// The quota fakes answer under this upstream; compose points REMORA_QUOTA_BASE_URL at it.
+// The quota fakes answer under this upstream; compose points REMORA_TEST_QUOTA_BASE_URL at it.
 const quotaUpstream = "quota"
 
 type quotaWindow struct {

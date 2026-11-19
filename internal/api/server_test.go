@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/auth"
@@ -50,6 +52,8 @@ func newTestEnvTail(t *testing.T, tail *bifrost.Tail, buffer, backlog int) *test
 		t.Fatalf("store.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
+	authSvc := auth.NewService(st, nil)
+	t.Cleanup(authSvc.StartTokenTouches(ctx, slog.New(slog.DiscardHandler))) // runs before st.Close, as in serve
 	if _, err := auth.EnsureAdmin(ctx, st, testAdminPassword); err != nil {
 		t.Fatalf("EnsureAdmin: %v", err)
 	}
@@ -68,7 +72,7 @@ func newTestEnvTail(t *testing.T, tail *bifrost.Tail, buffer, backlog int) *test
 		Logs:      env.logs,
 		Quota:     env.quota,
 		Tail:      tail,
-		Auth:      auth.NewService(st, nil),
+		Auth:      authSvc,
 
 		liveBuffer:  buffer,
 		liveBacklog: backlog,
@@ -201,14 +205,18 @@ func TestLoginSetsCookie(t *testing.T) {
 	}
 }
 
-func TestLoginTooManyAttempts(t *testing.T) {
+func TestLoginLimiterDelay(t *testing.T) {
 	env := newTestEnv(t)
 	for range 5 {
 		env.do(t, http.DefaultClient, http.MethodPost, "/api/auth/login", `{"password":"wrong-password-1"}`)
 	}
+	start := time.Now()
 	code, body := env.do(t, http.DefaultClient, http.MethodPost, "/api/auth/login", `{"password":"`+testAdminPassword+`"}`)
-	if code != http.StatusTooManyRequests || errCode(t, body) != "too_many_attempts" {
-		t.Errorf("6th login = %d %s", code, body)
+	if code != http.StatusNoContent {
+		t.Errorf("6th login = %d %s, want 204", code, body)
+	}
+	if got := time.Since(start); got < time.Second {
+		t.Errorf("6th login took %v, want at least 1s", got)
 	}
 }
 

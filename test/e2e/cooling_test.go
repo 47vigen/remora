@@ -105,3 +105,20 @@ func TestNoDroppedParamsHeaderForNonCodex(t *testing.T) {
 		t.Errorf("x-remora-dropped-params = %q, want no header", v)
 	}
 }
+
+func TestCoolingOn5xx(t *testing.T) {
+	resetFakes(t)
+	script(t, "cool-a", control.RouteOpenAIChat, control.Script{
+		Steps:  []control.Step{{Status: http.StatusServiceUnavailable, Body: `{"error":{"message":"unavailable"}}`}},
+		Repeat: true,
+	})
+	rep := coolChat(t)
+	wantStatus(t, rep, http.StatusOK)
+	wantHeader(t, rep, "X-Remora-Served-By", "cool-b/m1")
+	wantHeader(t, rep, "X-Remora-Fallback", "true")
+
+	awaitServed(t, "cool after repeated 503s", func() reply { return coolChat(t) }, "cool-b/m1", 200*time.Millisecond, 20*time.Second)
+	if !quietAcross(t, 3) {
+		t.Fatal("cool-a still received traffic after opening its breaker")
+	}
+}
