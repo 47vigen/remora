@@ -80,7 +80,7 @@ func TestDrainThroughNginx(t *testing.T) {
 		if stopErr != nil {
 			t.Errorf("docker stop: %v\n%s", stopErr, stderr.String())
 		}
-		if out, err := compose(t, "start", "--wait", "--wait-timeout", "60", "remora"); err != nil {
+		if out, err := compose(t, "up", "-d", "--wait", "--wait-timeout", "60", "remora"); err != nil {
 			t.Fatalf("restore remora: %v\n%s", err, out)
 		}
 	})
