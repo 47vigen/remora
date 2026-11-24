@@ -587,6 +587,9 @@ func TestNamesAdapterTranslatesSubscriptionProviders(t *testing.T) {
 	if got := names.Target(ctx, "openrouter", "vendor/m"); got != (alias.Target{Provider: "openrouter", Model: "vendor/m"}) {
 		t.Errorf("Target(openrouter) = %+v", got)
 	}
+	if got := names.Target(ctx, "remora-soniox", "stt-async-v5"); got != (alias.Target{Provider: "soniox", Model: "stt-async-v5"}) {
+		t.Errorf("Target(speech) = %+v", got)
+	}
 	cases := []struct {
 		provider, model string
 		ps, ms          []string
@@ -597,6 +600,8 @@ func TestNamesAdapterTranslatesSubscriptionProviders(t *testing.T) {
 		{"or", "", []string{"or"}, nil},
 		{"", "or/vendor/m", []string{"or"}, []string{"vendor/m"}},
 		{"or", "or/a", []string{"or"}, []string{"a"}},
+		{"soniox", "", []string{"remora-soniox", "soniox"}, nil},
+		{"", "soniox/stt-async-v5", []string{"remora-soniox", "soniox"}, []string{"stt-async-v5"}},
 	}
 	for _, c := range cases {
 		ps, ms := names.EngineFilter(ctx, c.provider, c.model)

@@ -39,17 +39,17 @@ ARG GOPROXY
 ARG BIFROST_VERSION
 RUN test -n "$BIFROST_VERSION"
 WORKDIR /src/transports
-COPY engines/bifrost/transports/go.mod engines/bifrost/transports/go.sum ./
-RUN GOWORK=off go mod download
 COPY engines/bifrost/transports/ ./
 # The dashboard UI is not shipped. main.go embeds bifrost-http/ui with `all:`,
 # which needs at least one file; a lone dotfile is never served.
 RUN mkdir -p bifrost-http/ui && touch bifrost-http/ui/.keep
-# Use the submodule's core and framework modules so fork patches (docs/patches.md) are in the binary.
+# Use the submodule's patched modules (docs/patches.md) in the binary.
 COPY engines/bifrost/core/ /src/core/
 COPY engines/bifrost/framework/ /src/framework/
+COPY engines/bifrost/plugins/routing/ /src/plugins/routing/
 RUN go mod edit -replace github.com/maximhq/bifrost/core=../core \
-                -replace github.com/maximhq/bifrost/framework=../framework
+                -replace github.com/maximhq/bifrost/framework=../framework \
+                -replace github.com/maximhq/bifrost/plugins/routing=../plugins/routing
 RUN GOWORK=off CGO_ENABLED=1 go build -trimpath -tags sqlite_static \
       -ldflags "-s -w -X main.Version=v${BIFROST_VERSION#transports/v}" \
       -o /out/bifrost ./bifrost-http

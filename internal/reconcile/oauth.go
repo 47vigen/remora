@@ -66,9 +66,12 @@ func OAuthReserved() []string {
 	return out
 }
 
-// ToEngineTarget maps an alias target on a subscription provider to the OAuth engine's front-door provider, with the
-// model the engine routes on ("<name>/<model>"). Any other target is returned unchanged.
+// ToEngineTarget maps an alias target to the internal provider for OAuth or the speech adapter.
 func ToEngineTarget(t alias.Target) alias.Target {
+	if t.Provider == SonioxProviderName {
+		t.Provider = bifrost.SonioxProvider
+		return t
+	}
 	if _, ok := cliproxyapi.ProviderByName(t.Provider); ok {
 		return alias.Target{Provider: bifrost.OAuthProvider, Model: t.Provider + "/" + t.Model}
 	}
