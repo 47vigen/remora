@@ -199,14 +199,17 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	rctx, rcancel := context.WithCancel(ctx)
 	var loops sync.WaitGroup
 	loops.Go(func() { rec.Run(rctx) })
-	// Cooling and stats follow the same content-free log, with independent queues. Log viewers keep their own tail.
-	sharedTail := bifrost.NewTail(fd, cfg.Cooling.Poll, nil, logger)
+	// Cooling, stats and log viewers each follow the content-free log with their own tail. Cooling reads only the rows
+	// it acts on: a tail of every row pages through all recent traffic each poll, and cooling must not wait behind it.
+	coolTail := bifrost.NewTail(fd, cfg.Cooling.Poll, []string{"error", "processing"}, logger)
+	statsTail := bifrost.NewTail(fd, cfg.Cooling.Poll, nil, logger)
 	liveTail := bifrost.NewTail(fd, cfg.Cooling.Poll, nil, logger).Live()
 	if rollup != nil {
-		loops.Go(stats.StartFeed(rctx, rollup, fd, sharedTail, cfg.StatsBackfillPace, supervise.RawLogRetentionDays, logger))
+		loops.Go(stats.StartFeed(rctx, rollup, fd, statsTail, cfg.StatsBackfillPace, supervise.RawLogRetentionDays, logger))
 	}
-	loops.Go(func() { runCooling(rctx, cooler, sharedTail, fd, logger) })
-	loops.Go(func() { sharedTail.Run(rctx) })
+	loops.Go(func() { runCooling(rctx, cooler, coolTail, fd, logger) })
+	loops.Go(func() { coolTail.Run(rctx) })
+	loops.Go(func() { statsTail.Run(rctx) })
 	loops.Go(func() { liveTail.Run(rctx) })
 	availability := make(chan struct{}, 1) // coalesces availability changes into one pending sync
 	qs := quota.New(accountsEngine(cfg, creds), st, quota.Config{
