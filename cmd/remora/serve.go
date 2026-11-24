@@ -208,16 +208,30 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	loops.Go(func() { runCooling(rctx, cooler, sharedTail, fd, logger) })
 	loops.Go(func() { sharedTail.Run(rctx) })
 	loops.Go(func() { liveTail.Run(rctx) })
+	availability := make(chan struct{}, 1) // coalesces availability changes into one pending sync
 	qs := quota.New(accountsEngine(cfg, creds), st, quota.Config{
 		Interval: cfg.QuotaInterval, BaseURL: cfg.QuotaBaseURL,
-		OnAccounts: func(ctx context.Context, rows []store.Account, creds []cliproxyapi.Credential) {
+		OnAccounts: func(_ context.Context, rows []store.Account, creds []cliproxyapi.Credential) {
 			if accts.ObserveAvailability(rows, creds) {
-				if err := rec.Sync(ctx); err != nil && ctx.Err() == nil {
-					logger.Warn("reconcile account availability; retrying on the timer", "err", err)
+				select { // never reconcile inside the quota round: it would stall polling and queue ahead of cooling
+				case availability <- struct{}{}:
+				default:
 				}
 			}
 		},
 	}, logger)
+	loops.Go(func() {
+		for {
+			select {
+			case <-rctx.Done():
+				return
+			case <-availability:
+				if err := rec.Sync(rctx); err != nil && rctx.Err() == nil {
+					logger.Warn("reconcile account availability; retrying on the timer", "err", err)
+				}
+			}
+		}
+	})
 	accts.OnChange = qs.Wake
 	loops.Go(func() { qs.Run(rctx) })
 	defer func() {
