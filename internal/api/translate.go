@@ -173,7 +173,7 @@ func (s *Server) subscriptionModels(ctx context.Context, provider string) ([]str
 	if err != nil {
 		return nil, err
 	}
-	return slices.DeleteFunc(all, func(m string) bool { return !strings.HasPrefix(m, provider+"/") }), nil
+	return slices.DeleteFunc(slices.Clone(all), func(m string) bool { return !strings.HasPrefix(m, provider+"/") }), nil
 }
 
 // statsWindow is the default time range: the 24 hours before to.

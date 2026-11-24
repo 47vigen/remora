@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"time"
 
+	"golang.org/x/sync/semaphore"
+
 	apispec "github.com/47vigen/remora/api"
 	"github.com/47vigen/remora/internal/api/gen"
 	"github.com/47vigen/remora/internal/auth"
@@ -48,6 +50,9 @@ var _ gen.StrictServerInterface = (*Server)(nil)
 func New(d Deps) *Server {
 	if d.liveBuffer <= 0 {
 		d.liveBuffer, d.liveBacklog = liveBuffer, liveBacklog
+	}
+	if d.Logs != nil {
+		d.Logs = &engineLogReads{source: d.Logs, slots: semaphore.NewWeighted(4)}
 	}
 	s := &Server{d: d, now: time.Now}
 	if d.Providers != nil && d.Aliases != nil && d.Keys != nil && d.Batch != nil {

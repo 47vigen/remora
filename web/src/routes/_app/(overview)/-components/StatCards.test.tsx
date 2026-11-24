@@ -32,3 +32,14 @@ test("an item shows its hint", () => {
   );
   expect(screen.getByText("last 24 hours")).toBeInTheDocument();
 });
+
+test("shows the API timeout instead of stale figures", () => {
+  const message = "The request log took too long to answer; try a shorter range.";
+  render(
+    <StatCards.Root error={{ error: { code: "engine_timeout", message } }}>
+      <StatCards.Item label="Requests" value="8K" />
+    </StatCards.Root>,
+  );
+  expect(screen.getByRole("alert")).toHaveTextContent(message);
+  expect(screen.queryByText("8K")).not.toBeInTheDocument();
+});

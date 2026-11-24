@@ -10,13 +10,24 @@ import { ChartCard } from "./ChartCard";
 import { ChartTooltip } from "./ChartTooltip";
 
 // Cost per bucket over the window.
-function CostChartImpl({ rows, total, className }: { rows: SeriesRow[]; total?: string; className?: string }) {
+function CostChartImpl({
+  rows,
+  total,
+  className,
+  error,
+}: {
+  rows: SeriesRow[];
+  total?: string;
+  className?: string;
+  error?: string;
+}) {
   const isEmpty = !rows.some((r) => r.cost > 0);
   return (
     <ChartCard
       title="Cost"
       value={total ?? (isEmpty ? formatCost(0) : undefined)}
       className={className}
+      error={error}
       isEmpty={isEmpty}
     >
       <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>

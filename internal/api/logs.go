@@ -44,7 +44,17 @@ func (s *Server) ListLogs(ctx context.Context, req gen.ListLogsRequestObject) (g
 		f.Offset = *o
 	}
 	f.SortBy, f.Order = "timestamp", "desc"
-	page, err := s.d.Logs.SearchLogs(ctx, f)
+	readCtx := ctx
+	if req.Params.To == nil {
+		// Overlapping requests with a moving window share the leader's bounds.
+		key := f
+		key.End = nil
+		if req.Params.From == nil {
+			key.Start = nil
+		}
+		readCtx = context.WithValue(ctx, engineSearchKey{}, "relative:"+key.Query(true).Encode())
+	}
+	page, err := s.d.Logs.SearchLogs(readCtx, f)
 	if err != nil {
 		return nil, err
 	}

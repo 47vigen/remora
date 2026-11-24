@@ -1,5 +1,5 @@
 import { ArrowDownToLine } from "@gravity-ui/icons";
-import { Alert, Button, Skeleton, ToggleButton, ToggleButtonGroup } from "@heroui/react";
+import { Button, Skeleton, ToggleButton, ToggleButtonGroup } from "@heroui/react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -133,6 +133,7 @@ function OverviewPage() {
     },
   });
 
+  const statsError = stats.error ? errorMessage(stats.error) : undefined;
   const summary = stats.data ? summarize(stats.data.summary) : undefined;
   const series = stats.data?.series ?? [];
   const overTime = seriesRows(series);
@@ -174,18 +175,10 @@ function OverviewPage() {
         }
       />
 
-      {stats.error ? (
-        <Alert status="danger" role="alert">
-          <Alert.Indicator />
-          <Alert.Content>
-            <Alert.Title>Could not load the statistics</Alert.Title>
-            <Alert.Description>{errorMessage(stats.error)}</Alert.Description>
-          </Alert.Content>
-        </Alert>
-      ) : null}
-
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-        {summary ? (
+        {stats.error ? (
+          <StatCards className="lg:col-span-12" error={stats.error} />
+        ) : summary ? (
           <StatCards className="lg:col-span-12">
             <StatCards.Item
               label="Requests"
@@ -218,8 +211,13 @@ function OverviewPage() {
           <Skeleton className="h-28 w-full lg:col-span-12" />
         ) : null}
 
-        {stats.data ? (
-          <VolumeChart rows={volumeRows(series)} total={summary?.requests} className="lg:col-span-8" />
+        {stats.data || statsError ? (
+          <VolumeChart
+            rows={volumeRows(series)}
+            total={summary?.requests}
+            className="lg:col-span-8"
+            error={statsError}
+          />
         ) : (
           <Skeleton className="h-80 lg:col-span-8" />
         )}
@@ -233,11 +231,11 @@ function OverviewPage() {
           <Skeleton className="h-80 lg:col-span-4" />
         )}
 
-        {stats.data ? (
+        {stats.data || statsError ? (
           <>
-            <TokenChart rows={overTime} total={summary?.tokens} className="lg:col-span-4" />
-            <CostChart rows={overTime} total={summary?.cost} className="lg:col-span-4" />
-            <LatencyChart rows={overTime} className="lg:col-span-4" />
+            <TokenChart rows={overTime} total={summary?.tokens} className="lg:col-span-4" error={statsError} />
+            <CostChart rows={overTime} total={summary?.cost} className="lg:col-span-4" error={statsError} />
+            <LatencyChart rows={overTime} className="lg:col-span-4" error={statsError} />
           </>
         ) : null}
 
@@ -248,9 +246,9 @@ function OverviewPage() {
             modelsError={byModel.error && !byModel.data ? errorMessage(byModel.error) : undefined}
             providers={breakdownRows(stats.data.groups)}
           />
-        ) : (
+        ) : !statsError ? (
           <Skeleton className="h-72 lg:col-span-8" />
-        )}
+        ) : null}
         {providers.data ? (
           <Attention
             className="lg:col-span-4"

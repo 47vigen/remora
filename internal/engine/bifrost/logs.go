@@ -32,8 +32,8 @@ type LogFilter struct {
 	Order           string // "asc" or "desc"
 }
 
-// query encodes f; page adds limit, offset, sort_by and order, which only the list reads.
-func (f LogFilter) query(page bool) url.Values {
+// Query encodes f; page adds limit, offset, sort_by and order, which only the list reads.
+func (f LogFilter) Query(page bool) url.Values {
 	q := url.Values{}
 	for name, v := range map[string][]string{
 		"status": f.Status, "providers": f.Providers, "models": f.Models, "virtual_key_ids": f.VirtualKeyIDs,
@@ -141,7 +141,7 @@ type LogPage struct {
 
 // SearchLogs calls GET /api/logs.
 func (c *Client) SearchLogs(ctx context.Context, f LogFilter) (LogPage, error) {
-	path := withQuery("/api/logs", f.query(true))
+	path := withQuery("/api/logs", f.Query(true))
 	var out struct {
 		Logs       []Log `json:"logs"`
 		Pagination struct {
@@ -157,7 +157,7 @@ func (c *Client) SearchLogs(ctx context.Context, f LogFilter) (LogPage, error) {
 // LogStats calls GET /api/logs/stats; paging and sorting fields of f are ignored.
 func (c *Client) LogStats(ctx context.Context, f LogFilter) (LogStats, error) {
 	var out LogStats
-	if err := c.do(ctx, http.MethodGet, withQuery("/api/logs/stats", f.query(false)), nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, withQuery("/api/logs/stats", f.Query(false)), nil, &out); err != nil {
 		return LogStats{}, err
 	}
 	return out, nil
@@ -190,7 +190,7 @@ func histogram[B any](ctx context.Context, c *Client, path string, f LogFilter) 
 	var out struct {
 		Buckets []B `json:"buckets"`
 	}
-	if err := c.do(ctx, http.MethodGet, withQuery(path, f.query(false)), nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, withQuery(path, f.Query(false)), nil, &out); err != nil {
 		return nil, err
 	}
 	return out.Buckets, nil
@@ -217,7 +217,7 @@ func (c *Client) ModelUsage(ctx context.Context, f LogFilter) ([]ModelUsage, err
 	var out struct {
 		Rankings []ModelUsage `json:"rankings"`
 	}
-	if err := c.do(ctx, http.MethodGet, withQuery("/api/logs/rankings", f.query(false)), nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, withQuery("/api/logs/rankings", f.Query(false)), nil, &out); err != nil {
 		return nil, err
 	}
 	return out.Rankings, nil
