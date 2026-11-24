@@ -62,6 +62,7 @@ func TestOAuthRules(t *testing.T) {
 
 func TestToEngineTarget(t *testing.T) {
 	cases := []struct{ in, want alias.Target }{
+		{alias.Target{Provider: "soniox", Model: "stt-async-v5"}, alias.Target{Provider: "remora-soniox", Model: "stt-async-v5"}},
 		{alias.Target{Provider: "codex", Model: "gpt-x"}, alias.Target{Provider: "remora-oauth", Model: "codex/gpt-x"}},
 		{alias.Target{Provider: "grok", Model: "g-1"}, alias.Target{Provider: "remora-oauth", Model: "grok/g-1"}},
 		{alias.Target{Provider: "openrouter", Model: "a/b"}, alias.Target{Provider: "openrouter", Model: "a/b"}},

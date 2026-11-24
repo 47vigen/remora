@@ -19,7 +19,7 @@ func TestSearchLogsQuery(t *testing.T) {
 		got = r.URL.Query()
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"logs":[{"id":"a","parent_request_id":null,"timestamp":"2026-10-14T09:30:01Z",` +
-			`"provider":"openrouter","model":"m","status":"error"}],"pagination":{"limit":1000,"offset":0,` +
+			`"provider":"openrouter","model":"m","status":"error","stop_reason":"length"}],"pagination":{"limit":1000,"offset":0,` +
 			`"sort_by":"timestamp","order":"asc","total_count":7},"stats":{},"has_logs":true}`))
 	}))
 	t.Cleanup(srv.Close)

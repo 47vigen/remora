@@ -498,3 +498,22 @@ func TestStatsGroupByModel(t *testing.T) {
 		t.Errorf("provider-scoped model groups = %s", raw)
 	}
 }
+
+// A provider renamed in the engine leaves history under its old name: both pairs are one model group.
+func TestStatsGroupByModelMergesRenamedProvider(t *testing.T) {
+	ts := time.Now().UTC()
+	old := bifrost.Log{Timestamp: ts, Status: "success", Provider: "soniox", Model: "stt"}
+	env := newStatsEnv(t, old, old,
+		bifrost.Log{Timestamp: ts, Status: "success", Provider: "remora-soniox", Model: "stt"},
+		bifrost.Log{Timestamp: ts, Status: "error", Provider: "remora-soniox", Model: "stt"},
+	)
+	env.names.targets = map[[2]string]alias.Target{
+		{"soniox", "stt"}:        {Provider: "soniox", Model: "stt"},
+		{"remora-soniox", "stt"}: {Provider: "soniox", Model: "stt"},
+	}
+	s, raw := getStats(t, env, "/api/stats?group_by=model")
+	if len(s.Groups) != 1 || s.Groups[0].Name != "soniox/stt" ||
+		s.Groups[0].Summary["requests"] != 4.0 || s.Groups[0].Summary["errors"] != 1.0 {
+		t.Fatalf("groups = %s", raw)
+	}
+}

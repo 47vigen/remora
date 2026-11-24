@@ -167,10 +167,21 @@ func (s *Server) groups(ctx context.Context, from, to time.Time, filter func(sta
 		if err != nil {
 			return nil, err
 		}
+		// Raw pairs sharing a public name (an engine-side rename) are one group.
+		pairs := map[string][]stats.ModelPair{}
+		var names []string
 		for _, u := range used[:min(len(used), 100)] {
 			t := s.d.Names.Target(ctx, u.Provider, u.Model)
-			out = append(out, group{t.Provider + "/" + t.Model, func(d stats.Dimensions) bool {
-				return d.Provider == u.Provider && d.Model == u.Model
+			name := t.Provider + "/" + t.Model
+			if _, ok := pairs[name]; !ok {
+				names = append(names, name)
+			}
+			pairs[name] = append(pairs[name], u)
+		}
+		for _, name := range names {
+			ps := pairs[name]
+			out = append(out, group{name, func(d stats.Dimensions) bool {
+				return slices.Contains(ps, stats.ModelPair{Provider: d.Provider, Model: d.Model})
 			}, nil})
 		}
 	case gen.GetStatsParamsGroupByNone, "":

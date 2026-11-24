@@ -13,6 +13,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/47vigen/remora/internal/alias"
+	"github.com/47vigen/remora/internal/engine/bifrost"
 	"github.com/47vigen/remora/internal/store"
 )
 
@@ -232,7 +233,7 @@ func (p *Proxy) wsModelCheck(ctx context.Context, value string) func(model strin
 			return false, &errInternal
 		case !key.Enabled:
 			return false, &errInvalidKey
-		case !Allowed(key.Allow, model):
+		case strings.HasPrefix(model, bifrost.SonioxProvider+"/") || !Allowed(key.Allow, model):
 			e := errModelNotAllowed(model)
 			return false, &e
 		}

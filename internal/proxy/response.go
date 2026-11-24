@@ -14,6 +14,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/47vigen/remora/internal/engine/bifrost"
 )
 
 // Headers remora adds to /v1 responses.
@@ -143,7 +145,7 @@ func setRemoraHeaders(h http.Header, info *reqInfo) {
 		h.Set(headerAlias, scrubString(info.model))
 	}
 	if provider != "" && model != "" {
-		h.Set(headerServedBy, scrubString(provider+"/"+model))
+		h.Set(headerServedBy, scrubString(bifrost.PublicProvider(provider)+"/"+model))
 	}
 	h.Set(headerFallback, strconv.FormatBool(fallback))
 }
