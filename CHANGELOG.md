@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.3](https://github.com/47vigen/remora/compare/v0.7.2...v0.7.3) (2026-11-24)
+
+
+### Bug Fixes
+
+* **accounts:** reconcile availability changes outside the quota round ([#102](https://github.com/47vigen/remora/issues/102)) ([40b399f](https://github.com/47vigen/remora/commit/40b399f8e2ed3a49b4cc8183e2f358d84c9e2caa))
+
 ## [0.7.2](https://github.com/47vigen/remora/compare/v0.7.1...v0.7.2) (2026-11-24)
 
 
