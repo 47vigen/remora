@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0](https://github.com/47vigen/remora/compare/v0.7.4...v0.8.0) (2026-11-24)
+
+
+### Dependencies and engines
+
+* engines and dependencies to latest ([#107](https://github.com/47vigen/remora/issues/107)) ([bfc5aaa](https://github.com/47vigen/remora/commit/bfc5aaac57a10a098d275126cc4763b5b2a310dd))
+
+
+### Chores
+
+* **release:** release engines and dependencies as 0.8.0 ([#109](https://github.com/47vigen/remora/issues/109)) ([5607ed0](https://github.com/47vigen/remora/commit/5607ed0d352c3716d53277a07afac6ed4aba4a9a))
+
 ## [0.7.4](https://github.com/47vigen/remora/compare/v0.7.3...v0.7.4) (2026-11-24)
 
 
