@@ -138,6 +138,19 @@ access to the volume and encrypt its backups. Keep the master key separate from 
 `master.key`, back it up separately; for new installations, supply `REMORA_MASTER_KEY` from a separate secret
 store to avoid writing the key to the volume. You need that same key to restore `remora.db`.
 
+### Memory
+
+Set a container memory limit of at least **1.5 GiB**; **2 GiB** gives more headroom. The
+[Compose example](deploy/compose.yaml) shows how to set it. When remora detects a finite cgroup v2
+memory limit, it uses 50% of the limit for the routing engine's `GOMEMLIMIT`, 15% for the
+subscription engine's, and 10% for its own. The remaining 25% leaves room for SQLite caches and
+other memory outside the Go runtimes. Without a detected limit, remora does not set these targets
+automatically. `GOMEMLIMIT` is a soft target for Go's garbage collector, not a hard cap on process memory.
+
+The routing engine's SQLite request log uses a page cache of up to about 40 MiB per database
+connection (10,000 pages at the usual 4 KiB page size). As more requests are logged, the database
+grows on disk; the page cache does not grow with the size of the stored history.
+
 ## Architecture
 
 ```

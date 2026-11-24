@@ -7,6 +7,9 @@ services:
       REMORA_DRAIN_TIMEOUT: 5s
     volumes: ["remora-data:/data"]
     restart: unless-stopped
+    # Recommended memory limit; see the Memory section in README.md.
+    # mem_limit: 2g
+    # memswap_limit: 2g
     # Keep at least 5s more than REMORA_DRAIN_TIMEOUT for shutdown cleanup and nginx.
     stop_grace_period: 10s
 volumes:
