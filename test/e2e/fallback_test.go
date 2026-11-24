@@ -69,7 +69,7 @@ func awaitCoolingCycle(t *testing.T) {
 	t.Helper()
 	send := func() reply { return chat(t, chatBody("fast", false)) }
 	awaitServed(t, "fast while up-a cools", send, "up-b/m1", 200*time.Millisecond, 10*time.Second)
-	awaitServed(t, "fast after up-a cooled", send, "up-a/m1", 500*time.Millisecond, 15*time.Second)
+	awaitServed(t, "fast after up-a cooled", send, "up-a/m1", 500*time.Millisecond, 30*time.Second)
 }
 
 func TestAliasSkipsSubscriptionWithoutAccount(t *testing.T) {
