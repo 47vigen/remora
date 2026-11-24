@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/47vigen/remora/internal/engine/cliproxyapi"
@@ -31,6 +32,9 @@ type Service struct {
 	log    *slog.Logger
 	now    func() time.Time
 
+	// OnChange wakes the account observer after auth or enabled state changes. Set it before serving requests.
+	OnChange  func()
+	available atomic.Value  // immutable map[string]bool of usable subscription providers; nil until observed
 	modelWait time.Duration // how long an imported credential's models are awaited per round
 
 	mu      sync.Mutex
@@ -38,6 +42,12 @@ type Service struct {
 
 	recMu             sync.Mutex // serializes Reconcile
 	settingsWrittenAt time.Time  // under recMu: when this process last wrote the settings, zero once they settled
+}
+
+func (s *Service) changed() {
+	if s.OnChange != nil {
+		s.OnChange()
+	}
 }
 
 // pending is a login started here. done is set once its credential was adopted.

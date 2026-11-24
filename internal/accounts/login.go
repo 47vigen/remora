@@ -117,6 +117,7 @@ func (s *Service) LoginStatus(ctx context.Context, state string) (LoginStatus, e
 	}
 	switch st.Status {
 	case "ok":
+		defer s.changed()
 		return s.adopt(ctx, state)
 	case "error":
 		s.drop(state)

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/47vigen/remora/internal/accounts"
+	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/api"
 	"github.com/47vigen/remora/internal/auth"
 	"github.com/47vigen/remora/internal/config"
@@ -165,7 +166,13 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	if err := cooler.Restore(ctx, st); err != nil {
 		return err
 	}
-	rec.Filter = cooler.Filter
+	if err := accts.LoadAvailability(ctx); err != nil && ctx.Err() == nil {
+		logger.Warn("initial account availability unknown; retrying on the poll", "err", err)
+	}
+	rec.Filter = func(chain []alias.Target) ([]alias.Target, []string) {
+		available, skipped := accts.Available(chain)
+		return cooler.Filter(available), skipped
+	}
 	// Every committed pass hands the spreading aliases' live chains to the proxy, so it never names a member
 	// without a rule.
 	picker := proxy.NewPicker(nil, nil)
@@ -190,7 +197,17 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	loops.Go(func() { coolTail.Run(rctx) })
 	loops.Go(func() { liveTail.Run(rctx) })
 	loops.Go(func() { runCooling(rctx, cooler, coolTail, fd, logger) })
-	qs := quota.New(accountsEngine(cfg, creds), st, quota.Config{Interval: cfg.QuotaInterval, BaseURL: cfg.QuotaBaseURL}, logger)
+	qs := quota.New(accountsEngine(cfg, creds), st, quota.Config{
+		Interval: cfg.QuotaInterval, BaseURL: cfg.QuotaBaseURL,
+		OnAccounts: func(ctx context.Context, rows []store.Account, creds []cliproxyapi.Credential) {
+			if accts.ObserveAvailability(rows, creds) {
+				if err := rec.Sync(ctx); err != nil && ctx.Err() == nil {
+					logger.Warn("reconcile account availability; retrying on the timer", "err", err)
+				}
+			}
+		},
+	}, logger)
+	accts.OnChange = qs.Wake
 	loops.Go(func() { qs.Run(rctx) })
 	defer func() {
 		rcancel()

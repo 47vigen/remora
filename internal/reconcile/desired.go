@@ -84,14 +84,17 @@ type desiredRule struct {
 	Rule   bifrost.RoutingRule // no ID; Priority is assigned by the pass
 }
 
+type unavailableMember struct{ Alias, Provider string }
+
 // desiredState is what the engine must hold, built from one store transaction.
 type desiredState struct {
-	Providers []desiredProvider // store providers, then internal ones
-	VKs       []desiredVK
-	Rules     []desiredRule          // internal rules, then alias rules by alias name
-	Aliases   []string               // every alias in the store, sorted
-	Chains    map[string]alias.Chain // live chains of the spreading aliases with member rules
-	Skipped   map[string]error
+	Providers   []desiredProvider // store providers, then internal ones
+	VKs         []desiredVK
+	Rules       []desiredRule          // internal rules, then alias rules by alias name
+	Aliases     []string               // every alias in the store, sorted
+	Chains      map[string]alias.Chain // live chains of the spreading aliases with member rules
+	Skipped     map[string]error
+	Unavailable map[unavailableMember]bool
 }
 
 // objects returns every engine_sync object name of the state.
@@ -137,7 +140,7 @@ func (r *Reconciler) desired(ctx context.Context, tx *store.Tx, strict bool) (*d
 		return nil, err
 	}
 
-	d := &desiredState{Skipped: map[string]error{}, Chains: map[string]alias.Chain{}}
+	d := &desiredState{Skipped: map[string]error{}, Chains: map[string]alias.Chain{}, Unavailable: map[unavailableMember]bool{}}
 	reserved := map[string]bool{}
 	for _, n := range r.Reserved {
 		reserved[n] = true
@@ -208,7 +211,7 @@ func (r *Reconciler) desired(ctx context.Context, tx *store.Tx, strict bool) (*d
 	}
 	slices.Sort(d.Aliases)
 	for _, name := range d.Aliases {
-		rules, chain, err := r.aliasRules(aliases, name, isTarget, fallbackOK, reserved)
+		rules, chain, err := r.aliasRules(d, aliases, name, isTarget, fallbackOK, reserved)
 		if err != nil {
 			if strict {
 				return nil, err
@@ -278,13 +281,13 @@ func engineBaseURL(raw string) string {
 	return strings.TrimRight(u.String(), "/")
 }
 
-// aliasRules validates one alias and builds its routing rules: the compiled chain is validated whole, Filter drops
-// cooling members, and members on a reserved (subscription) provider are mapped by ToEngineTarget. The default rule
+// aliasRules validates one alias and builds its routing rules: Filter drops cooling or unavailable members after
+// validation, then members on a reserved (subscription) provider are mapped by ToEngineTarget. The default rule
 // targets the first member and falls back through the rest. A spreading alias with two or more distinct live members
 // also gets one rule per member, selected by the proxy's X-Remora-First: its target is that member and its fallbacks
 // the other members rotated from it, since the engine keeps one fallback chain per rule. Only the default rule
 // carries Alias: it owns the stored rule id.
-func (r *Reconciler) aliasRules(all map[string]alias.Alias, name string, isTarget, fallbackOK func(string) bool, reserved map[string]bool) ([]desiredRule, *alias.Chain, error) {
+func (r *Reconciler) aliasRules(d *desiredState, all map[string]alias.Alias, name string, isTarget, fallbackOK func(string) bool, reserved map[string]bool) ([]desiredRule, *alias.Chain, error) {
 	if err := alias.ValidName(name); err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
@@ -302,8 +305,11 @@ func (r *Reconciler) aliasRules(all map[string]alias.Alias, name string, isTarge
 		}
 	}
 	if r.Filter != nil && len(targets) > 0 {
-		if kept := r.Filter(slices.Clone(targets)); len(kept) > 0 {
+		if kept, skipped := r.Filter(slices.Clone(targets)); len(kept) > 0 {
 			targets = kept
+			for _, provider := range skipped {
+				d.Unavailable[unavailableMember{Alias: name, Provider: provider}] = true
+			}
 		}
 	}
 	st := all[name].Strategy

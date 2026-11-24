@@ -130,6 +130,7 @@ func (s *Service) SetEnabled(ctx context.Context, id int64, enabled bool) error 
 	if err := s.store.SetAccountEnabled(ctx, id, enabled); err != nil {
 		return storeErr(err, "set account %d enabled", id)
 	}
+	s.changed()
 	return nil
 }
 
@@ -146,6 +147,7 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 		return storeErr(err, "delete account %d", id)
 	}
 	s.log.Info("accounts: account deleted", "provider", row.Provider, "id", id)
+	s.changed()
 	return nil
 }
 
@@ -224,6 +226,7 @@ func (s *Service) Import(ctx context.Context, provider string, credential []byte
 		return rollback(true, err)
 	}
 	s.log.Info("accounts: account imported", "provider", p.Name, "id", row.ID)
+	defer s.changed()
 
 	models, err := s.engine.AwaitCredentialModels(ctx, name, p.Name, s.modelWait)
 	if err != nil {
@@ -257,11 +260,15 @@ func (s *Service) credentials(ctx context.Context) (map[string]cliproxyapi.Crede
 	if err != nil {
 		return nil, err
 	}
+	return indexCredentials(list), nil
+}
+
+func indexCredentials(list []cliproxyapi.Credential) map[string]cliproxyapi.Credential {
 	out := make(map[string]cliproxyapi.Credential, len(list))
 	for _, c := range list {
 		out[c.Name] = c
 	}
-	return out, nil
+	return out
 }
 
 // row reads an account's row; ErrNotFound when there is none.
