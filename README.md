@@ -94,7 +94,8 @@ store and is managed in the UI, through the management API, or with `remora.yaml
 | `REMORA_COOLING_429_COUNT` | `3` | How many 429 answers within the window cool an alias member. |
 | `REMORA_COOLING_429_WINDOW` | `60s` | The window for `REMORA_COOLING_429_COUNT`. |
 | `REMORA_COOLING_DEFAULT` | `5m` | How long a member cools when the upstream gave no retry hint. |
-| `REMORA_COOLING_POLL` | `1s` | How often remora reads the request log for failures. |
+| `REMORA_COOLING_POLL` | `1s` | How often the shared cooling and stats feed reads the request log. |
+| `REMORA_STATS_BACKFILL_PACE` | `500ms` | Positive delay between historical request-log pages while catching up the stats database. |
 | `REMORA_COOLING_SUBSCRIPTION_DEFAULT` | `30s` | How long a subscription account member cools when the upstream gave no retry hint. A retry hint always wins. |
 | `REMORA_QUOTA_INTERVAL` | `15m` | How often each subscription account's quota is checked. At least `5m`; `0` turns background checks off, and the Refresh buttons still work. |
 | `REMORA_LOG_CONTENT` | `false` | Keep request and response bodies in the request log. Off by default: the log keeps 7 days of metadata and errors only. |

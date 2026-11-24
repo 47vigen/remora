@@ -53,9 +53,9 @@ func RetryAfter(value string, now time.Time) time.Duration {
 	return 0
 }
 
-// Run follows the front door's log rows until ctx is done or rows is closed. For each error row it fetches the row's
-// details and observes the event; a failed fetch is logged and the row skipped. Every tick (DefaultTick when tick ≤ 0)
-// it puts back members whose cooldown ended.
+// Run follows the shared log feed until ctx is done or rows is closed. It ignores non-errors and fetches details only
+// for failures; a failed fetch is logged and the row skipped. Every tick (DefaultTick when tick ≤ 0) it puts back
+// members whose cooldown ended.
 //
 // Rows that started before Run did are skipped: the feed replays its recent past when it starts, and a failure from
 // before a restart already had its cooldown, so it must not start a new full one. Call Run before /v1 opens.
