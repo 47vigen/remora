@@ -428,11 +428,11 @@ export type StatsSummary = {
     errors: number;
     error_rate: number;
     /**
-     * Null when there are no requests in the range.
+     * Approximate histogram percentile of successful attempts in the range. Null when unavailable.
      */
     latency_p50_ms?: number | null;
     /**
-     * Null when there are no requests in the range.
+     * Approximate histogram percentile of successful attempts in the range. Null when unavailable.
      */
     latency_p95_ms?: number | null;
     prompt_tokens: number;
@@ -456,11 +456,11 @@ export type StatsPoint = {
     total_tokens: number;
     cost_usd: number;
     /**
-     * Over the successful attempts in the bucket, by nearest rank. Null when there are none.
+     * Approximate histogram percentile of successful attempts in the bucket. Null when unavailable.
      */
     latency_p50_ms?: number | null;
     /**
-     * Over the successful attempts in the bucket, by nearest rank. Null when there are none.
+     * Approximate histogram percentile of successful attempts in the bucket. Null when unavailable.
      */
     latency_p95_ms?: number | null;
 };
@@ -697,7 +697,7 @@ export type GetHealthData = {
 export type GetHealthErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -724,7 +724,7 @@ export type GetVersionData = {
 export type GetVersionErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -751,7 +751,7 @@ export type LoginData = {
 export type LoginErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -778,7 +778,7 @@ export type LogoutData = {
 export type LogoutErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -805,7 +805,7 @@ export type GetSessionData = {
 export type GetSessionErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -855,7 +855,7 @@ export type ListProvidersData = {
 export type ListProvidersErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -882,7 +882,7 @@ export type CreateProviderData = {
 export type CreateProviderErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -914,7 +914,7 @@ export type DeleteProviderData = {
 export type DeleteProviderErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -946,7 +946,7 @@ export type GetProviderData = {
 export type GetProviderErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -978,7 +978,7 @@ export type UpdateProviderData = {
 export type UpdateProviderErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1010,13 +1010,13 @@ export type GetProviderModelsData = {
 export type GetProviderModelsErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     404: Error;
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1050,7 +1050,7 @@ export type TestProviderData = {
 export type TestProviderErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1094,7 +1094,7 @@ export type ListAccountsData = {
 export type ListAccountsErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1121,7 +1121,7 @@ export type GetAccountPoolData = {
 export type GetAccountPoolErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1157,7 +1157,7 @@ export type ListAccountStrategiesData = {
 export type ListAccountStrategiesErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1191,7 +1191,7 @@ export type SetAccountStrategyData = {
 export type SetAccountStrategyErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1235,7 +1235,7 @@ export type GetQuotaData = {
 export type GetQuotaErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1262,7 +1262,7 @@ export type RefreshQuotaData = {
 export type RefreshQuotaErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1289,7 +1289,7 @@ export type StartAccountLoginData = {
 export type StartAccountLoginErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1321,7 +1321,7 @@ export type CancelAccountLoginData = {
 export type CancelAccountLoginErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1353,7 +1353,7 @@ export type GetAccountLoginData = {
 export type GetAccountLoginErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1385,7 +1385,7 @@ export type CompleteAccountLoginData = {
 export type CompleteAccountLoginErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1410,7 +1410,7 @@ export type ImportAccountData = {
 export type ImportAccountErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1442,7 +1442,7 @@ export type DeleteAccountData = {
 export type DeleteAccountErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1474,7 +1474,7 @@ export type UpdateAccountData = {
 export type UpdateAccountErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1506,7 +1506,7 @@ export type ResetAccountCooldownData = {
 export type ResetAccountCooldownErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1547,7 +1547,7 @@ export type ListAliasesData = {
 export type ListAliasesErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1574,7 +1574,7 @@ export type CreateAliasData = {
 export type CreateAliasErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1601,7 +1601,7 @@ export type CompileAliasData = {
 export type CompileAliasErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1633,7 +1633,7 @@ export type DeleteAliasData = {
 export type DeleteAliasErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1665,7 +1665,7 @@ export type GetAliasData = {
 export type GetAliasErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1697,7 +1697,7 @@ export type UpdateAliasData = {
 export type UpdateAliasErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1729,7 +1729,7 @@ export type GetAliasChainData = {
 export type GetAliasChainErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1769,7 +1769,7 @@ export type ListCoolingData = {
 export type ListCoolingErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1809,7 +1809,7 @@ export type ListKeysData = {
 export type ListKeysErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1836,7 +1836,7 @@ export type CreateKeyData = {
 export type CreateKeyErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1868,7 +1868,7 @@ export type DeleteKeyData = {
 export type DeleteKeyErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1900,7 +1900,7 @@ export type GetKeyData = {
 export type GetKeyErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1932,7 +1932,7 @@ export type UpdateKeyData = {
 export type UpdateKeyErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -1972,8 +1972,12 @@ export type GetKeyUsageData = {
 
 export type GetKeyUsageErrors = {
     /**
+     * Request stats are not available yet (`stats_unavailable`).
+     */
+    503: Error;
+    /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -2013,7 +2017,7 @@ export type ListAuditData = {
 export type ListAuditErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -2077,8 +2081,12 @@ export type ListLogsData = {
 
 export type ListLogsErrors = {
     /**
+     * The request log read timed out (`engine_timeout`). Try a shorter range.
+     */
+    504: Error;
+    /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -2109,8 +2117,12 @@ export type GetLogData = {
 
 export type GetLogErrors = {
     /**
+     * The request log read timed out (`engine_timeout`). Try a shorter range.
+     */
+    504: Error;
+    /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -2165,8 +2177,12 @@ export type GetStatsData = {
 
 export type GetStatsErrors = {
     /**
+     * Request stats are not available yet (`stats_unavailable`).
+     */
+    503: Error;
+    /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -2193,7 +2209,7 @@ export type ChangePasswordData = {
 export type ChangePasswordErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -2233,7 +2249,7 @@ export type ListApiTokensData = {
 export type ListApiTokensErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -2260,7 +2276,7 @@ export type CreateApiTokenData = {
 export type CreateApiTokenErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -2292,7 +2308,7 @@ export type DeleteApiTokenData = {
 export type DeleteApiTokenErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -2319,7 +2335,7 @@ export type ExportConfigData = {
 export type ExportConfigErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -2346,7 +2362,7 @@ export type PlanConfigData = {
 export type PlanConfigErrors = {
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;
@@ -2377,7 +2393,7 @@ export type ApplyConfigErrors = {
     412: ConfigChanges;
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+     * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
      *
      */
     default: Error;

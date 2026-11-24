@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { getStatsOptions } from "../../../../client/@tanstack/react-query.gen";
 import { SectionLabel } from "../../../../components/page-header/PageHeader";
+import { errorMessage } from "../../../../lib/api";
 import { formatCost, formatLatency } from "../../../../lib/chart";
 import { formatCompactNumber } from "../../../../lib/numbers";
 import { SpecSheet } from "./SpecSheet";
@@ -22,7 +23,11 @@ export function ProviderTraffic({ name }: { name: string }) {
       >
         Last 24 hours
       </SectionLabel>
-      {s ? (
+      {stats.isError ? (
+        <p className="text-danger text-sm" role="alert">
+          {errorMessage(stats.error)}
+        </p>
+      ) : s ? (
         <SpecSheet>
           <SpecSheet.Item label="Requests" mono>
             {formatCompactNumber(s.requests, 1)}
@@ -40,8 +45,6 @@ export function ProviderTraffic({ name }: { name: string }) {
             {formatCost(s.cost_usd)}
           </SpecSheet.Item>
         </SpecSheet>
-      ) : stats.isError ? (
-        <p className="text-muted text-sm">Traffic is not available right now.</p>
       ) : (
         <Skeleton className="h-20 w-full" />
       )}

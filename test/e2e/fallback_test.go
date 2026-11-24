@@ -72,6 +72,28 @@ func awaitCoolingCycle(t *testing.T) {
 	awaitServed(t, "fast after up-a cooled", send, "up-a/m1", 500*time.Millisecond, 15*time.Second)
 }
 
+func TestAliasSkipsSubscriptionWithoutAccount(t *testing.T) {
+	resetFakes(t)
+	a := loginClient(t)
+	id := importQuotaAccount(t, a, "antigravity", "antigravity")
+	const name = "subscription-fallback"
+	a.must(http.MethodPost, "/api/aliases", mustJSON(t, map[string]any{
+		"name": name, "kind": "chat", "members": []string{"antigravity/m", "up-a/m1"},
+	}), http.StatusCreated)
+	t.Cleanup(func() { a.deleteIfAny("/api/aliases/" + name) })
+	send := func() reply { return chat(t, chatBody(name, false)) }
+	// The fixture signs in but does not serve m. Prove the alias initially tries that member before disabling it.
+	eventually(t, 10*time.Second, "alias tries the enabled subscription account", func() bool {
+		rep := send()
+		// A structured model-access error can also fall back; either result proves the primary was tried.
+		return served(rep, "up-a/m1", true) ||
+			rep.Status == http.StatusBadRequest && strings.Contains(string(rep.Body), "unknown provider for model")
+	})
+	a.must(http.MethodPatch, "/api/accounts/"+id, `{"enabled":false}`, http.StatusOK)
+
+	awaitServed(t, "alias with its subscription account disabled", send, "up-a/m1", 200*time.Millisecond, 10*time.Second)
+}
+
 func TestFallbackAllFail(t *testing.T) {
 	resetFakes(t)
 	fail := control.Script{Steps: []control.Step{{Status: http.StatusTooManyRequests, Body: `{"error":{"type":"rate_limit_exceeded"}}`}}, Repeat: true}

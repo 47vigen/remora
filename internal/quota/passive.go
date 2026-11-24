@@ -48,7 +48,7 @@ func passive(provider string, signals map[string]string, observedAt time.Time) (
 		const p = "anthropic-ratelimit-unified-"
 		q.LimitReached = sig[p+"status"] == "rejected" || sig[p+"7d-status"] == "rejected"
 		for _, w := range []struct{ key, window string }{{"5h", "5h"}, {"7d", "weekly"}} {
-			// shortcut: utilization assumed a fraction; if recorded headers show percent, divide by 100
+			// The engine reads the utilization header as a fraction from 0 to 1.
 			used, resetAt := num(p+w.key+"-utilization"), num(p+w.key+"-reset")
 			if used == nil && resetAt == nil {
 				continue

@@ -9,12 +9,23 @@ import { CappedBarStack } from "./barShape";
 import { ChartCard, LegendItem } from "./ChartCard";
 import { ChartTooltip } from "./ChartTooltip";
 
-function VolumeChartImpl({ rows, total, className }: { rows: VolumeRow[]; total?: string; className?: string }) {
+function VolumeChartImpl({
+  rows,
+  total,
+  className,
+  error,
+}: {
+  rows: VolumeRow[];
+  total?: string;
+  className?: string;
+  error?: string;
+}) {
   return (
     <ChartCard
       title="Requests"
       value={total}
       className={className}
+      error={error}
       legend={
         <>
           <LegendItem className="bg-accent">Success</LegendItem>

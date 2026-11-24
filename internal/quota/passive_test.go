@@ -1,6 +1,7 @@
 package quota
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -37,6 +38,51 @@ func TestPassiveCodexResetFromObservedAt(t *testing.T) {
 	}, observed)
 	if !ok || len(q.Windows) != 1 || q.Windows[0].ResetsAt == nil || !q.Windows[0].ResetsAt.Equal(observed.Add(time.Hour)) {
 		t.Errorf("passive = %+v, %v; want reset at observedAt+1h", q, ok)
+	}
+}
+
+func TestPassiveClaudeUtilization(t *testing.T) {
+	observed := time.Unix(1792152000, 0).UTC()
+	for _, tc := range []struct {
+		name, used, status string
+		remaining          float64
+		limitReached       bool
+	}{
+		{"allowed", "0.33", "allowed", 0.67, false},
+		{"exhausted", "1.0", "allowed", 0, true},
+		{"rejected", "0.33", "rejected", 0.67, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			q, ok := passive("claude", map[string]string{
+				"anthropic-ratelimit-unified-5h-utilization": tc.used,
+				"anthropic-ratelimit-unified-7d-utilization": "0.10",
+				"anthropic-ratelimit-unified-5h-reset":       "1792170000",
+				"anthropic-ratelimit-unified-7d-reset":       "1792756800",
+				"anthropic-ratelimit-unified-status":         tc.status,
+			}, observed)
+			if !ok || len(q.Windows) != 2 {
+				t.Fatalf("ok = %v, windows = %v; want two windows", ok, q.Windows)
+			}
+			if q.LimitReached != tc.limitReached {
+				t.Errorf("LimitReached = %v; want %v", q.LimitReached, tc.limitReached)
+			}
+			for i, want := range []struct {
+				window    string
+				remaining float64
+				reset     time.Time
+			}{
+				{"5h", tc.remaining, observed.Add(5 * time.Hour)},
+				{"weekly", 0.90, observed.Add(7 * 24 * time.Hour)},
+			} {
+				w := q.Windows[i]
+				if w.Window != want.window || w.ResetsAt == nil || !w.ResetsAt.Equal(want.reset) {
+					t.Errorf("window %d = %+v; want %s resetting at %s", i, w, want.window, want.reset)
+				}
+				if w.Remaining == nil || !(math.Abs(*w.Remaining-want.remaining) <= 1e-9) {
+					t.Errorf("%s remaining: got %s; want %g", want.window, show([]store.QuotaWindow{w}), want.remaining)
+				}
+			}
+		})
 	}
 }
 

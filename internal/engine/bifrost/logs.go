@@ -26,14 +26,15 @@ type LogFilter struct {
 	End             *time.Time // rows whose timestamp is at or before End
 	ContentSearch   string     // free text over the request and response content
 	ParentRequestID string     // the fallback attempts of one request
+	NoContent       bool       // omit request and response content from list rows
 	Limit           int        // 1..MaxLogLimit
 	Offset          int
 	SortBy          string // "timestamp", "latency", "tokens" or "cost"
 	Order           string // "asc" or "desc"
 }
 
-// query encodes f; page adds limit, offset, sort_by and order, which only the list reads.
-func (f LogFilter) query(page bool) url.Values {
+// Query encodes f; page adds projection, paging and sorting options, which only the list reads.
+func (f LogFilter) Query(page bool) url.Values {
 	q := url.Values{}
 	for name, v := range map[string][]string{
 		"status": f.Status, "providers": f.Providers, "models": f.Models, "virtual_key_ids": f.VirtualKeyIDs,
@@ -57,6 +58,9 @@ func (f LogFilter) query(page bool) url.Values {
 	}
 	if !page {
 		return q
+	}
+	if f.NoContent {
+		q.Set("content", "false")
 	}
 	if f.Limit > 0 {
 		q.Set("limit", strconv.Itoa(f.Limit))
@@ -89,12 +93,13 @@ type Log struct {
 	Timestamp       time.Time `json:"timestamp"`
 	Provider        string    `json:"provider"`
 	Model           string    `json:"model"`
-	Status          string    `json:"status"` // "processing", "success" or "error"
+	Status          string    `json:"status"` // "processing", "success", "error" or "cancelled"
 	// FallbackIndex is the attempt: 0 for the request itself, n for its nth fallback, whose ParentRequestID is the
 	// request's id.
 	FallbackIndex int         `json:"fallback_index"`
 	VirtualKeyID  *string     `json:"virtual_key_id"`
 	RoutingRuleID *string     `json:"routing_rule_id"`
+	SelectedKeyID string      `json:"selected_key_id"`
 	Latency       *float64    `json:"latency"` // milliseconds
 	Cost          *float64    `json:"cost"`    // dollars
 	Stream        bool        `json:"stream"`
@@ -141,7 +146,7 @@ type LogPage struct {
 
 // SearchLogs calls GET /api/logs.
 func (c *Client) SearchLogs(ctx context.Context, f LogFilter) (LogPage, error) {
-	path := withQuery("/api/logs", f.query(true))
+	path := withQuery("/api/logs", f.Query(true))
 	var out struct {
 		Logs       []Log `json:"logs"`
 		Pagination struct {
@@ -157,7 +162,7 @@ func (c *Client) SearchLogs(ctx context.Context, f LogFilter) (LogPage, error) {
 // LogStats calls GET /api/logs/stats; paging and sorting fields of f are ignored.
 func (c *Client) LogStats(ctx context.Context, f LogFilter) (LogStats, error) {
 	var out LogStats
-	if err := c.do(ctx, http.MethodGet, withQuery("/api/logs/stats", f.query(false)), nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, withQuery("/api/logs/stats", f.Query(false)), nil, &out); err != nil {
 		return LogStats{}, err
 	}
 	return out, nil
@@ -190,7 +195,7 @@ func histogram[B any](ctx context.Context, c *Client, path string, f LogFilter) 
 	var out struct {
 		Buckets []B `json:"buckets"`
 	}
-	if err := c.do(ctx, http.MethodGet, withQuery(path, f.query(false)), nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, withQuery(path, f.Query(false)), nil, &out); err != nil {
 		return nil, err
 	}
 	return out.Buckets, nil
@@ -217,7 +222,7 @@ func (c *Client) ModelUsage(ctx context.Context, f LogFilter) ([]ModelUsage, err
 	var out struct {
 		Rankings []ModelUsage `json:"rankings"`
 	}
-	if err := c.do(ctx, http.MethodGet, withQuery("/api/logs/rankings", f.query(false)), nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, withQuery("/api/logs/rankings", f.Query(false)), nil, &out); err != nil {
 		return nil, err
 	}
 	return out.Rankings, nil

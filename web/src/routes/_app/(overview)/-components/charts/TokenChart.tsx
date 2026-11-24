@@ -10,11 +10,22 @@ import { ChartCard, LegendItem } from "./ChartCard";
 import { ChartTooltip } from "./ChartTooltip";
 
 // Tokens per bucket over the window: input and output stacked.
-function TokenChartImpl({ rows, total, className }: { rows: SeriesRow[]; total?: string; className?: string }) {
+function TokenChartImpl({
+  rows,
+  total,
+  className,
+  error,
+}: {
+  rows: SeriesRow[];
+  total?: string;
+  className?: string;
+  error?: string;
+}) {
   const used = rows.some((r) => r.promptTokens + r.completionTokens > 0);
   return (
     <ChartCard
       className={className}
+      error={error}
       title="Tokens"
       value={total}
       legend={

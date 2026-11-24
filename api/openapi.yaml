@@ -837,6 +837,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Stats"
+        "503":
+          $ref: "#/components/responses/StatsUnavailable"
         default:
           $ref: "#/components/responses/Error"
 
@@ -893,6 +895,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/LogList"
+        "504":
+          $ref: "#/components/responses/EngineTimeout"
         default:
           $ref: "#/components/responses/Error"
 
@@ -938,6 +942,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/LogDetail"
+        "504":
+          $ref: "#/components/responses/EngineTimeout"
         default:
           $ref: "#/components/responses/Error"
 
@@ -979,6 +985,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Stats"
+        "503":
+          $ref: "#/components/responses/StatsUnavailable"
         default:
           $ref: "#/components/responses/Error"
 
@@ -1255,7 +1263,19 @@ components:
     Error:
       description: |
         An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-        (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+        (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    StatsUnavailable:
+      description: Request stats are not available yet (`stats_unavailable`).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    EngineTimeout:
+      description: The request log read timed out (`engine_timeout`). Try a shorter range.
       content:
         application/json:
           schema:
@@ -1920,11 +1940,11 @@ components:
         latency_p50_ms:
           type: [number, "null"]
           format: double
-          description: Null when there are no requests in the range.
+          description: Approximate histogram percentile of successful attempts in the range. Null when unavailable.
         latency_p95_ms:
           type: [number, "null"]
           format: double
-          description: Null when there are no requests in the range.
+          description: Approximate histogram percentile of successful attempts in the range. Null when unavailable.
         prompt_tokens:
           type: integer
         completion_tokens:
@@ -1962,11 +1982,11 @@ components:
         latency_p50_ms:
           type: [number, "null"]
           format: double
-          description: Over the successful attempts in the bucket, by nearest rank. Null when there are none.
+          description: Approximate histogram percentile of successful attempts in the bucket. Null when unavailable.
         latency_p95_ms:
           type: [number, "null"]
           format: double
-          description: Over the successful attempts in the bucket, by nearest rank. Null when there are none.
+          description: Approximate histogram percentile of successful attempts in the bucket. Null when unavailable.
     StatsGroup:
       type: object
       required: [name, summary]

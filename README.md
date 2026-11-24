@@ -94,7 +94,8 @@ store and is managed in the UI, through the management API, or with `remora.yaml
 | `REMORA_COOLING_429_COUNT` | `3` | How many 429 answers within the window cool an alias member. |
 | `REMORA_COOLING_429_WINDOW` | `60s` | The window for `REMORA_COOLING_429_COUNT`. |
 | `REMORA_COOLING_DEFAULT` | `5m` | How long a member cools when the upstream gave no retry hint. |
-| `REMORA_COOLING_POLL` | `1s` | How often remora reads the request log for failures. |
+| `REMORA_COOLING_POLL` | `1s` | How often the shared cooling and stats feed reads the request log. |
+| `REMORA_STATS_BACKFILL_PACE` | `500ms` | Positive delay between historical request-log pages while catching up the stats database. |
 | `REMORA_COOLING_SUBSCRIPTION_DEFAULT` | `30s` | How long a subscription account member cools when the upstream gave no retry hint. A retry hint always wins. |
 | `REMORA_QUOTA_INTERVAL` | `15m` | How often each subscription account's quota is checked. At least `5m`; `0` turns background checks off, and the Refresh buttons still work. |
 | `REMORA_LOG_CONTENT` | `false` | Keep request and response bodies in the request log. Off by default: the log keeps 7 days of metadata and errors only. |
@@ -136,6 +137,19 @@ contain `master.key`, an engine configuration with its own encryption key, and O
 access to the volume and encrypt its backups. Keep the master key separate from the volume backup: if you use
 `master.key`, back it up separately; for new installations, supply `REMORA_MASTER_KEY` from a separate secret
 store to avoid writing the key to the volume. You need that same key to restore `remora.db`.
+
+### Memory
+
+Set a container memory limit of at least **1.5 GiB**; **2 GiB** gives more headroom. The
+[Compose example](deploy/compose.yaml) shows how to set it. When remora detects a finite cgroup v2
+memory limit, it uses 50% of the limit for the routing engine's `GOMEMLIMIT`, 15% for the
+subscription engine's, and 10% for its own. The remaining 25% leaves room for SQLite caches and
+other memory outside the Go runtimes. Without a detected limit, remora does not set these targets
+automatically. `GOMEMLIMIT` is a soft target for Go's garbage collector, not a hard cap on process memory.
+
+The routing engine's SQLite request log uses a page cache of up to about 40 MiB per database
+connection (10,000 pages at the usual 4 KiB page size). As more requests are logged, the database
+grows on disk; the page cache does not grow with the size of the stored history.
 
 ## Architecture
 

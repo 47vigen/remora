@@ -37,6 +37,7 @@ func (s *Server) ListLogs(ctx context.Context, req gen.ListLogsRequestObject) (g
 		return nil, err
 	}
 	f.Limit, f.Offset = defaultLimit, 0
+	f.NoContent = true
 	if l := req.Params.Limit; l != nil && *l > 0 {
 		f.Limit = min(*l, maxLimit)
 	}
@@ -44,7 +45,17 @@ func (s *Server) ListLogs(ctx context.Context, req gen.ListLogsRequestObject) (g
 		f.Offset = *o
 	}
 	f.SortBy, f.Order = "timestamp", "desc"
-	page, err := s.d.Logs.SearchLogs(ctx, f)
+	readCtx := ctx
+	if req.Params.To == nil {
+		// Overlapping requests with a moving window share the leader's bounds.
+		key := f
+		key.End = nil
+		if req.Params.From == nil {
+			key.Start = nil
+		}
+		readCtx = context.WithValue(ctx, engineSearchKey{}, "relative:"+key.Query(true).Encode())
+	}
+	page, err := s.d.Logs.SearchLogs(readCtx, f)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +133,7 @@ func (s *Server) GetLog(ctx context.Context, req gen.GetLogRequestObject) (gen.G
 // place. The list leaves error details out, so a failed attempt is read on its own for its error.
 func (s *Server) fallbackPath(ctx context.Context, root, asked bifrost.Log) ([]bifrost.Log, error) {
 	page, err := s.d.Logs.SearchLogs(ctx, bifrost.LogFilter{
-		ParentRequestID: root.ID, SortBy: "timestamp", Order: "asc", Limit: maxPathAttempts,
+		ParentRequestID: root.ID, SortBy: "timestamp", Order: "asc", Limit: maxPathAttempts, NoContent: true,
 	})
 	if err != nil {
 		return nil, err

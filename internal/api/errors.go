@@ -18,6 +18,8 @@ import (
 // errNotImplemented answers 501 not_implemented: an operation whose handler or backing service is not wired yet.
 var errNotImplemented = errors.New("not implemented")
 
+var errEngineTimeout = errors.New("request log read timed out")
+
 // errForbidden answers 403 forbidden: the caller is authenticated, but not in a way that may do this.
 var errForbidden = errors.New("forbidden")
 
@@ -56,6 +58,8 @@ func toAPIError(err error) apiError {
 		re requestError
 	)
 	switch {
+	case errors.Is(err, errEngineTimeout):
+		return apiError{http.StatusGatewayTimeout, typeAPI, "engine_timeout", "The request log took too long to answer; try a shorter range."}
 	case errors.Is(err, errForbidden):
 		return apiError{http.StatusForbidden, typePermission, "forbidden", "Only a signed-in session may do this, not an API token."}
 	case errors.Is(err, errNotImplemented):

@@ -170,6 +170,24 @@ func TestRunSkipsRowsBeforeStart(t *testing.T) {
 	}
 }
 
+func TestCoolingIgnoresSuccessRows(t *testing.T) {
+	cl, _, _ := newCooler(t)
+	at := t0.Add(time.Second)
+	rows := make(chan bifrost.Log, 3)
+	for _, status := range []string{"success", "processing", "error"} {
+		rows <- bifrost.Log{ID: status, Status: status, Timestamp: at, Provider: "or", Model: "a"}
+	}
+	close(rows)
+	var fetched []string
+	err := cl.Run(t.Context(), rows, func(_ context.Context, id string) (bifrost.Log, error) {
+		fetched = append(fetched, id)
+		return bifrost.Log{ErrorDetails: failure(402, 0)}, nil
+	}, time.Hour)
+	if !errors.Is(err, ErrFeedClosed) || len(fetched) != 1 || fetched[0] != "error" || len(cl.Snapshot()) != 1 {
+		t.Fatalf("cooling must fetch only the error, got fetches %v, snapshot %v, err %v", fetched, cl.Snapshot(), err)
+	}
+}
+
 func TestRunEndsWhenFeedCloses(t *testing.T) {
 	cl, _, _ := newCooler(t)
 	rows := make(chan bifrost.Log)

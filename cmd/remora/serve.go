@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/47vigen/remora/internal/accounts"
+	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/api"
 	"github.com/47vigen/remora/internal/auth"
 	"github.com/47vigen/remora/internal/config"
@@ -29,6 +30,7 @@ import (
 	"github.com/47vigen/remora/internal/quota"
 	"github.com/47vigen/remora/internal/reconcile"
 	"github.com/47vigen/remora/internal/soniox"
+	"github.com/47vigen/remora/internal/stats"
 	"github.com/47vigen/remora/internal/store"
 	"github.com/47vigen/remora/internal/supervise"
 )
@@ -91,6 +93,17 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 			err = errors.Join(err, fmt.Errorf("close store: %w", cerr))
 		}
 	}()
+
+	rollup, statsErr := stats.Open(ctx, filepath.Join(cfg.DataDir, "stats.db"))
+	if statsErr != nil {
+		logger.Error("request stats unavailable", "err", statsErr)
+	} else {
+		defer func() {
+			if cerr := rollup.Close(); cerr != nil {
+				logger.Warn("closing request stats failed", "err", cerr)
+			}
+		}()
+	}
 
 	pw, err := auth.EnsureAdmin(ctx, st, cfg.AdminPassword)
 	if err != nil {
@@ -165,7 +178,13 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	if err := cooler.Restore(ctx, st); err != nil {
 		return err
 	}
-	rec.Filter = cooler.Filter
+	if err := accts.LoadAvailability(ctx); err != nil && ctx.Err() == nil {
+		logger.Warn("initial account availability unknown; retrying on the poll", "err", err)
+	}
+	rec.Filter = func(chain []alias.Target) ([]alias.Target, []string) {
+		available, skipped := accts.Available(chain)
+		return cooler.Filter(available), skipped
+	}
 	// Every committed pass hands the spreading aliases' live chains to the proxy, so it never names a member
 	// without a rule.
 	picker := proxy.NewPicker(nil, nil)
@@ -176,21 +195,30 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		}
 		logger.Error("initial reconcile failed; retrying on the timer", "err", err)
 	}
-	// Then reconcile on a timer and follow the front door's log for cooling. These loops end before the engines stop
-	// and the store closes. Cooling is started before the listener opens: it skips log rows older than its start,
-	// which the tail replays from before a restart.
+	// These loops end before the engines stop and the stores close.
 	rctx, rcancel := context.WithCancel(ctx)
 	var loops sync.WaitGroup
 	loops.Go(func() { rec.Run(rctx) })
-	// Cooling only uses failures, so its tail asks for error rows, plus the requests still running so one that outlives
-	// the lookback and then fails is still followed; reading every row re-read the whole window, bodies included,
-	// every poll. Live log viewers get their own tail, which polls only while one is open.
-	coolTail := bifrost.NewTail(fd, cfg.Cooling.Poll, []string{"error", "processing"}, logger)
+	// Cooling and stats follow the same content-free log, with independent queues. Log viewers keep their own tail.
+	sharedTail := bifrost.NewTail(fd, cfg.Cooling.Poll, nil, logger)
 	liveTail := bifrost.NewTail(fd, cfg.Cooling.Poll, nil, logger).Live()
-	loops.Go(func() { coolTail.Run(rctx) })
+	if rollup != nil {
+		loops.Go(stats.StartFeed(rctx, rollup, fd, sharedTail, cfg.StatsBackfillPace, supervise.RawLogRetentionDays, logger))
+	}
+	loops.Go(func() { runCooling(rctx, cooler, sharedTail, fd, logger) })
+	loops.Go(func() { sharedTail.Run(rctx) })
 	loops.Go(func() { liveTail.Run(rctx) })
-	loops.Go(func() { runCooling(rctx, cooler, coolTail, fd, logger) })
-	qs := quota.New(accountsEngine(cfg, creds), st, quota.Config{Interval: cfg.QuotaInterval, BaseURL: cfg.QuotaBaseURL}, logger)
+	qs := quota.New(accountsEngine(cfg, creds), st, quota.Config{
+		Interval: cfg.QuotaInterval, BaseURL: cfg.QuotaBaseURL,
+		OnAccounts: func(ctx context.Context, rows []store.Account, creds []cliproxyapi.Credential) {
+			if accts.ObserveAvailability(rows, creds) {
+				if err := rec.Sync(ctx); err != nil && ctx.Err() == nil {
+					logger.Warn("reconcile account availability; retrying on the timer", "err", err)
+				}
+			}
+		},
+	}, logger)
+	accts.OnChange = qs.Wake
 	loops.Go(func() { qs.Run(rctx) })
 	defer func() {
 		rcancel()
@@ -205,6 +233,10 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	api.RegisterHealthz(mux, sup, accts)
 	authSvc := auth.NewService(st, nil)
 	defer authSvc.StartTokenTouches(stopCtx, logger)()
+	var statsSrc api.StatsSource // a nil *stats.Store would make a non-nil interface
+	if rollup != nil {
+		statsSrc = rollup
+	}
 	mgmt := api.New(api.Deps{
 		Providers: api.NewProviders(st, rec, fd, soniox.NewClient(cfg.SonioxBaseURL, &http.Client{})),
 		Accounts:  api.NewAccounts(accts),
@@ -214,6 +246,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		System:    api.NewSystem(sup),
 		Names:     api.NewNames(st),
 		Logs:      fd,
+		Stats:     statsSrc,
 		Quota:     api.NewQuota(accts, qs),
 		Tail:      liveTail,
 		Audit:     st,

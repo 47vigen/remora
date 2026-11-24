@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"time"
 
+	"golang.org/x/sync/semaphore"
+
 	apispec "github.com/47vigen/remora/api"
 	"github.com/47vigen/remora/internal/api/gen"
 	"github.com/47vigen/remora/internal/auth"
@@ -15,7 +17,7 @@ import (
 )
 
 // Deps are the services the management API runs on. A nil port answers 501 not_implemented for the operations
-// that need it (remora.yaml export, plan and apply need Providers, Aliases, Keys and Batch; logs and stats need Logs).
+// that need it (remora.yaml export, plan and apply need Providers, Aliases, Keys and Batch). Stats answers 503 when absent.
 type Deps struct {
 	Providers Providers
 	Accounts  Accounts // plan 03's accounts.Service, through NewAccounts
@@ -24,6 +26,7 @@ type Deps struct {
 	Batch     config.Batch // joins the writes of one remora.yaml apply; reconcile.Reconciler.Batch
 	System    System
 	Names     EngineNames
+	Stats     StatsSource   // the local request rollup
 	Logs      LogSource     // the front door's request log
 	Quota     Quotas        // subscription accounts' quota, through NewQuota
 	Tail      *bifrost.Tail // the one poller following it, fanned out to live log viewers
@@ -48,6 +51,9 @@ var _ gen.StrictServerInterface = (*Server)(nil)
 func New(d Deps) *Server {
 	if d.liveBuffer <= 0 {
 		d.liveBuffer, d.liveBacklog = liveBuffer, liveBacklog
+	}
+	if d.Logs != nil {
+		d.Logs = &engineLogReads{source: d.Logs, slots: semaphore.NewWeighted(4)}
 	}
 	s := &Server{d: d, now: time.Now}
 	if d.Providers != nil && d.Aliases != nil && d.Keys != nil && d.Batch != nil {

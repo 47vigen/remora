@@ -26,7 +26,7 @@ func TestSearchLogsQuery(t *testing.T) {
 	c := New(srv.URL, "admin", "secret", srv.Client())
 
 	page, err := c.SearchLogs(context.Background(), LogFilter{
-		Status: []string{"error"}, Start: &start, Limit: 1000, SortBy: "timestamp", Order: "asc",
+		Status: []string{"error"}, Start: &start, Limit: 1000, SortBy: "timestamp", Order: "asc", NoContent: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -36,7 +36,7 @@ func TestSearchLogsQuery(t *testing.T) {
 	}
 	want := map[string]string{
 		"status": "error", "start_time": start.Format(time.RFC3339Nano), "sort_by": "timestamp", "order": "asc",
-		"limit": "1000",
+		"limit": "1000", "content": "false",
 	}
 	for k, v := range want {
 		if got.Get(k) != v {
@@ -58,7 +58,7 @@ func TestSearchLogsQuery(t *testing.T) {
 	if _, err := c.SearchLogs(context.Background(), LogFilter{Status: []string{"error", "success"}, Offset: 1000}); err != nil {
 		t.Fatal(err)
 	}
-	if got.Get("status") != "error,success" || got.Get("offset") != "1000" || got.Has("start_time") || got.Has("limit") {
+	if got.Get("status") != "error,success" || got.Get("offset") != "1000" || got.Has("start_time") || got.Has("limit") || got.Has("content") {
 		t.Fatalf("query = %v", got)
 	}
 }
@@ -116,7 +116,7 @@ func TestSearchLogsQueryAllFilters(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"logs":[{"id":"c1","parent_request_id":"r","timestamp":"2026-10-14T09:30:01Z",` +
 			`"provider":"p","model":"m","status":"success","fallback_index":2,"virtual_key_id":"vk1",` +
-			`"routing_rule_id":"r1","latency":123.5,"cost":0.25,"stream":true,` +
+			`"routing_rule_id":"r1","selected_key_id":"k1","latency":123.5,"cost":0.25,"stream":true,` +
 			`"token_usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}],` +
 			`"pagination":{"total_count":41}}`))
 	}))
@@ -150,7 +150,7 @@ func TestSearchLogsQueryAllFilters(t *testing.T) {
 	}
 	l := page.Logs[0]
 	if l.FallbackIndex != 2 || l.VirtualKeyID == nil || *l.VirtualKeyID != "vk1" || l.RoutingRuleID == nil ||
-		*l.RoutingRuleID != "r1" || l.Latency == nil || *l.Latency != 123.5 || l.Cost == nil || *l.Cost != 0.25 ||
+		*l.RoutingRuleID != "r1" || l.SelectedKeyID != "k1" || l.Latency == nil || *l.Latency != 123.5 || l.Cost == nil || *l.Cost != 0.25 ||
 		!l.Stream || l.TokenUsage == nil || *l.TokenUsage != (TokenUsage{PromptTokens: 3, CompletionTokens: 4, TotalTokens: 7}) {
 		t.Fatalf("log = %+v", l)
 	}

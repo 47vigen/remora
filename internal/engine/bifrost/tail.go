@@ -10,6 +10,7 @@ import (
 
 const (
 	defaultTailInterval = time.Second
+	tailPage            = 200
 	// defaultLookback is how far before the newest row seen each poll reaches back. A row is written when its request
 	// completes but carries the request's start time, so a long request lands behind rows already seen.
 	defaultLookback = 10 * time.Minute
@@ -41,16 +42,21 @@ type Tail struct {
 	log      *slog.Logger
 	now      func() time.Time
 
-	mu     sync.Mutex
-	subs   map[int]*subscriber
-	nextID int
+	mu                   sync.Mutex
+	subs                 map[int]*subscriber
+	nextID               int
+	firstWindow, settled time.Time
 
 	// Poll state, touched only with pollMu held: by Run's goroutine, and by Subscribe when it primes a live tail.
-	pollMu  sync.Mutex
-	cursor  time.Time            // when the last fully read window began, or the newest row it delivered if later
-	seen    map[string]time.Time // delivered row id → its timestamp
-	running map[string]time.Time // id of a row seen in processing → its timestamp, followed until it completes
-	narrow  int                  // live polls since the last one that read the whole lookback
+	pollMu                    sync.Mutex
+	cursor                    time.Time            // latest completed poll's start or newest delivered row, whichever is later
+	resume                    time.Time            // last row delivered in an unfinished scan, even if older than cursor
+	seen                      map[string]time.Time // delivered row id → its timestamp
+	running                   map[string]time.Time // id of a row seen in processing → its timestamp, followed until it completes
+	narrow                    int                  // live polls since the last one that read the whole lookback
+	backoff                   time.Duration
+	retryAt                   time.Time
+	scanStart, coveredThrough time.Time
 }
 
 // subscriber is one subscription: its channel and up to backlog rows that did not fit it yet.
@@ -112,7 +118,7 @@ func (t *Tail) Subscribe(ctx context.Context, buffer, backlog int) (<-chan Log, 
 		// Holding pollMu until the viewer is registered keeps Run from treating the tail as idle in between.
 		t.pollMu.Lock()
 		defer t.pollMu.Unlock()
-		if t.cursor.IsZero() {
+		if t.cursor.IsZero() && t.subscribers() == 0 && !time.Now().Before(t.retryAt) {
 			pctx, cancel := context.WithTimeout(ctx, livePrimeTimeout)
 			t.poll(pctx)
 			cancel()
@@ -133,25 +139,51 @@ func (t *Tail) Subscribe(ctx context.Context, buffer, backlog int) (<-chan Log, 
 	}
 }
 
-// Run polls every interval until ctx is done, skipping ticks while nobody is subscribed.
+// Coverage returns the start of the first successful scan (even on an empty log) and the point before which
+// an up-to-date subscriber can checkpoint. An undrained subscription cannot checkpoint yet.
+func (t *Tail) Coverage(rows <-chan Log) (first, settled time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(rows) == 0 {
+		for _, s := range t.subs {
+			if s.ch == rows && len(s.pending) == 0 {
+				return t.firstWindow, t.settled
+			}
+		}
+	}
+	return t.firstWindow, time.Time{}
+}
+
+// Run polls while subscribed, spacing retries farther apart after failed polls.
 func (t *Tail) Run(ctx context.Context) {
-	tick := time.NewTicker(t.interval)
-	defer tick.Stop()
+	timer := time.NewTimer(t.interval)
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-tick.C:
+		case <-timer.C:
 			t.pollMu.Lock()
+			delay := t.interval
 			switch {
 			case t.subscribers() > 0:
-				t.poll(ctx)
+				if !time.Now().Before(t.retryAt) {
+					t.poll(ctx)
+				}
+				if wait := time.Until(t.retryAt); wait > 0 {
+					delay = wait
+					if t.live { // Keep noticing when the last viewer leaves during backoff.
+						delay = min(delay, t.interval)
+					}
+				}
 			case t.live:
 				t.cursor = time.Time{}
+				t.resume = time.Time{}
 				clear(t.seen)
 				clear(t.running)
 			}
 			t.pollMu.Unlock()
+			timer.Reset(delay)
 		}
 	}
 }
@@ -162,21 +194,18 @@ func (t *Tail) subscribers() int {
 	return len(t.subs)
 }
 
-// poll hands subscribers their backlog, then reads the whole window from cursor − lookback, page by page, and delivers
-// the rows not seen yet. The cursor advances only once every page of the window has been read, so a burst larger than
-// one page is never skipped; a failed page leaves the cursor where it was and the next poll reads the window again.
-// It advances to the poll's own start even when no row arrived: with a status filter the matching rows can be days
-// apart, and a cursor held at the last of them would make every poll read every row since. Rows seen in processing
-// that fall behind the window are fetched one by one until they complete.
+// poll flushes the backlog, then reads the overlapping window (or resumes an unfinished scan) page by page.
+// On success the cursor advances at least to the poll's start, even if a status filter matched no rows.
+// Rows seen in processing that fall behind the window are fetched individually until they complete.
 func (t *Tail) poll(ctx context.Context) {
 	t.deliver()
 	began := t.now()
 	from := t.cursor
 	fresh := t.live && from.IsZero()
+	wide := !t.live || from.IsZero() || !t.resume.IsZero() || t.narrow >= liveWideEvery-1
 	if from.IsZero() {
 		from = began
 	}
-	wide := !t.live || fresh || t.narrow >= liveWideEvery-1
 	back := t.lookback
 	if wide {
 		t.narrow = 0
@@ -185,17 +214,33 @@ func (t *Tail) poll(ctx context.Context) {
 		t.narrow++
 	}
 	start := from.Add(-back)
-	newest := began
-	if t.cursor.After(newest) {
-		newest = t.cursor
+	if !t.resume.IsZero() {
+		start = t.resume // inclusive so unseen rows tied at this timestamp are not skipped
 	}
-	for offset := 0; ; offset += MaxLogLimit {
+	floor := began.Add(-t.lookback - t.interval)
+	if start.Before(floor) {
+		start = floor
+	}
+	if !t.live && (t.resume.IsZero() || start.After(t.resume)) {
+		t.scanStart = start
+	}
+	for id, ts := range t.seen {
+		if ts.Before(floor) {
+			delete(t.seen, id)
+		}
+	}
+	for offset := 0; ; offset += tailPage {
 		page, err := t.src.SearchLogs(ctx, LogFilter{
-			Start: &start, Status: t.status, Limit: MaxLogLimit, Offset: offset, SortBy: "timestamp", Order: "asc",
+			Start: &start, Status: t.status, Limit: tailPage, Offset: offset, SortBy: "timestamp", Order: "asc", NoContent: true,
 		})
 		if err != nil {
 			if ctx.Err() == nil {
-				t.log.WarnContext(ctx, "reading the request log failed", "err", err)
+				wait := min(max(2*t.backoff, time.Second), time.Minute)
+				if wait != t.backoff {
+					t.log.WarnContext(ctx, "reading the request log failed", "err", err, "retry_in", wait)
+				}
+				t.backoff = wait
+				t.retryAt = time.Now().Add(wait)
 			}
 			return
 		}
@@ -209,27 +254,55 @@ func (t *Tail) poll(ctx context.Context) {
 				continue
 			}
 			t.seen[l.ID] = l.Timestamp
-			if l.Timestamp.After(newest) {
-				newest = l.Timestamp
+			if l.Timestamp.After(t.resume) {
+				t.resume = l.Timestamp
 			}
 			if !fresh {
 				t.deliver(l)
 			}
 		}
-		if len(page.Logs) < MaxLogLimit {
+		if t.resume.After(t.cursor) {
+			t.cursor = t.resume
+		}
+		if len(page.Logs) < tailPage {
 			break
 		}
 	}
 	if wide {
 		t.recheck(ctx, start)
 	}
-	t.cursor = newest
-	floor := newest.Add(-t.lookback)
-	for id, ts := range t.seen {
-		if ts.Before(floor) {
-			delete(t.seen, id)
+	if !t.live {
+		t.markCoverage(began)
+	}
+	if t.backoff > 0 {
+		t.log.InfoContext(ctx, "reading the request log recovered")
+		t.backoff = 0
+		t.retryAt = time.Time{}
+	}
+	t.resume = time.Time{}
+	if began.After(t.cursor) {
+		t.cursor = began
+	}
+}
+
+// markCoverage never checkpoints across a gap created by the clamp, or past a request still in flight.
+func (t *Tail) markCoverage(began time.Time) {
+	if !t.coveredThrough.IsZero() && t.scanStart.After(t.coveredThrough) {
+		return
+	}
+	t.coveredThrough = began
+	settled := t.scanStart
+	for _, at := range t.running {
+		if at.Before(settled) {
+			settled = at
 		}
 	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.firstWindow.IsZero() {
+		t.firstWindow = t.scanStart
+	}
+	t.settled = settled
 }
 
 // follow remembers a row in processing, forgetting the oldest one when maxRunning are followed already.

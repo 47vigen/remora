@@ -8,6 +8,7 @@ import (
 	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/config"
 	"github.com/47vigen/remora/internal/quota"
+	"github.com/47vigen/remora/internal/stats"
 )
 
 // Ports: one small interface per resource. Handlers talk only to these, so they are tested with in-memory fakes;
@@ -115,3 +116,11 @@ type EngineNames interface {
 	Target(ctx context.Context, engineProvider, engineModel string) alias.Target
 	EngineFilter(ctx context.Context, provider, model string) (engineProviders, engineModels []string)
 }
+
+// StatsSource reads the local request rollup.
+type StatsSource interface {
+	Query(ctx context.Context, from, to time.Time, bucketSec int64, filter func(stats.Dimensions) bool, groups ...func(stats.Dimensions) bool) (stats.Result, error)
+	ModelPairs(ctx context.Context, from, to time.Time, filter func(stats.Dimensions) bool) ([]stats.ModelPair, error)
+}
+
+var _ StatsSource = (*stats.Store)(nil)

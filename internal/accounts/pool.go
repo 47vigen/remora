@@ -3,9 +3,12 @@ package accounts
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 
+	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/engine/cliproxyapi"
+	"github.com/47vigen/remora/internal/store"
 )
 
 // outReasons are the cooldown reasons that take an account out of the pool until someone signs it in again. A
@@ -55,6 +58,62 @@ func (s *Service) Pool(ctx context.Context) ([]PoolStatus, error) {
 		}
 	}
 	return out, nil
+}
+
+// LoadAvailability takes the first availability snapshot before aliases are compiled at startup.
+func (s *Service) LoadAvailability(ctx context.Context) error {
+	rows, err := s.store.Accounts(ctx)
+	if err != nil {
+		return fmt.Errorf("accounts: read availability: %w", err)
+	}
+	creds, err := s.credentials(ctx)
+	if err != nil {
+		return fmt.Errorf("accounts: read availability: %w", err)
+	}
+	s.updateAvailability(rows, creds)
+	return nil
+}
+
+// ObserveAvailability updates the provider set from the quota worker's auth-list poll. It reports any change.
+func (s *Service) ObserveAvailability(rows []store.Account, creds []cliproxyapi.Credential) bool {
+	return s.updateAvailability(rows, indexCredentials(creds))
+}
+
+func (s *Service) updateAvailability(rows []store.Account, creds map[string]cliproxyapi.Credential) bool {
+	available := map[string]bool{}
+	for _, row := range rows {
+		if !row.Enabled || available[row.Provider] {
+			continue
+		}
+		p, ok := cliproxyapi.ProviderByName(row.Provider)
+		c := creds[row.Credential]
+		if !ok || c.Disabled || c.Provider != p.Engine {
+			continue
+		}
+		if _, out := outReason(creds, row.Provider, row.Credential); !out {
+			available[row.Provider] = true
+		}
+	}
+	prev, _ := s.available.Swap(available).(map[string]bool)
+	return prev == nil || !maps.Equal(prev, available)
+}
+
+// Available removes subscription targets with no usable account and reports their providers. An empty result
+// lets the reconciler keep the original chain. An unreadable auth list never replaces the last snapshot.
+func (s *Service) Available(chain []alias.Target) ([]alias.Target, []string) {
+	available, _ := s.available.Load().(map[string]bool)
+	if available == nil {
+		return chain, nil
+	}
+	var skipped []string
+	kept := slices.DeleteFunc(chain, func(t alias.Target) bool {
+		if cliproxyapi.IsSubscription(t.Provider) && !available[t.Provider] {
+			skipped = append(skipped, t.Provider)
+			return true
+		}
+		return false
+	})
+	return kept, skipped
 }
 
 // outReason says why the credential named name keeps its account of provider out of the pool, if it does.

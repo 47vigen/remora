@@ -20,8 +20,9 @@ var ErrRefreshTarget = errors.New("name one account or one provider")
 
 // Config tunes the Service.
 type Config struct {
-	Interval time.Duration // 0 = no background polling
-	BaseURL  string        // "" = the providers' hosts
+	Interval   time.Duration                                                    // 0 = no background quota checks
+	BaseURL    string                                                           // "" = the providers' hosts
+	OnAccounts func(context.Context, []store.Account, []cliproxyapi.Credential) // observes each successful auth-list poll
 }
 
 // maxIdle bounds a round's sleep, so accounts added meanwhile are seen.
@@ -91,6 +92,14 @@ func (s *Service) Run(ctx context.Context) {
 	}
 }
 
+// Wake schedules an immediate poll instead of waiting for the next quota round.
+func (s *Service) Wake() {
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
+}
+
 // round checks at most one account and returns how long to sleep before the next round.
 func (s *Service) round(ctx context.Context) time.Duration {
 	rows, err := s.st.Accounts(ctx)
@@ -102,6 +111,9 @@ func (s *Service) round(ctx context.Context) time.Duration {
 	if err != nil {
 		s.log.Debug("quota: read credentials", "err", err)
 		return Spacing
+	}
+	if s.cfg.OnAccounts != nil {
+		s.cfg.OnAccounts(ctx, rows, creds)
 	}
 	snaps, err := s.st.AccountQuotas(ctx)
 	if err != nil {
@@ -313,10 +325,7 @@ func (s *Service) Refresh(ctx context.Context, accountID int64, provider string)
 	}
 	s.mu.Unlock()
 	if len(queued) > 0 {
-		select {
-		case s.wake <- struct{}{}:
-		default:
-		}
+		s.Wake()
 	}
 	return queued, skipped, nil
 }

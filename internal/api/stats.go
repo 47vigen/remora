@@ -5,65 +5,51 @@ import (
 	"errors"
 	"math"
 	"slices"
+	"strings"
 	"time"
-
-	"golang.org/x/sync/errgroup"
 
 	"github.com/47vigen/remora/internal/api/gen"
 	"github.com/47vigen/remora/internal/engine/bifrost"
+	"github.com/47vigen/remora/internal/engine/cliproxyapi"
+	"github.com/47vigen/remora/internal/stats"
 )
 
-// percentile is the p-quantile (0 < p ≤ 1) of the latency of the n successful attempts f matches, by nearest rank: it
-// reads the one row at rank ceil(p·n) from the list sorted by latency. It is nil when n is 0. The front door's log
-// store keeps no median, so this is exact rather than read from a histogram. The engine sorts the whole range for it
-// and the cost grows with the offset, so the rank is counted from whichever end of the list is nearer.
-func percentile(ctx context.Context, src LogSource, f bifrost.LogFilter, p float64, n int64) (*float64, error) {
-	if n <= 0 {
-		return nil, nil
+// statsBucketSize preserves the log histogram's bucket widths, in seconds.
+func statsBucketSize(start, end *time.Time) int64 {
+	if start == nil || end == nil {
+		return 3600
 	}
-	rank := min(max(int64(math.Ceil(p*float64(n)-1e-9)), 1), n)
-	f.Status, f.Limit, f.SortBy, f.Order, f.Offset = []string{"success"}, 1, "latency", "asc", int(rank-1)
-	if rank > n-rank+1 {
-		f.Order, f.Offset = "desc", int(n-rank)
+	const day = 24 * time.Hour
+	switch d := end.Sub(*start); {
+	case d >= 365*day:
+		return 30 * 24 * 3600
+	case d >= 90*day:
+		return 7 * 24 * 3600
+	case d > 31*day:
+		return 3 * 24 * 3600
+	case d >= 7*day:
+		return 24 * 3600
+	case d >= 3*day:
+		return 8 * 3600
+	case d >= day:
+		return 3600
+	case d >= 2*time.Hour:
+		return 600
+	default:
+		return 60
 	}
-	row, err := src.SearchLogs(ctx, f)
-	if err != nil {
-		return nil, err
-	}
-	if len(row.Logs) == 0 || row.Logs[0].Latency == nil {
-		return nil, nil
-	}
-	return new(*row.Logs[0].Latency), nil
 }
 
-// summary is the stats of what f matches, one row per log row: a fallback attempt counts as a request of its own,
-// as in the series and the log list.
-func (s *Server) summary(ctx context.Context, f bifrost.LogFilter) (gen.StatsSummary, error) {
-	st, err := s.d.Logs.LogStats(ctx, f)
-	if err != nil {
-		return gen.StatsSummary{}, err
-	}
-	var done int64
-	if st.Completed != nil {
-		done = *st.Completed
-	}
+func summary(st stats.Summary) gen.StatsSummary {
 	out := gen.StatsSummary{
-		Requests: int(done), PromptTokens: int(st.PromptTokens), CompletionTokens: int(st.CompletionTokens),
-		TotalTokens: int(st.TotalTokens), CostUsd: finite(st.TotalCost),
+		Requests: int(st.Requests), Errors: int(st.Errors), PromptTokens: int(st.PromptTokens),
+		CompletionTokens: int(st.CompletionTokens), TotalTokens: int(st.TotalTokens), CostUsd: finite(st.CostUSD),
+		LatencyP50Ms: st.LatencyP50Ms, LatencyP95Ms: st.LatencyP95Ms,
 	}
-	if done == 0 {
-		return out, nil
+	if st.Requests > 0 {
+		out.ErrorRate = float64(st.Errors) / float64(st.Requests)
 	}
-	ok := int64(math.Round(float64(done) * min(max(finite(st.SuccessRate), 0), 100) / 100))
-	out.Errors = int(done - ok)
-	out.ErrorRate = float64(out.Errors) / float64(done)
-	g, gctx := errgroup.WithContext(ctx)
-	g.Go(func() (err error) { out.LatencyP50Ms, err = percentile(gctx, s.d.Logs, f, 0.5, ok); return err })
-	g.Go(func() (err error) { out.LatencyP95Ms, err = percentile(gctx, s.d.Logs, f, 0.95, ok); return err })
-	if err := g.Wait(); err != nil {
-		return gen.StatsSummary{}, err
-	}
-	return out, nil
+	return out
 }
 
 // finite maps NaN and infinities to 0, which JSON cannot carry.
@@ -74,138 +60,72 @@ func finite(v float64) float64 {
 	return v
 }
 
-// groupReads is how many group summaries are read from the engine at once.
-const groupReads = 8
-
-// group is one member of a group_by set and the filter that narrows to it.
+// group is one member of a group_by set and the predicate that narrows to it.
 type group struct {
 	name   string
-	narrow func(*bifrost.LogFilter) bool // false when the member cannot match the base filter
+	narrow func(stats.Dimensions) bool
 	label  *string
 }
 
-// stats answers the stats over f's range: the summary, the series and, with group_by, one summary per member of
-// the set that saw requests. With groupsOnly the summary and the series are left empty, for a caller that already
-// has them.
-func (s *Server) stats(ctx context.Context, f bifrost.LogFilter, groupBy string, groupsOnly bool) (gen.Stats, error) {
-	out := gen.Stats{From: *f.Start, To: *f.End, Series: []gen.StatsPoint{}, Groups: []gen.StatsGroup{}}
-	var err error
-	if !groupsOnly {
-		if out.Summary, err = s.summary(ctx, f); err != nil {
-			return gen.Stats{}, err
-		}
-		if out.Series, err = s.series(ctx, f, out.Summary); err != nil {
-			return gen.Stats{}, err
-		}
-	}
-	members, err := s.groups(ctx, f, groupBy)
+func (s *Server) stats(ctx context.Context, from, to time.Time, filter func(stats.Dimensions) bool, groupBy string, groupsOnly bool) (gen.Stats, error) {
+	out := emptyStats(from, to)
+	members, err := s.groups(ctx, from, to, filter, groupBy)
 	if err != nil {
 		return gen.Stats{}, err
 	}
-	// Each summary is several engine reads, so the members are read side by side.
-	sums := make([]gen.StatsSummary, len(members))
-	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(groupReads)
-	for i, m := range members {
-		gf := f
-		if !m.narrow(&gf) {
-			continue
-		}
-		g.Go(func() error {
-			var err error
-			sums[i], err = s.summary(gctx, gf)
-			return err
-		})
-	}
-	if err := g.Wait(); err != nil {
-		return gen.Stats{}, err
-	}
-	for i, m := range members {
-		if sums[i].Requests > 0 {
-			out.Groups = append(out.Groups, gen.StatsGroup{Name: m.name, Label: m.label, Summary: sums[i]})
-		}
-	}
-	return out, nil
-}
-
-// series merges the request, token and cost histograms by bucket start and ranks latency as the summary does.
-func (s *Server) series(ctx context.Context, f bifrost.LogFilter, summary gen.StatsSummary) ([]gen.StatsPoint, error) {
-	var (
-		counts []bifrost.HistogramBucket
-		tokens []bifrost.TokenBucket
-		costs  []bifrost.CostBucket
-	)
-	g, gctx := errgroup.WithContext(ctx)
-	g.Go(func() (err error) { counts, err = s.d.Logs.Histogram(gctx, f); return err })
-	g.Go(func() (err error) { tokens, err = s.d.Logs.TokenHistogram(gctx, f); return err })
-	g.Go(func() (err error) { costs, err = s.d.Logs.CostHistogram(gctx, f); return err })
-	if err := g.Wait(); err != nil {
-		return nil, err
-	}
-	out := make([]gen.StatsPoint, len(counts))
-	at := make(map[int64]int, len(counts))
-	for i, b := range counts {
-		at[b.Timestamp.Unix()] = i
-		out[i] = gen.StatsPoint{Time: b.Timestamp, Requests: int(b.Count), Errors: int(b.Error)}
-	}
-	for _, b := range tokens {
-		if i, ok := at[b.Timestamp.Unix()]; ok {
-			out[i].PromptTokens, out[i].CompletionTokens = int(b.PromptTokens), int(b.CompletionTokens)
-			out[i].TotalTokens = int(b.TotalTokens)
-		}
-	}
-	for _, b := range costs {
-		if i, ok := at[b.Timestamp.Unix()]; ok {
-			out[i].CostUsd = finite(b.TotalCost)
-		}
-	}
-	// The one bucket covers the summary's range, so reuse its values even if new rows arrive mid-read.
-	if len(out) == 1 {
-		out[0].LatencyP50Ms, out[0].LatencyP95Ms = summary.LatencyP50Ms, summary.LatencyP95Ms
+	var bucketSec int64
+	if !groupsOnly {
+		bucketSec = statsBucketSize(&from, &to)
+	} else if len(members) == 0 {
 		return out, nil
 	}
-	g, gctx = errgroup.WithContext(ctx)
-	g.SetLimit(groupReads)
-	for i, b := range counts {
-		if b.Success == 0 {
-			continue
-		}
-		start, end := *f.Start, *f.End
-		if ts := b.Timestamp; ts.After(start) {
-			start = ts
-		}
-		if i+1 < len(counts) && !counts[i+1].Timestamp.After(end) {
-			end = counts[i+1].Timestamp.Add(-time.Nanosecond)
-		}
-		bf := f
-		bf.Start, bf.End = &start, &end
-		g.Go(func() (err error) {
-			if out[i].LatencyP50Ms, err = percentile(gctx, s.d.Logs, bf, 0.5, b.Success); err != nil {
-				return err
-			}
-			out[i].LatencyP95Ms, err = percentile(gctx, s.d.Logs, bf, 0.95, b.Success)
-			return err
-		})
+	predicates := make([]func(stats.Dimensions) bool, len(members))
+	for i, m := range members {
+		predicates[i] = m.narrow
 	}
-	if err := g.Wait(); err != nil {
-		return nil, err
+	res, err := s.d.Stats.Query(ctx, from, to, bucketSec, filter, predicates...)
+	if err != nil {
+		return gen.Stats{}, err
+	}
+	if !groupsOnly {
+		out.Summary = summary(res.Summary)
+		out.Series = series(res.Series)
+	}
+	for i, m := range members {
+		if st := res.Groups[i]; st.Requests > 0 {
+			out.Groups = append(out.Groups, gen.StatsGroup{Name: m.name, Label: m.label, Summary: summary(st)})
+		}
 	}
 	return out, nil
 }
 
-// narrowTo sets *field to [id], or keeps it when it already holds id; a base filter on another id cannot match.
-func narrowTo(field *[]string, id string) bool {
-	if len(*field) > 0 {
-		return slices.Contains(*field, id)
+func series(points []stats.Point) []gen.StatsPoint {
+	out := make([]gen.StatsPoint, len(points))
+	for i, p := range points {
+		out[i] = gen.StatsPoint{
+			Time: p.Time, Requests: int(p.Requests), Errors: int(p.Errors), PromptTokens: int(p.PromptTokens),
+			CompletionTokens: int(p.CompletionTokens), TotalTokens: int(p.TotalTokens), CostUsd: finite(p.CostUSD),
+			LatencyP50Ms: p.LatencyP50Ms, LatencyP95Ms: p.LatencyP95Ms,
+		}
 	}
-	*field = []string{id}
-	return true
+	return out
 }
 
-// groups lists the members of a group_by set from the store: client keys by id, aliases and providers by name
-// (configured providers, then the subscription providers that have accounts). Members without a front-door id are
-// left out. Models come from the log instead: the ones that served what f matches, named "<provider>/<model>".
-func (s *Server) groups(ctx context.Context, f bifrost.LogFilter, groupBy string) ([]group, error) {
+func (s *Server) statsProvider(ctx context.Context, name string) func(stats.Dimensions) bool {
+	ps, ms := s.d.Names.EngineFilter(ctx, name, "")
+	var prefix string
+	if isSubscription(name) {
+		// Subscription providers share a front-door provider; their models carry the provider name.
+		prefix = name + "/"
+	}
+	return func(d stats.Dimensions) bool {
+		return (len(ps) == 0 || slices.Contains(ps, d.Provider)) &&
+			(len(ms) == 0 || slices.Contains(ms, d.Model)) && strings.HasPrefix(d.Model, prefix)
+	}
+}
+
+// groups lists client keys by id and aliases and providers by name. Models are the busiest pairs matching the filter.
+func (s *Server) groups(ctx context.Context, from, to time.Time, filter func(stats.Dimensions) bool, groupBy string) ([]group, error) {
 	var out []group
 	switch gen.GetStatsParamsGroupBy(groupBy) {
 	case gen.GetStatsParamsGroupByKey:
@@ -218,7 +138,7 @@ func (s *Server) groups(ctx context.Context, f bifrost.LogFilter, groupBy string
 		}
 		for _, k := range keys {
 			if vk, ok := s.d.Names.VKByKey(ctx, k.ID); ok {
-				out = append(out, group{k.ID, func(f *bifrost.LogFilter) bool { return narrowTo(&f.VirtualKeyIDs, vk) }, &k.Name})
+				out = append(out, group{k.ID, func(d stats.Dimensions) bool { return d.VirtualKeyID == vk }, &k.Name})
 			}
 		}
 	case gen.GetStatsParamsGroupByAlias:
@@ -231,7 +151,7 @@ func (s *Server) groups(ctx context.Context, f bifrost.LogFilter, groupBy string
 		}
 		for _, a := range aliases {
 			if rule, ok := s.d.Names.RuleByAlias(ctx, a.Name); ok {
-				out = append(out, group{a.Name, func(f *bifrost.LogFilter) bool { return narrowTo(&f.RoutingRuleIDs, rule) }, nil})
+				out = append(out, group{a.Name, func(d stats.Dimensions) bool { return d.RoutingRuleID == rule }, nil})
 			}
 		}
 	case gen.GetStatsParamsGroupByProvider:
@@ -240,44 +160,17 @@ func (s *Server) groups(ctx context.Context, f bifrost.LogFilter, groupBy string
 			return nil, err
 		}
 		for _, name := range names {
-			var ms []string
-			if isSubscription(name) {
-				if ms, err = s.subscriptionModels(ctx, name); err != nil {
-					return nil, err
-				}
-				if len(ms) == 0 {
-					continue
-				}
-			}
-			out = append(out, group{name, func(f *bifrost.LogFilter) bool {
-				ps, _ := s.d.Names.EngineFilter(ctx, name, "")
-				if len(f.Providers) > 0 && len(ps) > 0 && !slices.Contains(f.Providers, ps[0]) {
-					return false
-				}
-				f.Providers = ps
-				if len(ms) > 0 {
-					if len(f.Models) > 0 {
-						ms = slices.DeleteFunc(slices.Clone(ms), func(m string) bool { return !slices.Contains(f.Models, m) })
-						if len(ms) == 0 {
-							return false
-						}
-					}
-					f.Models = ms
-				}
-				return true
-			}, nil})
+			out = append(out, group{name, s.statsProvider(ctx, name), nil})
 		}
 	case gen.GetStatsParamsGroupByModel:
-		used, err := s.d.Logs.ModelUsage(ctx, f)
+		used, err := s.d.Stats.ModelPairs(ctx, from, to, filter)
 		if err != nil {
 			return nil, err
 		}
-		for _, u := range used {
+		for _, u := range used[:min(len(used), 100)] {
 			t := s.d.Names.Target(ctx, u.Provider, u.Model)
-			// The pair was read under the base filter, so it always matches it.
-			out = append(out, group{t.Provider + "/" + t.Model, func(f *bifrost.LogFilter) bool {
-				f.Providers, f.Models = []string{u.Provider}, []string{u.Model}
-				return true
+			out = append(out, group{t.Provider + "/" + t.Model, func(d stats.Dimensions) bool {
+				return d.Provider == u.Provider && d.Model == u.Model
 			}, nil})
 		}
 	case gen.GetStatsParamsGroupByNone, "":
@@ -287,7 +180,7 @@ func (s *Server) groups(ctx context.Context, f bifrost.LogFilter, groupBy string
 	return out, nil
 }
 
-// providerNames lists the configured providers, then the subscription providers that have accounts.
+// providerNames uses the catalog rather than querying live account credentials for historical stats.
 func (s *Server) providerNames(ctx context.Context) ([]string, error) {
 	if s.d.Providers == nil {
 		return nil, errNotImplemented
@@ -300,15 +193,9 @@ func (s *Server) providerNames(ctx context.Context) ([]string, error) {
 	for _, p := range ps {
 		out = append(out, p.Name)
 	}
-	if s.d.Accounts != nil {
-		accts, err := s.d.Accounts.List(ctx, "")
-		if err != nil {
-			return nil, err
-		}
-		for _, a := range accts {
-			if !slices.Contains(out, a.Provider) {
-				out = append(out, a.Provider)
-			}
+	for _, p := range cliproxyapi.Providers() {
+		if !slices.Contains(out, p.Name) {
+			out = append(out, p.Name)
 		}
 	}
 	return out, nil
@@ -319,10 +206,17 @@ func emptyStats(from, to time.Time) gen.Stats {
 	return gen.Stats{From: from, To: to, Series: []gen.StatsPoint{}, Groups: []gen.StatsGroup{}}
 }
 
+var statsUnavailable = gen.StatsUnavailableJSONResponse{
+	Error: gen.ErrorDetail{Type: typeAPI, Code: "stats_unavailable", Message: "Request stats are not available yet."},
+}
+
 // GetStats answers volume, errors, latency, tokens and cost over a time range (the last 24 hours by default),
 // optionally narrowed to a key, an alias or a provider and grouped by one of them.
 func (s *Server) GetStats(ctx context.Context, req gen.GetStatsRequestObject) (gen.GetStatsResponseObject, error) {
-	if s.d.Logs == nil || s.d.Names == nil {
+	if s.d.Stats == nil {
+		return gen.GetStats503JSONResponse{StatsUnavailableJSONResponse: statsUnavailable}, nil
+	}
+	if s.d.Names == nil {
 		return nil, errNotImplemented
 	}
 	p := req.Params
@@ -330,13 +224,19 @@ func (s *Server) GetStats(ctx context.Context, req gen.GetStatsRequestObject) (g
 	if err != nil {
 		return nil, err
 	}
-	f := bifrost.LogFilter{Start: &start, End: &end}
-	if err := s.scope(ctx, &f, deref(p.Key), deref(p.Alias), deref(p.Provider), ""); errors.Is(err, errNoMatch) {
+	// Only translate key and alias here: log provider scoping reads the live model catalog.
+	var f bifrost.LogFilter
+	if err := s.scope(ctx, &f, deref(p.Key), deref(p.Alias), "", ""); errors.Is(err, errNoMatch) {
 		return gen.GetStats200JSONResponse(emptyStats(start, end)), nil
 	} else if err != nil {
 		return nil, err
 	}
-	out, err := s.stats(ctx, f, string(deref(p.GroupBy)), deref(p.GroupsOnly))
+	provider := s.statsProvider(ctx, deref(p.Provider))
+	filter := func(d stats.Dimensions) bool {
+		return (len(f.VirtualKeyIDs) == 0 || slices.Contains(f.VirtualKeyIDs, d.VirtualKeyID)) &&
+			(len(f.RoutingRuleIDs) == 0 || slices.Contains(f.RoutingRuleIDs, d.RoutingRuleID)) && provider(d)
+	}
+	out, err := s.stats(ctx, start, end, filter, string(deref(p.GroupBy)), deref(p.GroupsOnly))
 	if err != nil {
 		return nil, err
 	}
@@ -346,7 +246,10 @@ func (s *Server) GetStats(ctx context.Context, req gen.GetStatsRequestObject) (g
 // GetKeyUsage answers one client key's stats over a time range. A key the front door has no virtual key for yet
 // has seen no requests.
 func (s *Server) GetKeyUsage(ctx context.Context, req gen.GetKeyUsageRequestObject) (gen.GetKeyUsageResponseObject, error) {
-	if s.d.Logs == nil || s.d.Names == nil || s.d.Keys == nil {
+	if s.d.Stats == nil {
+		return gen.GetKeyUsage503JSONResponse{StatsUnavailableJSONResponse: statsUnavailable}, nil
+	}
+	if s.d.Names == nil || s.d.Keys == nil {
 		return nil, errNotImplemented
 	}
 	if _, err := s.d.Keys.Get(ctx, req.Id); err != nil {
@@ -360,7 +263,7 @@ func (s *Server) GetKeyUsage(ctx context.Context, req gen.GetKeyUsageRequestObje
 	if !ok {
 		return gen.GetKeyUsage200JSONResponse(emptyStats(start, end)), nil
 	}
-	out, err := s.stats(ctx, bifrost.LogFilter{Start: &start, End: &end, VirtualKeyIDs: []string{vk}}, "", false)
+	out, err := s.stats(ctx, start, end, func(d stats.Dimensions) bool { return d.VirtualKeyID == vk }, "", false)
 	if err != nil {
 		return nil, err
 	}

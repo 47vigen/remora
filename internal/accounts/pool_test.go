@@ -3,9 +3,11 @@ package accounts
 import (
 	"context"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
+	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/engine/cliproxyapi"
 )
 
@@ -48,6 +50,43 @@ func TestPoolCountsOnlyDroppedAccounts(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Pool = %+v\nwant   %+v", got, want)
 	}
+}
+
+func TestFilterDropsProviderWithoutAccount(t *testing.T) {
+	const provider = "antigravity"
+	e := newEnv(t)
+	ctx := t.Context()
+	upstream := alias.Target{Provider: "up-a", Model: "m"}
+	member := alias.Target{Provider: provider, Model: "m"}
+	chain := []alias.Target{member, upstream}
+	cred := cliproxyapi.Credential{Name: "sub.json", Provider: provider, ProjectID: "project"}
+	row := e.addRow(t, provider, "sub", cred.Name, false)
+	e.fake.AddCredential(cred)
+
+	check := func(want []alias.Target, skipped ...string) {
+		t.Helper()
+		if err := e.svc.LoadAvailability(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if kept, dropped := e.svc.Available(slices.Clone(chain)); !slices.Equal(kept, want) || !slices.Equal(dropped, skipped) {
+			t.Fatalf("Available = %v, skipped %v; want %v, skipped %v", kept, dropped, want, skipped)
+		}
+	}
+	check([]alias.Target{upstream}, provider) // engine credential alone is not enough
+	if err := e.svc.SetEnabled(ctx, row.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	check(chain)
+	cred.Disabled = true
+	e.fake.AddCredential(cred)
+	check([]alias.Target{upstream}, provider) // enabled store row alone is not enough
+	cred.Disabled, cred.Unavailable = false, true
+	cred.Cooldowns = []cliproxyapi.Cooldown{{Scope: "auth", Reason: "invalid_grant"}}
+	e.fake.AddCredential(cred)
+	check([]alias.Target{upstream}, provider)
+	cred.Cooldowns[0].Reason = "quota"
+	e.fake.AddCredential(cred)
+	check(chain) // a temporary cooldown does not sign the account out
 }
 
 func TestPoolEmpty(t *testing.T) {

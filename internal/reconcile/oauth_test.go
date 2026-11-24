@@ -190,7 +190,7 @@ func TestReconcileFiltersCooling(t *testing.T) {
 
 	ctx := context.Background()
 	cl := cooling.New(cooling.Config{}, h.rec.Sync, nil, nil)
-	h.rec.Filter = cl.Filter
+	h.rec.Filter = func(chain []alias.Target) ([]alias.Target, []string) { return cl.Filter(chain), nil }
 	h.sync(t)
 	if rs := h.eng.RulesNamed(RuleName("pair")); len(rs) != 1 || rs[0].Target != (bifrost.Route{Provider: "openrouter", Model: "a"}) {
 		t.Fatalf("before cooling: %+v", rs)
