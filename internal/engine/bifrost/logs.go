@@ -26,13 +26,14 @@ type LogFilter struct {
 	End             *time.Time // rows whose timestamp is at or before End
 	ContentSearch   string     // free text over the request and response content
 	ParentRequestID string     // the fallback attempts of one request
+	NoContent       bool       // omit request and response content from list rows
 	Limit           int        // 1..MaxLogLimit
 	Offset          int
 	SortBy          string // "timestamp", "latency", "tokens" or "cost"
 	Order           string // "asc" or "desc"
 }
 
-// Query encodes f; page adds limit, offset, sort_by and order, which only the list reads.
+// Query encodes f; page adds projection, paging and sorting options, which only the list reads.
 func (f LogFilter) Query(page bool) url.Values {
 	q := url.Values{}
 	for name, v := range map[string][]string{
@@ -57,6 +58,9 @@ func (f LogFilter) Query(page bool) url.Values {
 	}
 	if !page {
 		return q
+	}
+	if f.NoContent {
+		q.Set("content", "false")
 	}
 	if f.Limit > 0 {
 		q.Set("limit", strconv.Itoa(f.Limit))

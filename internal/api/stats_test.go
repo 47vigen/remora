@@ -50,7 +50,7 @@ func TestPercentile(t *testing.T) {
 		t.Fatalf("p50 = %v, %v", p50, err)
 	}
 	f, _ := logs.lastSearch()
-	if f.Offset != 4 || f.Limit != 1 || f.SortBy != "latency" || f.Order != "asc" || !slices.Equal(f.Status, []string{"success"}) {
+	if f.Offset != 4 || f.Limit != 1 || f.SortBy != "latency" || f.Order != "asc" || !f.NoContent || !slices.Equal(f.Status, []string{"success"}) {
 		t.Errorf("p50 query = %+v", f)
 	}
 	// The top of the list is read from its own end, where the engine's sort stays short.

@@ -26,7 +26,7 @@ func TestSearchLogsQuery(t *testing.T) {
 	c := New(srv.URL, "admin", "secret", srv.Client())
 
 	page, err := c.SearchLogs(context.Background(), LogFilter{
-		Status: []string{"error"}, Start: &start, Limit: 1000, SortBy: "timestamp", Order: "asc",
+		Status: []string{"error"}, Start: &start, Limit: 1000, SortBy: "timestamp", Order: "asc", NoContent: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -36,7 +36,7 @@ func TestSearchLogsQuery(t *testing.T) {
 	}
 	want := map[string]string{
 		"status": "error", "start_time": start.Format(time.RFC3339Nano), "sort_by": "timestamp", "order": "asc",
-		"limit": "1000",
+		"limit": "1000", "content": "false",
 	}
 	for k, v := range want {
 		if got.Get(k) != v {
@@ -58,7 +58,7 @@ func TestSearchLogsQuery(t *testing.T) {
 	if _, err := c.SearchLogs(context.Background(), LogFilter{Status: []string{"error", "success"}, Offset: 1000}); err != nil {
 		t.Fatal(err)
 	}
-	if got.Get("status") != "error,success" || got.Get("offset") != "1000" || got.Has("start_time") || got.Has("limit") {
+	if got.Get("status") != "error,success" || got.Get("offset") != "1000" || got.Has("start_time") || got.Has("limit") || got.Has("content") {
 		t.Fatalf("query = %v", got)
 	}
 }

@@ -211,7 +211,7 @@ func (t *Tail) poll(ctx context.Context) {
 	}
 	for offset := 0; ; offset += tailPage {
 		page, err := t.src.SearchLogs(ctx, LogFilter{
-			Start: &start, Status: t.status, Limit: tailPage, Offset: offset, SortBy: "timestamp", Order: "asc",
+			Start: &start, Status: t.status, Limit: tailPage, Offset: offset, SortBy: "timestamp", Order: "asc", NoContent: true,
 		})
 		if err != nil {
 			if ctx.Err() == nil {
