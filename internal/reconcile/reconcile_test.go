@@ -759,12 +759,47 @@ func TestSync_SpreadingAliasDeduplicatesChain(t *testing.T) {
 	}
 }
 
+func TestFilterDropsProviderWithoutAccount(t *testing.T) {
+	h := newHarness(t)
+	h.withOAuth()
+	h.write(t, putAll([]store.Provider{custom("up-a")},
+		chat("mixed", "antigravity/m", "up-a/m"), chat("subscription-only", "antigravity/m")))
+	available := false
+	h.rec.Filter = func(chain []alias.Target) ([]alias.Target, []string) {
+		if available {
+			return chain, nil
+		}
+		kept := slices.DeleteFunc(chain, func(target alias.Target) bool { return target.Provider == "antigravity" })
+		return kept, []string{"antigravity"}
+	}
+	const message = "alias member skipped: no enabled, signed-in account"
+	check := func(wantMixed bifrost.Route, wantLogs int) {
+		t.Helper()
+		h.sync(t)
+		if rules := h.eng.RulesNamed(RuleName("mixed")); len(rules) != 1 || rules[0].Target != wantMixed {
+			t.Fatalf("mixed rules = %+v, want target %+v", rules, wantMixed)
+		}
+		if rules := h.eng.RulesNamed(RuleName("subscription-only")); len(rules) != 1 || rules[0].Target != route(bifrost.OAuthProvider+"/antigravity/m") {
+			t.Fatalf("all dropped: alias must keep its original members, got %+v", rules)
+		}
+		if log := h.log.String(); strings.Count(log, message) != wantLogs || strings.Contains(log, "alias=subscription-only") {
+			t.Fatalf("want %d skip logs for mixed only, got %s", wantLogs, log)
+		}
+	}
+	check(route("up-a/m"), 1)
+	check(route("up-a/m"), 1)
+	available = true
+	check(route(bifrost.OAuthProvider+"/antigravity/m"), 1)
+	available = false
+	check(route("up-a/m"), 2)
+}
+
 func TestSync_SpreadingAliasOneLiveMember(t *testing.T) {
 	h := newHarness(t)
 	var got map[string]alias.Chain
 	h.rec.Publish = func(c map[string]alias.Chain) { got = c }
-	h.rec.Filter = func(chain []alias.Target) []alias.Target {
-		return slices.DeleteFunc(chain, func(t alias.Target) bool { return t.Provider != "up-a" })
+	h.rec.Filter = func(chain []alias.Target) ([]alias.Target, []string) {
+		return slices.DeleteFunc(chain, func(t alias.Target) bool { return t.Provider != "up-a" }), nil
 	}
 	h.write(t, putAll(upABC, spreading("spread", alias.StrategyRoundRobin, "up-a/m1", "up-b/m1", "up-c/m1")))
 	h.sync(t)
@@ -779,7 +814,7 @@ func TestSync_SpreadingAliasOneLiveMember(t *testing.T) {
 
 func TestSync_SpreadingAliasAllCooling(t *testing.T) {
 	h := newHarness(t)
-	h.rec.Filter = func([]alias.Target) []alias.Target { return nil }
+	h.rec.Filter = func([]alias.Target) ([]alias.Target, []string) { return nil, nil }
 	h.write(t, putAll(upABC, spreading("spread", alias.StrategyLeastUsed, "up-a/m1", "up-b/m1", "up-c/m1")))
 	h.sync(t)
 	h.memberRules(t, "spread", 3)
@@ -791,8 +826,8 @@ func TestSync_CoolingMemberLosesItsRule(t *testing.T) {
 	h.rec.Publish = func(c map[string]alias.Chain) { got = c }
 	h.write(t, putAll(upABC, spreading("spread", alias.StrategyRandom, "up-a/m1", "up-b/m1", "up-c/m1")))
 	h.sync(t)
-	h.rec.Filter = func(chain []alias.Target) []alias.Target {
-		return slices.DeleteFunc(chain, func(t alias.Target) bool { return t.Provider == "up-b" })
+	h.rec.Filter = func(chain []alias.Target) ([]alias.Target, []string) {
+		return slices.DeleteFunc(chain, func(t alias.Target) bool { return t.Provider == "up-b" }), nil
 	}
 	h.sync(t)
 	ms := h.memberRules(t, "spread", 2)

@@ -74,9 +74,9 @@ type Reconciler struct {
 	Internal      []InternalProvider    // pushed like store providers, never deleted, valid as alias member providers
 	InternalRules []bifrost.RoutingRule // pushed by name like alias rules, never deleted (plan 03: one "remora-oauth-<name>" per OAuth provider); Priority as RulePriorityBase says
 	Reserved      []string              // user-facing OAuth provider names: no store provider may take one; valid as alias member providers, mapped by ToEngineTarget
-	// Filter, when set, drops members from a compiled alias chain before it becomes a routing rule (cooling). It sees
-	// user-facing targets, after the chain is validated, and an empty result leaves the chain whole.
-	Filter func(chain []alias.Target) []alias.Target
+	// Filter prunes validated user-facing targets before compiling routing rules. It also reports providers skipped
+	// for lack of a usable account. An empty result leaves the chain whole.
+	Filter func(chain []alias.Target) (kept []alias.Target, unavailableProviders []string)
 	// Also runs in every SyncAll (so in every Run pass) before the front-door pass: work that belongs to the same
 	// reconcile cycle, such as the OAuth engine's own reconciliation. Errors are joined with the pass's.
 	Also []func(ctx context.Context) error
@@ -97,7 +97,8 @@ type Reconciler struct {
 	syncMu       sync.Mutex // serializes engine passes, Change compensation and publication
 	lastForce    time.Time
 	lastRestarts int
-	pending      map[string]bool // engine mutations not yet acknowledged by a successful commit
+	pending      map[string]bool            // engine mutations not yet acknowledged by a successful commit
+	unavailable  map[unavailableMember]bool // skipped members from the last committed pass
 
 	synced     atomic.Bool // a Sync has completed
 	alsoSynced atomic.Bool // a SyncAll has run every Also step without an error
@@ -183,6 +184,12 @@ func (r *Reconciler) runPasses(ctx context.Context, commit func(context.Context,
 		}
 		if err == nil {
 			r.pending = nil
+			for m := range p.desired.Unavailable {
+				if !r.unavailable[m] {
+					r.log().Info("alias member skipped: no enabled, signed-in account", "provider", m.Provider, "alias", m.Alias)
+				}
+			}
+			r.unavailable = p.desired.Unavailable
 			if r.Publish != nil {
 				r.Publish(p.desired.Chains)
 			}
