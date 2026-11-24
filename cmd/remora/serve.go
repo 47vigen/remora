@@ -233,6 +233,10 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	api.RegisterHealthz(mux, sup, accts)
 	authSvc := auth.NewService(st, nil)
 	defer authSvc.StartTokenTouches(stopCtx, logger)()
+	var statsSrc api.StatsSource // a nil *stats.Store would make a non-nil interface
+	if rollup != nil {
+		statsSrc = rollup
+	}
 	mgmt := api.New(api.Deps{
 		Providers: api.NewProviders(st, rec, fd, soniox.NewClient(cfg.SonioxBaseURL, &http.Client{})),
 		Accounts:  api.NewAccounts(accts),
@@ -242,7 +246,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		System:    api.NewSystem(sup),
 		Names:     api.NewNames(st),
 		Logs:      fd,
-		Stats:     rollup,
+		Stats:     statsSrc,
 		Quota:     api.NewQuota(accts, qs),
 		Tail:      liveTail,
 		Audit:     st,
