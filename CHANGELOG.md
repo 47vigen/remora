@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/47vigen/remora/compare/v0.7.1...v0.7.2) (2026-11-24)
+
+
+### Bug Fixes
+
+* stats from a rollup; bounded, content-free engine reads; tail and subscription-member fixes ([#100](https://github.com/47vigen/remora/issues/100)) ([ffebda1](https://github.com/47vigen/remora/commit/ffebda193099103991f44daed55ac6c130101f69))
+
 ## [0.7.1](https://github.com/47vigen/remora/compare/v0.7.0...v0.7.1) (2026-11-19)
 
 
