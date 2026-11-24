@@ -42,19 +42,21 @@ type Tail struct {
 	log      *slog.Logger
 	now      func() time.Time
 
-	mu     sync.Mutex
-	subs   map[int]*subscriber
-	nextID int
+	mu                   sync.Mutex
+	subs                 map[int]*subscriber
+	nextID               int
+	firstWindow, settled time.Time
 
 	// Poll state, touched only with pollMu held: by Run's goroutine, and by Subscribe when it primes a live tail.
-	pollMu  sync.Mutex
-	cursor  time.Time            // latest completed poll's start or newest delivered row, whichever is later
-	resume  time.Time            // last row delivered in an unfinished scan, even if older than cursor
-	seen    map[string]time.Time // delivered row id → its timestamp
-	running map[string]time.Time // id of a row seen in processing → its timestamp, followed until it completes
-	narrow  int                  // live polls since the last one that read the whole lookback
-	backoff time.Duration
-	retryAt time.Time
+	pollMu                    sync.Mutex
+	cursor                    time.Time            // latest completed poll's start or newest delivered row, whichever is later
+	resume                    time.Time            // last row delivered in an unfinished scan, even if older than cursor
+	seen                      map[string]time.Time // delivered row id → its timestamp
+	running                   map[string]time.Time // id of a row seen in processing → its timestamp, followed until it completes
+	narrow                    int                  // live polls since the last one that read the whole lookback
+	backoff                   time.Duration
+	retryAt                   time.Time
+	scanStart, coveredThrough time.Time
 }
 
 // subscriber is one subscription: its channel and up to backlog rows that did not fit it yet.
@@ -137,6 +139,21 @@ func (t *Tail) Subscribe(ctx context.Context, buffer, backlog int) (<-chan Log, 
 	}
 }
 
+// Coverage returns the start of the first successful scan (even on an empty log) and the point before which
+// an up-to-date subscriber can checkpoint. An undrained subscription cannot checkpoint yet.
+func (t *Tail) Coverage(rows <-chan Log) (first, settled time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(rows) == 0 {
+		for _, s := range t.subs {
+			if s.ch == rows && len(s.pending) == 0 {
+				return t.firstWindow, t.settled
+			}
+		}
+	}
+	return t.firstWindow, time.Time{}
+}
+
 // Run polls while subscribed, spacing retries farther apart after failed polls.
 func (t *Tail) Run(ctx context.Context) {
 	timer := time.NewTimer(t.interval)
@@ -204,6 +221,9 @@ func (t *Tail) poll(ctx context.Context) {
 	if start.Before(floor) {
 		start = floor
 	}
+	if !t.live && (t.resume.IsZero() || start.After(t.resume)) {
+		t.scanStart = start
+	}
 	for id, ts := range t.seen {
 		if ts.Before(floor) {
 			delete(t.seen, id)
@@ -251,6 +271,9 @@ func (t *Tail) poll(ctx context.Context) {
 	if wide {
 		t.recheck(ctx, start)
 	}
+	if !t.live {
+		t.markCoverage(began)
+	}
 	if t.backoff > 0 {
 		t.log.InfoContext(ctx, "reading the request log recovered")
 		t.backoff = 0
@@ -260,6 +283,26 @@ func (t *Tail) poll(ctx context.Context) {
 	if began.After(t.cursor) {
 		t.cursor = began
 	}
+}
+
+// markCoverage never checkpoints across a gap created by the clamp, or past a request still in flight.
+func (t *Tail) markCoverage(began time.Time) {
+	if !t.coveredThrough.IsZero() && t.scanStart.After(t.coveredThrough) {
+		return
+	}
+	t.coveredThrough = began
+	settled := t.scanStart
+	for _, at := range t.running {
+		if at.Before(settled) {
+			settled = at
+		}
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.firstWindow.IsZero() {
+		t.firstWindow = t.scanStart
+	}
+	t.settled = settled
 }
 
 // follow remembers a row in processing, forgetting the oldest one when maxRunning are followed already.

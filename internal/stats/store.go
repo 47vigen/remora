@@ -14,7 +14,10 @@ import (
 	_ "modernc.org/sqlite" // registers the SQLite driver
 )
 
-const schemaVersion = 1
+const (
+	schemaVersion = 1
+	replayWindow  = 15 * time.Minute
+)
 
 const schema = `
 CREATE TABLE minute (
@@ -150,13 +153,20 @@ func (s *Store) Cursor(ctx context.Context, name string) (Cursor, error) {
 // Prune removes expired minute buckets and replay IDs. The feed calls it hourly
 // with the raw log retention; stats keep at least eight days.
 func (s *Store) Prune(ctx context.Context, now time.Time, rawRetentionDays int) error {
+	return s.prune(ctx, now, rawRetentionDays, now.Add(-replayWindow))
+}
+
+func (s *Store) prune(ctx context.Context, now time.Time, rawRetentionDays int, seenBefore time.Time) error {
 	return s.write(ctx, func(tx *sql.Tx) error {
 		cutoff := now.UTC().AddDate(0, 0, -max(8, rawRetentionDays+1))
 		if _, err := tx.ExecContext(ctx, `DELETE FROM minute WHERE bucket_unix_min < ?`, unixMinute(cutoff)); err != nil {
 			return err
 		}
 		// Use insertion time, not request time: historical pages can overlap too.
-		_, err := tx.ExecContext(ctx, `DELETE FROM seen WHERE ts < ?`, now.Add(-15*time.Minute).Unix())
+		if seenBefore.Before(cutoff) {
+			seenBefore = cutoff
+		}
+		_, err := tx.ExecContext(ctx, `DELETE FROM seen WHERE ts < ?`, seenBefore.Unix())
 		return err
 	})
 }

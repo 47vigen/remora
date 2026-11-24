@@ -30,6 +30,7 @@ import (
 	"github.com/47vigen/remora/internal/quota"
 	"github.com/47vigen/remora/internal/reconcile"
 	"github.com/47vigen/remora/internal/soniox"
+	"github.com/47vigen/remora/internal/stats"
 	"github.com/47vigen/remora/internal/store"
 	"github.com/47vigen/remora/internal/supervise"
 )
@@ -92,6 +93,17 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 			err = errors.Join(err, fmt.Errorf("close store: %w", cerr))
 		}
 	}()
+
+	rollup, statsErr := stats.Open(ctx, filepath.Join(cfg.DataDir, "stats.db"))
+	if statsErr != nil {
+		logger.Error("request stats unavailable", "err", statsErr)
+	} else {
+		defer func() {
+			if cerr := rollup.Close(); cerr != nil {
+				logger.Warn("closing request stats failed", "err", cerr)
+			}
+		}()
+	}
 
 	pw, err := auth.EnsureAdmin(ctx, st, cfg.AdminPassword)
 	if err != nil {
@@ -183,20 +195,19 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		}
 		logger.Error("initial reconcile failed; retrying on the timer", "err", err)
 	}
-	// Then reconcile on a timer and follow the front door's log for cooling. These loops end before the engines stop
-	// and the store closes. Cooling is started before the listener opens: it skips log rows older than its start,
-	// which the tail replays from before a restart.
+	// These loops end before the engines stop and the stores close.
 	rctx, rcancel := context.WithCancel(ctx)
 	var loops sync.WaitGroup
 	loops.Go(func() { rec.Run(rctx) })
-	// Cooling only uses failures, so its tail asks for error rows, plus the requests still running so one that outlives
-	// the lookback and then fails is still followed; reading every row re-read the whole window, bodies included,
-	// every poll. Live log viewers get their own tail, which polls only while one is open.
-	coolTail := bifrost.NewTail(fd, cfg.Cooling.Poll, []string{"error", "processing"}, logger)
+	// Cooling and stats follow the same content-free log, with independent queues. Log viewers keep their own tail.
+	sharedTail := bifrost.NewTail(fd, cfg.Cooling.Poll, nil, logger)
 	liveTail := bifrost.NewTail(fd, cfg.Cooling.Poll, nil, logger).Live()
-	loops.Go(func() { coolTail.Run(rctx) })
+	if rollup != nil {
+		loops.Go(stats.StartFeed(rctx, rollup, fd, sharedTail, cfg.StatsBackfillPace, supervise.RawLogRetentionDays, logger))
+	}
+	loops.Go(func() { runCooling(rctx, cooler, sharedTail, fd, logger) })
+	loops.Go(func() { sharedTail.Run(rctx) })
 	loops.Go(func() { liveTail.Run(rctx) })
-	loops.Go(func() { runCooling(rctx, cooler, coolTail, fd, logger) })
 	qs := quota.New(accountsEngine(cfg, creds), st, quota.Config{
 		Interval: cfg.QuotaInterval, BaseURL: cfg.QuotaBaseURL,
 		OnAccounts: func(ctx context.Context, rows []store.Account, creds []cliproxyapi.Credential) {
@@ -231,6 +242,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		System:    api.NewSystem(sup),
 		Names:     api.NewNames(st),
 		Logs:      fd,
+		Stats:     rollup,
 		Quota:     api.NewQuota(accts, qs),
 		Tail:      liveTail,
 		Audit:     st,

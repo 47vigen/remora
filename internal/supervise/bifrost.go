@@ -32,6 +32,9 @@ type bifrostWriter struct {
 	BatchInterval string `json:"batch_interval"`
 }
 
+// RawLogRetentionDays is the retention configured for the request log.
+const RawLogRetentionDays = 7
+
 // bifrostClient holds only the keys remora sets; the engine fills every omitted key with its default. The request log
 // keeps 7 days instead of 365, and request and response bodies only when the operator asks (REMORA_LOG_CONTENT).
 // Error details, which cooling reads, stay either way.
@@ -76,7 +79,7 @@ func BifrostEngine(cfg config.Config, c Credentials) (Engine, error) {
 			AdminPassword: c.BifrostAdminPassword,
 			IsEnabled:     true,
 		}},
-		Client:  bifrostClient{LogRetentionDays: 7, DisableContentLogging: !cfg.LogContent},
+		Client:  bifrostClient{LogRetentionDays: RawLogRetentionDays, DisableContentLogging: !cfg.LogContent},
 		Plugins: []bifrostPlugin{{Name: "telemetry", Enabled: false}},
 	}
 	data, err := json.MarshalIndent(doc, "", "  ")

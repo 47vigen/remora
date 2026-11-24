@@ -13,6 +13,7 @@ import (
 	"github.com/47vigen/remora/internal/auth"
 	"github.com/47vigen/remora/internal/config"
 	"github.com/47vigen/remora/internal/engine/bifrost"
+	"github.com/47vigen/remora/internal/stats"
 	"github.com/47vigen/remora/internal/store"
 )
 
@@ -27,6 +28,7 @@ type Deps struct {
 	System    System
 	Names     EngineNames
 	Logs      LogSource     // the front door's request log
+	Stats     *stats.Store  // optional request rollup; catch-up runs in the background
 	Quota     Quotas        // subscription accounts' quota, through NewQuota
 	Tail      *bifrost.Tail // the one poller following it, fanned out to live log viewers
 	Audit     *store.Store

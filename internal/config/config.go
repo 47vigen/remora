@@ -39,6 +39,7 @@ const (
 	EnvLogContent                 = "REMORA_LOG_CONTENT"
 	EnvQuotaInterval              = "REMORA_QUOTA_INTERVAL"
 	EnvQuotaBaseURL               = "REMORA_TEST_QUOTA_BASE_URL"
+	EnvStatsBackfillPace          = "REMORA_STATS_BACKFILL_PACE"
 )
 
 // Defaults applied when a variable is unset or empty.
@@ -106,8 +107,9 @@ type Config struct {
 	SonioxSweepInterval time.Duration // REMORA_SONIOX_SWEEP_INTERVAL, default 10m
 	Cooling             Cooling       // REMORA_COOLING_*
 
-	PprofAddr  string // REMORA_PPROF_ADDR, "" = off: a loopback host:port that serves net/http/pprof
-	LogContent bool   // REMORA_LOG_CONTENT, default false: keep request and response bodies in the request log
+	PprofAddr         string        // REMORA_PPROF_ADDR, "" = off: a loopback host:port that serves net/http/pprof
+	LogContent        bool          // REMORA_LOG_CONTENT, default false: keep request and response bodies in the request log
+	StatsBackfillPace time.Duration // REMORA_STATS_BACKFILL_PACE, default 500ms between historical pages
 
 	QuotaInterval time.Duration // REMORA_QUOTA_INTERVAL, default 15m, at least 5m, 0 = background checks off
 	QuotaBaseURL  string        // REMORA_TEST_QUOTA_BASE_URL, "" = the providers; tests point quota checks at a fake
@@ -191,6 +193,9 @@ func Load(getenv func(string) string) (Config, error) {
 		}
 	}
 	if c.Cooling.Poll, err = positiveDuration(getenv, EnvCoolingPoll, DefaultCoolingPoll); err != nil {
+		return Config{}, err
+	}
+	if c.StatsBackfillPace, err = positiveDuration(getenv, EnvStatsBackfillPace, 500*time.Millisecond); err != nil {
 		return Config{}, err
 	}
 	c.QuotaInterval = DefaultQuotaInterval
