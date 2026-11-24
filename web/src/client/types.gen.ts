@@ -428,11 +428,11 @@ export type StatsSummary = {
     errors: number;
     error_rate: number;
     /**
-     * Null when there are no requests in the range.
+     * Approximate histogram percentile of successful attempts in the range. Null when unavailable.
      */
     latency_p50_ms?: number | null;
     /**
-     * Null when there are no requests in the range.
+     * Approximate histogram percentile of successful attempts in the range. Null when unavailable.
      */
     latency_p95_ms?: number | null;
     prompt_tokens: number;
@@ -456,11 +456,11 @@ export type StatsPoint = {
     total_tokens: number;
     cost_usd: number;
     /**
-     * Over the successful attempts in the bucket, by nearest rank. Null when there are none.
+     * Approximate histogram percentile of successful attempts in the bucket. Null when unavailable.
      */
     latency_p50_ms?: number | null;
     /**
-     * Over the successful attempts in the bucket, by nearest rank. Null when there are none.
+     * Approximate histogram percentile of successful attempts in the bucket. Null when unavailable.
      */
     latency_p95_ms?: number | null;
 };
@@ -1972,9 +1972,9 @@ export type GetKeyUsageData = {
 
 export type GetKeyUsageErrors = {
     /**
-     * The request log read timed out (`engine_timeout`). Try a shorter range.
+     * Request stats are not available yet (`stats_unavailable`).
      */
-    504: Error;
+    503: Error;
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
      * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
@@ -2177,9 +2177,9 @@ export type GetStatsData = {
 
 export type GetStatsErrors = {
     /**
-     * The request log read timed out (`engine_timeout`). Try a shorter range.
+     * Request stats are not available yet (`stats_unavailable`).
      */
-    504: Error;
+    503: Error;
     /**
      * An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
      * (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
