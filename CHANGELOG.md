@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.4](https://github.com/47vigen/remora/compare/v0.7.3...v0.7.4) (2026-11-24)
+
+
+### Bug Fixes
+
+* **cooling:** follow error rows on a tail of their own again ([#104](https://github.com/47vigen/remora/issues/104)) ([67b2391](https://github.com/47vigen/remora/commit/67b23918cd80937137c873a171e965a6371e95f6))
+
 ## [0.7.3](https://github.com/47vigen/remora/compare/v0.7.2...v0.7.3) (2026-11-24)
 
 
