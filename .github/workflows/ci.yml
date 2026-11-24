@@ -141,7 +141,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.4
+          bun-version: 1.4.5
       - run: bun install --frozen-lockfile
       - name: OpenAPI client drift
         run: bun run gen && git diff --exit-code -- src/client
@@ -278,7 +278,7 @@ jobs:
         run: docker load -i images/remora.tar && docker load -i images/fakes.tar
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.4
+          bun-version: 1.4.5
       - name: Start the stack
         run: |
           docker compose -f test/e2e/compose.yaml -p remora-e2e up -d --wait --wait-timeout 180

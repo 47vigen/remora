@@ -7,7 +7,7 @@
 
 # ---------------------------------------------------------------------------
 # web: the console, built by Vite into web/dist with a .br and a .gz beside each asset; nginx serves it.
-FROM --platform=$BUILDPLATFORM oven/bun:1.4.4 AS web
+FROM --platform=$BUILDPLATFORM oven/bun:1.4.5 AS web
 WORKDIR /src/web
 COPY web/package.json web/bun.lock ./
 RUN bun install --frozen-lockfile
@@ -70,7 +70,7 @@ RUN CGO_ENABLED=1 go build -buildvcs=false -trimpath \
 
 # ---------------------------------------------------------------------------
 # final: glibc runtime with tini as PID 1; nginx in front on 8080, remora behind it on loopback.
-FROM debian:13.7-slim
+FROM debian:13.8-slim
 ARG BIFROST_VERSION
 ARG CLIPROXYAPI_VERSION
 RUN test -n "$BIFROST_VERSION" && test -n "$CLIPROXYAPI_VERSION"
