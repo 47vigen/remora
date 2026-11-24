@@ -117,6 +117,25 @@ func TestTailDeliversOnceInOrder(t *testing.T) {
 	}
 }
 
+func TestTailSearchesWithoutContent(t *testing.T) {
+	for _, mode := range []string{"cooling", "live"} {
+		t.Run(mode, func(t *testing.T) {
+			src := &fakeLogs{}
+			tail := NewTail(src, time.Second, []string{"error"}, nil)
+			if mode == "live" {
+				tail = NewTail(src, time.Second, nil, nil).Live()
+				_, cancel := tail.Subscribe(t.Context(), 1, 0)
+				defer cancel()
+			} else {
+				tail.poll(t.Context())
+			}
+			if len(src.calls) != 1 || !src.calls[0].NoContent {
+				t.Fatalf("tail search = %+v, want a metadata-only search", src.calls)
+			}
+		})
+	}
+}
+
 func TestTailCatchesLateRow(t *testing.T) {
 	src := &fakeLogs{polls: [][]Log{
 		{row("b", 300, "error")},

@@ -51,7 +51,7 @@ func TestListLogsFilters(t *testing.T) {
 	if !slices.Equal(f.VirtualKeyIDs, []string{"vk1"}) || !slices.Equal(f.RoutingRuleIDs, []string{"r1"}) ||
 		!slices.Equal(f.Providers, []string{"fd-or"}) || !slices.Equal(f.Models, []string{"fd-or/a"}) ||
 		!slices.Equal(f.Status, []string{"error"}) || f.Start == nil || !f.Start.Equal(from) || f.End == nil ||
-		!f.End.Equal(to) || f.ContentSearch != "x" || f.SortBy != "timestamp" || f.Order != "desc" {
+		!f.End.Equal(to) || f.ContentSearch != "x" || f.SortBy != "timestamp" || f.Order != "desc" || !f.NoContent {
 		t.Fatalf("filter = %+v", f)
 	}
 }
@@ -215,7 +215,7 @@ func TestGetLogFallbackPath(t *testing.T) {
 	}
 	checkFallbackPath(t, d)
 	f, _ := env.logs.lastSearch()
-	if f.ParentRequestID != "r" || f.SortBy != "timestamp" || f.Order != "asc" || f.Limit != 50 {
+	if f.ParentRequestID != "r" || f.SortBy != "timestamp" || f.Order != "asc" || f.Limit != 50 || !f.NoContent {
 		t.Errorf("path query = %+v", f)
 	}
 

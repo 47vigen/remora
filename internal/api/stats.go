@@ -21,6 +21,7 @@ func percentile(ctx context.Context, src LogSource, f bifrost.LogFilter, p float
 	if n <= 0 {
 		return nil, nil
 	}
+	f.NoContent = true
 	rank := min(max(int64(math.Ceil(p*float64(n)-1e-9)), 1), n)
 	f.Status, f.Limit, f.SortBy, f.Order, f.Offset = []string{"success"}, 1, "latency", "asc", int(rank-1)
 	if rank > n-rank+1 {
