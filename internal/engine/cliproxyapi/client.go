@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -214,7 +215,13 @@ func (c *Client) Config(ctx context.Context) (json.RawMessage, error) {
 // PatchConfig merges patch (a JSON object) into the engine's configuration. Objects merge; lists and scalars are
 // replaced.
 func (c *Client) PatchConfig(ctx context.Context, patch any) error {
-	return c.do(ctx, http.MethodPatch, "/config", patch, nil)
+	err := c.do(ctx, http.MethodPatch, "/config", patch, nil)
+	var conflict *Error
+	if errors.As(err, &conflict) && conflict.StatusCode == http.StatusConflict && conflict.Message == "config_changed" {
+		// Each PATCH reads the current file before merging, so the retry uses a fresh snapshot.
+		return c.do(ctx, http.MethodPatch, "/config", patch, nil)
+	}
+	return err
 }
 
 func query(key, value string) string {

@@ -141,7 +141,7 @@ func (a providersAdapter) Models(ctx context.Context, name string) ([]string, er
 	if a.fd == nil {
 		return nil, errNotImplemented
 	}
-	return a.fd.ProviderModels(ctx, p.Name)
+	return a.fd.ProviderModels(ctx, engineProvider(p.Name))
 }
 
 func (a providersAdapter) Create(ctx context.Context, p Provider) (Provider, error) {
@@ -574,7 +574,7 @@ func (a namesAdapter) Target(_ context.Context, engineProvider, engineModel stri
 func (a namesAdapter) EngineFilter(_ context.Context, provider, model string) ([]string, []string) {
 	var ps, ms []string
 	if provider != "" {
-		ps = []string{engineProvider(provider)}
+		ps = logProviderNames(provider)
 	}
 	if model != "" {
 		p, m, ok := strings.Cut(model, "/")
@@ -587,7 +587,7 @@ func (a namesAdapter) EngineFilter(_ context.Context, provider, model string) ([
 			ms = []string{m}
 		}
 		if ok && provider == "" {
-			ps = []string{engineProvider(p)}
+			ps = logProviderNames(p)
 		}
 	}
 	return ps, ms
@@ -794,8 +794,19 @@ func isSubscription(name string) bool {
 	return ok
 }
 
+// logProviderNames includes the former engine name so searches still find transcription history.
+func logProviderNames(name string) []string {
+	if name == bifrost.SonioxPublicName {
+		return []string{bifrost.SonioxProvider, name}
+	}
+	return []string{engineProvider(name)}
+}
+
 // engineProvider is the front-door provider that serves a remora provider.
 func engineProvider(name string) string {
+	if name == bifrost.SonioxPublicName {
+		return bifrost.SonioxProvider
+	}
 	if isSubscription(name) {
 		return bifrost.OAuthProvider
 	}

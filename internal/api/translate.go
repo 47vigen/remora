@@ -41,6 +41,7 @@ var scrubRules = []struct {
 	// rules ("remora-oauth-codex"); users know these as "codex/gpt-x" and "codex".
 	{regexp.MustCompile(`(?i)remora-oauth[/-]`), ""},
 	{regexp.MustCompile(`(?i)remora-oauth`), "oauth engine"},
+	{regexp.MustCompile(bifrost.SonioxProvider), bifrost.SonioxPublicName},
 	{regexp.MustCompile(`(?i)cli ?proxy ?api|cliproxy`), "oauth engine"},
 	{regexp.MustCompile(`(?i)bifrost`), "gateway"},
 	{regexp.MustCompile(`(?i)(?:127\.0\.0\.1|localhost):[0-9]+`), "upstream"},
@@ -59,7 +60,7 @@ func Scrub(s string) string {
 // as provider "remora-oauth" with model "<name>/<model>"; every other provider keeps its name.
 func userTarget(engineProvider, engineModel string) alias.Target {
 	if engineProvider != bifrost.OAuthProvider {
-		return alias.Target{Provider: engineProvider, Model: engineModel}
+		return alias.Target{Provider: bifrost.PublicProvider(engineProvider), Model: engineModel}
 	}
 	if name, model, ok := strings.Cut(engineModel, "/"); ok && name != "" && model != "" {
 		return alias.Target{Provider: name, Model: model}

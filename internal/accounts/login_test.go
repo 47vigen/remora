@@ -257,7 +257,7 @@ func TestLoginStatusUnknownState(t *testing.T) {
 	}
 }
 
-func TestLoginStatusWithoutProject(t *testing.T) {
+func TestLoginStatusWithLegacyCredentialWithoutProject(t *testing.T) {
 	e := newEnv(t)
 	l := e.start(t, "antigravity")
 	e.fake.FinishLogin(l.State, cliproxyapi.Credential{Name: "antigravity-a@x.json", Provider: "antigravity", Email: "a@x", Status: "active"})
@@ -275,6 +275,21 @@ func TestLoginStatusWithoutProject(t *testing.T) {
 	}
 	if a := accts[0]; a.Status != statusRefused || a.StatusMessage != MsgNoProject {
 		t.Errorf("account status %q %q, want refused", a.Status, a.StatusMessage)
+	}
+}
+
+func TestLoginStatusProjectDiscoveryFailed(t *testing.T) {
+	e := newEnv(t)
+	l := e.start(t, "antigravity")
+	const message = "Failed to fetch project ID"
+	e.fake.FailLogin(l.State, message)
+
+	st, err := e.svc.LoginStatus(t.Context(), l.State)
+	if err != nil || st.Status != "error" || st.Message != message {
+		t.Fatalf("LoginStatus = %+v, %v; want the project discovery failure", st, err)
+	}
+	if accts, err := e.svc.List(t.Context(), "antigravity"); err != nil || len(accts) != 0 {
+		t.Fatalf("List = %+v, %v; want no account after a failed login", accts, err)
 	}
 }
 

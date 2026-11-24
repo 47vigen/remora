@@ -8,7 +8,7 @@ import (
 )
 
 // SonioxProviderName is the only name a provider of kind "soniox" may take: clients ask for "soniox/<model>".
-const SonioxProviderName = "soniox"
+const SonioxProviderName = bifrost.SonioxPublicName
 
 // defaultSonioxDeadline is the adapter's deadline when the Reconciler is given none.
 const defaultSonioxDeadline = 30 * time.Minute
@@ -22,7 +22,7 @@ const sonioxGrace = 60 * time.Second
 // allowed, so list-models, chat and streaming are off for it.
 func sonioxProvider(adapterURL string, deadline time.Duration) bifrost.Provider {
 	return bifrost.Provider{
-		Name:                SonioxProviderName,
+		Name:                bifrost.SonioxProvider,
 		BaseType:            "openai",
 		BaseURL:             adapterURL,
 		AllowPrivateNetwork: true,

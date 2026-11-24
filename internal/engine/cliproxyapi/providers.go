@@ -61,5 +61,5 @@ func UserRef(provider, model string) string {
 	if provider == bifrost.OAuthProvider {
 		return model
 	}
-	return provider + "/" + model
+	return bifrost.PublicProvider(provider) + "/" + model
 }

@@ -338,6 +338,32 @@ func TestProxy_Routes(t *testing.T) {
 	}
 }
 
+func TestProxy_SpeechProviderKeepsPublicName(t *testing.T) {
+	f := newFixture(t)
+	f.upstream(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(headerRoutingProvider, "remora-soniox")
+		w.Header().Set(headerRoutingModel, "stt-async-v5")
+		okJSON(w, r)
+	})
+	post := func(model string) result {
+		body, ct := multipartBody(t, []field{{name: "file", filename: "a.wav", value: []byte("RIFF")}, {name: "model", value: []byte(model)}})
+		return f.do(t, http.MethodPost, "/v1/audio/transcriptions", keyFull, ct, body, nil)
+	}
+	resp := post("soniox/stt-async-v5")
+	if resp.StatusCode != http.StatusOK || resp.Header.Get(headerServedBy) != "soniox/stt-async-v5" {
+		t.Fatalf("status = %d, served by %q", resp.StatusCode, resp.Header.Get(headerServedBy))
+	}
+	got := f.seen()
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, got.path, bytes.NewReader(got.body))
+	r.Header = got.header
+	if r.FormValue("model") != "remora-soniox/stt-async-v5" {
+		t.Fatalf("upstream model = %q", r.FormValue("model"))
+	}
+	if resp := post("remora-soniox/stt-async-v5"); resp.StatusCode != http.StatusForbidden || f.hits.Load() != 1 {
+		t.Fatalf("private route returned %d; upstream hits %d", resp.StatusCode, f.hits.Load())
+	}
+}
+
 func TestProxy_Allowlist(t *testing.T) {
 	f := newFixture(t)
 	for _, c := range []struct {

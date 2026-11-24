@@ -69,7 +69,7 @@ func TestSonioxProviderBody(t *testing.T) {
 	got := createBody(t, sonioxProvider("http://127.0.0.1:18090", 30*time.Minute))
 	// The plan's body plus the two fields the management client sends for every provider
 	// (stream_idle_timeout_in_seconds, concurrency_and_buffer_size).
-	jsonEq(t, got, `{"provider":"soniox",
+	jsonEq(t, got, `{"provider":"remora-soniox",
 	 "network_config":{"base_url":"http://127.0.0.1:18090","default_request_timeout_in_seconds":1860,"max_retries":0,
 	   "stream_idle_timeout_in_seconds":300,"allow_private_network":true},
 	 "concurrency_and_buffer_size":{"concurrency":1000,"buffer_size":5000},
@@ -138,6 +138,7 @@ func TestSonioxProviderReconciled(t *testing.T) {
 	h := newHarness(t)
 	h.rec.SonioxURL = "http://127.0.0.1:18090"
 	h.rec.SonioxDeadline = time.Hour
+	h.eng.SeedProvider(bifrost.Provider{Name: SonioxProviderName, BaseType: "openai"}, bifrost.Key{ID: "soniox-key"})
 	h.write(t, putAll([]store.Provider{sonioxStore(SonioxProviderName, "")}))
 	h.sync(t)
 
@@ -149,7 +150,7 @@ func TestSonioxProviderReconciled(t *testing.T) {
 	if !reflect.DeepEqual(provs[0], want) {
 		t.Errorf("provider %+v, want %+v", provs[0], want)
 	}
-	keys, _ := h.eng.ListKeys(context.Background(), SonioxProviderName)
+	keys, _ := h.eng.ListKeys(context.Background(), "remora-soniox")
 	if len(keys) != 1 || keys[0].ID != "soniox-key" || !keys[0].Enabled {
 		t.Errorf("keys %+v, want the store key soniox-key", keys)
 	}

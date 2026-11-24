@@ -15,6 +15,7 @@ import (
 
 	"github.com/47vigen/remora/internal/alias"
 	"github.com/47vigen/remora/internal/cooling"
+	"github.com/47vigen/remora/internal/engine/bifrost"
 	"github.com/47vigen/remora/internal/engine/cliproxyapi"
 	"github.com/47vigen/remora/internal/store"
 )
@@ -265,7 +266,7 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt route, sh sha
 		errModelRequired.write(w, sh)
 		return
 	}
-	if !Allowed(key.Allow, model) {
+	if strings.HasPrefix(model, bifrost.SonioxProvider+"/") || !Allowed(key.Allow, model) {
 		errModelNotAllowed(model).write(w, sh)
 		return
 	}
@@ -323,8 +324,9 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt route, sh sha
 		}()
 	}
 	body := raw
+	outModel := model
 	if isAlias {
-		outModel := alias.EngineModel(model)
+		outModel = alias.EngineModel(model)
 		if probe != (alias.Target{}) {
 			// shortcut: a probe has no fallback; add a probe-only rule if failed probes must fall back.
 			outModel = probe.Provider + "/" + probe.Model
@@ -332,6 +334,11 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt route, sh sha
 		} else if p.Picker != nil {
 			info.first = p.Picker.Pick(model)
 		}
+	}
+	if name, ok := strings.CutPrefix(outModel, bifrost.SonioxPublicName+"/"); ok {
+		outModel = bifrost.SonioxProvider + "/" + name
+	}
+	if outModel != model {
 		if body, err = withModel(raw, sp, r.Header.Get("Content-Type"), outModel); err != nil {
 			errModelRequired.write(w, sh)
 			return

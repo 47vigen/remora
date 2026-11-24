@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -324,6 +325,47 @@ func TestUploadCredential(t *testing.T) {
 	}
 	if err := c.UploadCredential(ctx, "x.json", []byte("not json")); !errors.As(err, &e) || e.StatusCode != http.StatusInternalServerError {
 		t.Errorf("bad body: err = %v, want *Error 500", err)
+	}
+}
+
+func TestConfigPatchRetriesOnceOnConflict(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		conflicts   int32
+		wantPatches int32
+	}{
+		{"recovers", 1, 2},
+		{"stops", 2, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var patches atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPatch || r.URL.Path != "/v8/management/config" {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				body, err := io.ReadAll(r.Body)
+				if err != nil || string(body) != `{"routing":{"strategy":"round-robin"}}` {
+					t.Errorf("patch body = %q, %v", body, err)
+				}
+				if patches.Add(1) <= tc.conflicts {
+					w.WriteHeader(http.StatusConflict)
+					_, _ = io.WriteString(w, `{"error":"config_changed"}`)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer srv.Close()
+			c := cliproxyapi.New(srv.URL, secret, srv.Client())
+			err := c.PatchConfig(t.Context(), map[string]any{"routing": map[string]string{"strategy": "round-robin"}})
+			var conflict *cliproxyapi.Error
+			if tc.conflicts == 1 && err != nil || tc.conflicts == 2 && (!errors.As(err, &conflict) || conflict.StatusCode != http.StatusConflict) {
+				t.Errorf("PatchConfig error = %v", err)
+			}
+			if n := patches.Load(); n != tc.wantPatches {
+				t.Errorf("sent %d patches, want %d", n, tc.wantPatches)
+			}
+		})
 	}
 }
 

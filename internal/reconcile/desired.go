@@ -240,6 +240,9 @@ func (r *Reconciler) engineProvider(p store.Provider, reserved, internal map[str
 	bp := bifrost.Provider{Name: p.Name, BaseURL: engineBaseURL(p.BaseURL), AllowPrivateNetwork: p.AllowPrivateNetwork}
 	switch p.Kind {
 	case store.KindBuiltin:
+		if p.Name == SonioxProviderName {
+			return bifrost.Provider{}, invalid("provider %q must use the speech adapter", p.Name)
+		}
 		// The front door keys a standard provider by name, so 0.1 allows one provider per builtin type.
 		if !bifrost.IsStandardProvider(p.Type) {
 			return bifrost.Provider{}, invalid("provider %q: %q is not a builtin type", p.Name, p.Type)
@@ -326,7 +329,7 @@ func (r *Reconciler) aliasRules(d *desiredState, all map[string]alias.Alias, nam
 	refs := make([]string, len(targets))
 	for i, t := range targets {
 		refs[i] = t.Provider + "/" + t.Model
-		if reserved[t.Provider] {
+		if reserved[t.Provider] || t.Provider == SonioxProviderName {
 			t = ToEngineTarget(t)
 		}
 		routes[i] = bifrost.Route(t)
