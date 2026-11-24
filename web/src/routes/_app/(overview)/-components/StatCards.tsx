@@ -1,8 +1,21 @@
-import { cn } from "@heroui/react";
+import { Alert, cn } from "@heroui/react";
 import type { ReactNode } from "react";
 
+import { errorMessage } from "../../../../lib/api";
+
 /** One sheet of figures split by hairlines, the way a spec table reads. */
-function Root({ children, className }: { children: ReactNode; className?: string }) {
+function Root({ children, className, error }: { children?: ReactNode; className?: string; error?: unknown }) {
+  if (error) {
+    return (
+      <Alert status="danger" role="alert" className={className}>
+        <Alert.Indicator />
+        <Alert.Content>
+          <Alert.Title>Could not load the statistics</Alert.Title>
+          <Alert.Description>{errorMessage(error)}</Alert.Description>
+        </Alert.Content>
+      </Alert>
+    );
+  }
   return (
     <dl
       className={cn(

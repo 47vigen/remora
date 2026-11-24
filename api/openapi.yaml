@@ -837,6 +837,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Stats"
+        "504":
+          $ref: "#/components/responses/EngineTimeout"
         default:
           $ref: "#/components/responses/Error"
 
@@ -893,6 +895,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/LogList"
+        "504":
+          $ref: "#/components/responses/EngineTimeout"
         default:
           $ref: "#/components/responses/Error"
 
@@ -938,6 +942,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/LogDetail"
+        "504":
+          $ref: "#/components/responses/EngineTimeout"
         default:
           $ref: "#/components/responses/Error"
 
@@ -979,6 +985,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Stats"
+        "504":
+          $ref: "#/components/responses/EngineTimeout"
         default:
           $ref: "#/components/responses/Error"
 
@@ -1255,7 +1263,13 @@ components:
     Error:
       description: |
         An error. `code` is one of `invalid_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
-        (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502).
+        (404), `conflict` (409), `too_many_attempts` (429), `engine_error` (502), `engine_timeout` (504).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    EngineTimeout:
+      description: The request log read timed out (`engine_timeout`). Try a shorter range.
       content:
         application/json:
           schema:
