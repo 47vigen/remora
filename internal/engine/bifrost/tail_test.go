@@ -1,11 +1,16 @@
 package bifrost
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -17,6 +22,7 @@ type fakeLogs struct {
 	poll  int
 	calls []LogFilter
 	byID  map[string]Log // what GetLog answers; a missing id is ErrNotFound
+	fails func(call int) bool
 }
 
 func (f *fakeLogs) GetLog(_ context.Context, id string) (Log, error) {
@@ -33,12 +39,19 @@ func (f *fakeLogs) SearchLogs(_ context.Context, lf LogFilter) (LogPage, error) 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, lf)
+	if f.fails != nil && f.fails(len(f.calls)) {
+		f.poll++
+		return LogPage{}, io.ErrUnexpectedEOF
+	}
 	if len(f.polls) == 0 {
 		return LogPage{}, nil
 	}
 	i := min(f.poll, len(f.polls)-1)
 	rows := append([]Log(nil), f.polls[i]...)
 	sort.SliceStable(rows, func(a, b int) bool { return rows[a].Timestamp.Before(rows[b].Timestamp) })
+	if lf.Start != nil {
+		rows = rows[sort.Search(len(rows), func(i int) bool { return !rows[i].Timestamp.Before(*lf.Start) }):]
+	}
 	end := min(lf.Offset+lf.Limit, len(rows))
 	var page []Log
 	if lf.Offset < len(rows) {
@@ -96,7 +109,7 @@ func TestTailDeliversOnceInOrder(t *testing.T) {
 		t.Fatalf("delivered %v", got)
 	}
 	f := src.calls[len(src.calls)-1]
-	if f.SortBy != "timestamp" || f.Order != "asc" || f.Limit != 1000 || f.Start == nil || len(f.Status) != 0 {
+	if f.SortBy != "timestamp" || f.Order != "asc" || f.Start == nil || len(f.Status) != 0 {
 		t.Fatalf("filter = %+v", f)
 	}
 	if want := t0.Add(2 * time.Second).Add(-defaultLookback); !f.Start.Equal(want) {
@@ -170,12 +183,122 @@ func TestTailPagesBeyondLimit(t *testing.T) {
 		}
 		seen[id] = true
 	}
-	if len(src.calls) < 2 || src.calls[0].Offset != 0 || src.calls[1].Offset != 1000 {
+	if len(src.calls) < 2 || src.calls[0].Offset != 0 || src.calls[1].Offset != src.calls[0].Limit {
 		t.Fatalf("offsets: %+v", src.calls)
 	}
-	// The cursor moves only once the window is fully read: both pages of the first poll share one start.
+	// Offset pagination stays anchored within a poll, even as it records progress for a retry.
 	if !src.calls[0].Start.Equal(*src.calls[1].Start) {
 		t.Fatalf("start moved mid-window: %v then %v", src.calls[0].Start, src.calls[1].Start)
+	}
+}
+
+func TestTailFailedPageKeepsProgress(t *testing.T) {
+	rows := make([]Log, 201)
+	for i := range rows {
+		rows[i] = row(fmt.Sprintf("r%03d", i), i-200, "success")
+	}
+	rows[200].Timestamp = rows[199].Timestamp // the retry must include ties without redelivery
+	src := &fakeLogs{polls: [][]Log{rows}, fails: func(call int) bool { return call == 2 }}
+	tl := NewTail(src, time.Second, nil, nil)
+	tl.now = func() time.Time { return t0 }
+	tl.cursor = t0 // the overlap can deliver rows older than the previous poll's cursor
+	ctx := context.Background()
+	ch, cancel := tl.Subscribe(ctx, len(rows), 0)
+	defer cancel()
+
+	tl.poll(ctx)
+	if got := drain(ch); len(got) != 200 {
+		t.Fatalf("delivered %d rows before the failed page, want 200", len(got))
+	}
+	tl.poll(ctx)
+	if f := src.calls[2]; f.Offset != 0 || !f.Start.Equal(rows[199].Timestamp) {
+		t.Fatalf("retry starts at %v (offset %d), want %v (offset 0)", f.Start, f.Offset, rows[199].Timestamp)
+	}
+	if got := drain(ch); !eq(got, []string{"r200:success"}) {
+		t.Fatalf("retry delivered %v, want only the unread row", got)
+	}
+}
+
+func TestTailWindowClamped(t *testing.T) {
+	src := &fakeLogs{fails: func(call int) bool { return call > 1 }}
+	const interval = 2 * time.Second
+	tl := NewTail(src, interval, nil, nil)
+	now := t0
+	tl.now = func() time.Time { return now }
+	ctx := context.Background()
+	tl.poll(ctx)
+	tl.seen["old"] = now
+	now = now.Add(interval)
+	tl.poll(ctx)
+	now = now.Add(time.Hour)
+	tl.poll(ctx)
+	if got, want := src.calls[2].Start, now.Add(-defaultLookback-interval); !got.Equal(want) {
+		t.Fatalf("start = %v after an hour of failures, want %v", got, want)
+	}
+	if len(tl.seen) != 0 {
+		t.Fatal("deduplication retained rows outside the clamped window")
+	}
+}
+
+func TestTailBackoff(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const interval = 250 * time.Millisecond
+		var attempts []time.Time
+		src := &fakeLogs{fails: func(call int) bool {
+			attempts = append(attempts, time.Now())
+			return call <= 9 || call == 12
+		}}
+		var logs bytes.Buffer
+		tl := NewTail(src, interval, nil, slog.New(slog.NewJSONHandler(&logs, nil)))
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		_, unsubscribe := tl.Subscribe(ctx, 1, 0)
+		defer unsubscribe()
+		done := make(chan struct{})
+		start := time.Now()
+		go func() { tl.Run(ctx); close(done) }()
+
+		gaps := []time.Duration{
+			interval, time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second,
+			16 * time.Second, 32 * time.Second, time.Minute, time.Minute, time.Minute,
+			interval, interval, time.Second, interval,
+		}
+		var elapsed time.Duration
+		for _, gap := range gaps {
+			elapsed += gap
+		}
+		time.Sleep(elapsed + time.Nanosecond)
+		cancel()
+		<-done
+
+		if len(attempts) != len(gaps) {
+			t.Fatalf("polled %d times over %v, want %d", len(attempts), elapsed, len(gaps))
+		}
+		for i, attempt := range attempts {
+			if got := attempt.Sub(start); got != gaps[i] {
+				t.Errorf("poll %d after %v, want %v", i+1, got, gaps[i])
+			}
+			start = attempt
+		}
+		if got := strings.Count(logs.String(), `"level":"WARN"`); got != 8 {
+			t.Errorf("warnings = %d, want one per backoff step plus one after reset", got)
+		}
+		if got := strings.Count(logs.String(), `"level":"INFO"`); got != 2 {
+			t.Errorf("info messages = %d, want one per recovery", got)
+		}
+	})
+}
+
+func TestTailPageSize(t *testing.T) {
+	src := &fakeLogs{polls: [][]Log{make([]Log, 201)}}
+	for i := range src.polls[0] {
+		src.polls[0][i] = row("row", i, "success")
+	}
+	tl := NewTail(src, time.Second, nil, nil)
+	tl.now = func() time.Time { return t0 }
+	tl.poll(context.Background())
+	if len(src.calls) != 2 || src.calls[0].Limit != 200 || src.calls[1].Limit != 200 {
+		t.Fatalf("requested pages %+v, want two with limit 200", src.calls)
 	}
 }
 
@@ -339,6 +462,33 @@ func TestLiveTailSkipsHistoryButNotCompletionsAfterSubscribe(t *testing.T) {
 	tl.poll(context.Background())
 	if got := drain(ch); !eq(got, []string{"new:success"}) {
 		t.Fatalf("delivered %v", got)
+	}
+}
+
+func TestLiveTailPrimesAfterFailedPrime(t *testing.T) {
+	// A failed priming read leaves the tail unprimed: its first successful poll only primes, so a viewer never gets
+	// the lookback replayed (the panel reads its own catch-up page on connect); rows that complete after that arrive.
+	src := &fakeLogs{
+		polls: [][]Log{{row("old", 1, "success")}, {row("old", 1, "success")}, {row("old", 1, "success"), row("new", 2, "success")}},
+		fails: func(call int) bool { return call == 1 },
+	}
+	tl := NewTail(src, time.Second, nil, nil).Live()
+	tl.now = func() time.Time { return t0 }
+	ctx := context.Background()
+	ch, cancel := tl.Subscribe(ctx, 16, 0)
+	defer cancel()
+	_, cancelSecond := tl.Subscribe(ctx, 16, 0)
+	defer cancelSecond()
+	if got := src.callCount(); got != 1 {
+		t.Fatalf("Subscribe read the log %d times during backoff, want 1", got)
+	}
+	tl.poll(ctx)
+	if got := drain(ch); len(got) != 0 {
+		t.Fatalf("first successful poll after a failed prime delivered %v, want nothing", got)
+	}
+	tl.poll(ctx)
+	if got := drain(ch); !eq(got, []string{"new:success"}) {
+		t.Fatalf("second poll delivered %v, want [new:success]", got)
 	}
 }
 
