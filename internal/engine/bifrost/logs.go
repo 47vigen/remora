@@ -93,12 +93,13 @@ type Log struct {
 	Timestamp       time.Time `json:"timestamp"`
 	Provider        string    `json:"provider"`
 	Model           string    `json:"model"`
-	Status          string    `json:"status"` // "processing", "success" or "error"
+	Status          string    `json:"status"` // "processing", "success", "error" or "cancelled"
 	// FallbackIndex is the attempt: 0 for the request itself, n for its nth fallback, whose ParentRequestID is the
 	// request's id.
 	FallbackIndex int         `json:"fallback_index"`
 	VirtualKeyID  *string     `json:"virtual_key_id"`
 	RoutingRuleID *string     `json:"routing_rule_id"`
+	SelectedKeyID string      `json:"selected_key_id"`
 	Latency       *float64    `json:"latency"` // milliseconds
 	Cost          *float64    `json:"cost"`    // dollars
 	Stream        bool        `json:"stream"`
