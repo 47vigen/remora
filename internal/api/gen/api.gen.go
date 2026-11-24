@@ -1011,10 +1011,10 @@ type StatsPoint struct {
 	CostUsd          float64 `json:"cost_usd"`
 	Errors           int     `json:"errors"`
 
-	// LatencyP50Ms Over the successful attempts in the bucket, by nearest rank. Null when there are none.
+	// LatencyP50Ms Approximate histogram percentile of successful attempts in the bucket. Null when unavailable.
 	LatencyP50Ms *float64 `json:"latency_p50_ms,omitempty"`
 
-	// LatencyP95Ms Over the successful attempts in the bucket, by nearest rank. Null when there are none.
+	// LatencyP95Ms Approximate histogram percentile of successful attempts in the bucket. Null when unavailable.
 	LatencyP95Ms *float64 `json:"latency_p95_ms,omitempty"`
 	PromptTokens int      `json:"prompt_tokens"`
 	Requests     int      `json:"requests"`
@@ -1031,10 +1031,10 @@ type StatsSummary struct {
 	ErrorRate        float64 `json:"error_rate"`
 	Errors           int     `json:"errors"`
 
-	// LatencyP50Ms Null when there are no requests in the range.
+	// LatencyP50Ms Approximate histogram percentile of successful attempts in the range. Null when unavailable.
 	LatencyP50Ms *float64 `json:"latency_p50_ms,omitempty"`
 
-	// LatencyP95Ms Null when there are no requests in the range.
+	// LatencyP95Ms Approximate histogram percentile of successful attempts in the range. Null when unavailable.
 	LatencyP95Ms *float64 `json:"latency_p95_ms,omitempty"`
 	PromptTokens int      `json:"prompt_tokens"`
 
@@ -1100,6 +1100,9 @@ type To = time.Time
 
 // EngineTimeout defines model for EngineTimeout.
 type EngineTimeout = Error
+
+// StatsUnavailable defines model for StatsUnavailable.
+type StatsUnavailable = Error
 
 // ListAccountsParams defines parameters for ListAccounts.
 type ListAccountsParams struct {
@@ -7644,8 +7647,8 @@ type GetKeyUsageResponse struct {
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
 	JSON200 *Stats
-	// JSON504 the response for an HTTP 504 `application/json` response
-	JSON504 *EngineTimeout
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *StatsUnavailable
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *Error
 }
@@ -7655,9 +7658,9 @@ func (r GetKeyUsageResponse) GetJSON200() *Stats {
 	return r.JSON200
 }
 
-// GetJSON504 returns the response for an HTTP 504 `application/json` response
-func (r GetKeyUsageResponse) GetJSON504() *EngineTimeout {
-	return r.JSON504
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r GetKeyUsageResponse) GetJSON503() *StatsUnavailable {
+	return r.JSON503
 }
 
 // GetJSONDefault returns the response for an HTTP default `application/json` response
@@ -8423,8 +8426,8 @@ type GetStatsResponse struct {
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
 	JSON200 *Stats
-	// JSON504 the response for an HTTP 504 `application/json` response
-	JSON504 *EngineTimeout
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *StatsUnavailable
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *Error
 }
@@ -8434,9 +8437,9 @@ func (r GetStatsResponse) GetJSON200() *Stats {
 	return r.JSON200
 }
 
-// GetJSON504 returns the response for an HTTP 504 `application/json` response
-func (r GetStatsResponse) GetJSON504() *EngineTimeout {
-	return r.JSON504
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r GetStatsResponse) GetJSON503() *StatsUnavailable {
+	return r.JSON503
 }
 
 // GetJSONDefault returns the response for an HTTP default `application/json` response
@@ -10554,12 +10557,12 @@ func ParseGetKeyUsageResponse(rsp *http.Response) (*GetKeyUsageResponse, error) 
 		}
 		response.JSON200 = &dest
 
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 504:
-		var dest EngineTimeout
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest StatsUnavailable
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
-		response.JSON504 = &dest
+		response.JSON503 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
@@ -11100,12 +11103,12 @@ func ParseGetStatsResponse(rsp *http.Response) (*GetStatsResponse, error) {
 		}
 		response.JSON200 = &dest
 
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 504:
-		var dest EngineTimeout
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest StatsUnavailable
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
-		response.JSON504 = &dest
+		response.JSON503 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
@@ -13220,6 +13223,8 @@ type EngineTimeoutJSONResponse Error
 
 type ErrorJSONResponse Error
 
+type StatsUnavailableJSONResponse Error
+
 type ListAccountsRequestObject struct {
 	Params ListAccountsParams
 }
@@ -14526,16 +14531,16 @@ func (response GetKeyUsage200JSONResponse) VisitGetKeyUsageResponse(w http.Respo
 	return err
 }
 
-type GetKeyUsage504JSONResponse struct{ EngineTimeoutJSONResponse }
+type GetKeyUsage503JSONResponse struct{ StatsUnavailableJSONResponse }
 
-func (response GetKeyUsage504JSONResponse) VisitGetKeyUsageResponse(w http.ResponseWriter) error {
+func (response GetKeyUsage503JSONResponse) VisitGetKeyUsageResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(504)
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -15191,16 +15196,16 @@ func (response GetStats200JSONResponse) VisitGetStatsResponse(w http.ResponseWri
 	return err
 }
 
-type GetStats504JSONResponse struct{ EngineTimeoutJSONResponse }
+type GetStats503JSONResponse struct{ StatsUnavailableJSONResponse }
 
-func (response GetStats504JSONResponse) VisitGetStatsResponse(w http.ResponseWriter) error {
+func (response GetStats503JSONResponse) VisitGetStatsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(504)
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
